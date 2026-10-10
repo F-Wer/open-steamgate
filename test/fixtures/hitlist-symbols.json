@@ -1,0 +1,49 @@
+{
+  "schema": "gogen-symbols/1",
+  "build": "fixture-build",
+  "symbols": {
+    "main.ZDEMO_N_MY_NS_INTF__RUN": {
+      "go": "ZDEMO_N_MY_NS_INTF__RUN",
+      "abap": "ZDEMO=>/MY_NS/INTF~RUN",
+      "kind": "method",
+      "file": "src/zdemo.clas.abap",
+      "line": 10
+    },
+    "osg/gogen/app.ZDEMO_N_HELPER_RUN": {
+      "go": "ZDEMO_N_HELPER_RUN",
+      "abap": "ZDEMO=>N_HELPER_RUN",
+      "kind": "method",
+      "file": "src/zdemo.clas.abap",
+      "line": 20
+    },
+    "main.ZDEMO_LCL_HELPER__OSD_METHOD__RUN": {
+      "go": "ZDEMO_LCL_HELPER__OSD_METHOD__RUN",
+      "abap": "ZDEMO:LCL_HELPER=>RUN",
+      "owner": "ZDEMO",
+      "kind": "local",
+      "file": "src/zdemo.clas.locals_imp.abap",
+      "line": 30
+    },
+    "main.(*ZDEMO).IF_REQUEST__RUN": {
+      "go": "(*ZDEMO).IF_REQUEST__RUN",
+      "abap": "ZDEMO=>IF_REQUEST~RUN",
+      "kind": "method",
+      "file": "src/zdemo.clas.abap",
+      "line": 40
+    },
+    "main.ZDEMO_N_HELPER_RUN.func1": {
+      "go": "ZDEMO_N_HELPER_RUN.func1",
+      "abap": "ZDEMO=>N_HELPER_RUN",
+      "kind": "closure",
+      "file": "src/zdemo.clas.abap",
+      "line": 20
+    },
+    "main.ZDEMO_RUN": {
+      "go": "ZDEMO_RUN",
+      "abap": "ZDEMO=>RUN",
+      "kind": "method",
+      "file": "src/zdemo.clas.abap",
+      "line": 42
+    }
+  }
+}

@@ -1,7 +1,7 @@
 import {describe, it} from "mocha";
 import assert from "node:assert/strict";
 import {gzipSync} from "node:zlib";
-import {mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {parsePprof} from "../tools/hitlist/pprof.mjs";
@@ -37,6 +37,56 @@ function fixture(packedFields = true) {
 const parsed = () => parsePprof(gzipSync(fixture()));
 
 describe("native ABAP hit lists", () => {
+  const symbols = JSON.parse(readFileSync(new URL("./fixtures/hitlist-symbols.json", import.meta.url)));
+  it("uses exact qualified and bare symbols, including closures and owners", () => {
+    const profile = frames => ({format:"pprof", samples:frames.map(name => ({frames:[{name,file:"generated.go",line:999}],labels:{},weight:1,samples:1}))});
+    const names = Object.keys(symbols.symbols);
+    const r = hitlist(profile(names), {symbols});
+    assert.equal(r.metadata.identities, "exact (symbol map)");
+    assert.equal(r.metadata.commit, "fixture-build");
+    assert.ok(r.rows.some(r => r.key === "ZDEMO=>/MY_NS/INTF~RUN:10"));
+    assert.equal(r.rows.find(r => r.key === "ZDEMO=>N_HELPER_RUN:20").samples, 2);
+    const local = r.rows.find(r => r.abap === "ZDEMO:LCL_HELPER=>RUN");
+    assert.equal(local.class, "ZDEMO");
+    assert.equal(local.owner, "ZDEMO");
+    assert.ok(r.rows.some(r => r.abap === "ZDEMO=>IF_REQUEST~RUN"));
+    assert.equal(hitlist(profile(["another/package.ZDEMO_N_HELPER_RUN"]), {symbols}).rows[0].abap, "ZDEMO=>N_HELPER_RUN");
+    const unknown = hitlist({format:"pprof",samples:[{frames:[{name:"main.ZUNLISTED_RUN",file:"zunlisted.clas.abap",line:42}],labels:{},weight:1,samples:1}]}, {symbols});
+    assert.equal(unknown.rows.length, 0);
+    assert.equal(unknown.metadata.unattributedPercent, 100);
+    const collision = structuredClone(symbols);
+    collision.symbols["other.ZDEMO_RUN"] = {...collision.symbols["main.ZDEMO_RUN"], abap:"ZOTHER=>RUN"};
+    assert.equal(hitlist(profile(["main.ZDEMO_RUN"]), {symbols:collision}).rows[0].abap, "ZDEMO=>RUN");
+    assert.equal(hitlist(profile(["third.ZDEMO_RUN"]), {symbols:collision}).rows.length, 0);
+    assert.throws(() => hitlist(profile([]), {symbols:{schema:"wrong"}}), /invalid.*symbol map/);
+  });
+  it("discovers maps beside captures and profiled binaries and marks lossy fallback", () => {
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "hitlist-symbols-"));
+    try {
+      const profile = join(dir, "cpu.pb.gz"), map = join(dir, "symbols.json");
+      writeFileSync(profile, gzipSync(fixture()));
+      assert.match(run([profile]), /identities: decoded \(lossy, no symbol map\)/);
+      writeFileSync(map, JSON.stringify(symbols));
+      const r = JSON.parse(run([profile, "--format", "json"]));
+      assert.equal(r.metadata.identities, "exact (symbol map)");
+      assert.equal(r.rows[0].abap, "ZDEMO=>RUN");
+      assert.match(run([profile, "--symbols", map]), /identities: exact \(symbol map\)/);
+      rmSync(map);
+      const explicit = join(dir, "custom.json");
+      writeFileSync(explicit, JSON.stringify(symbols));
+      assert.match(run([profile, "--symbols", explicit]), /identities: exact/);
+      // The protobuf mapping names an executable in a different directory.
+      mkdirSync(join(dir, "captures"));
+      const moved = join(dir, "captures", "cpu.pb.gz");
+      const mapping = bytes(3, msg(number(1,1), number(5,15)));
+      const binary = join(dir, "osgo");
+      writeFileSync(moved, gzipSync(msg(fixture(), mapping, bytes(6,binary))));
+      writeFileSync(map, JSON.stringify(symbols));
+      assert.equal(JSON.parse(run([moved,"--format","json"])).metadata.identities, "exact (symbol map)");
+      assert.throws(() => run([profile,"--symbols",join(dir,"missing.json")]), /ENOENT/);
+    } finally { rmSync(dir, {recursive:true,force:true}); }
+  });
+
   it("decodes receiver/interface methods, constructors and generated closures", () => {
     assert.equal(abapSite({name:"main.(*ZDEMO).IF_REQUEST__RUN.func1",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>IF_REQUEST~RUN:42");
     assert.equal(abapSite({name:"main.New_ZDEMO",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>CONSTRUCTOR:42");

@@ -2,7 +2,7 @@
 const cell = v => String(v ?? "—").replaceAll("|", "\\|").replace(/[\r\n]/g, " ");
 const pct = n => n.toFixed(2);
 const signed = n => n == null ? "—" : `${n >= 0 ? "+" : ""}${Number.isInteger(n) ? n : pct(n)}`;
-const header = m => `${cell(m.host)}; build ${cell(m.commit)}; duration ${m.durationSeconds}s; ${cell(m.metric?.type)}/${cell(m.metric?.unit)}`;
+const header = m => `${cell(m.host)}; build ${cell(m.commit)}; duration ${m.durationSeconds}s; ${cell(m.metric?.type)}/${cell(m.metric?.unit)}; identities: ${cell(m.identities ?? "decoded (lossy, no symbol map)")}`;
 export function markdown(r) {
   if (r.kind === "diff") return [
     `ABAP hit-list diff: ${header(r.metadata.before)} → ${header(r.metadata.after)}`,

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: MIT
-import {readFileSync, writeFileSync} from "node:fs";
+import {existsSync, readFileSync, writeFileSync} from "node:fs";
+import {dirname, join, resolve} from "node:path";
 import {pathToFileURL} from "node:url";
 import {parseArgs} from "node:util";
 import {parsePprof} from "./hitlist/pprof.mjs";
@@ -27,12 +28,12 @@ export function readProfile(file) {
 }
 export function run(args) {
   const {values: v, positionals} = parseArgs({args, allowPositionals: true, options: {
-    names: {type: "string"}, counts: {type: "string"}, tag: {type: "string", multiple: true},
+    symbols: {type: "string"}, names: {type: "string"}, counts: {type: "string"}, tag: {type: "string", multiple: true},
     top: {type: "string"}, "min-flat": {type: "string"}, format: {type: "string", default: "markdown"},
     host: {type: "string"}, commit: {type: "string"}, out: {type: "string"}, diff: {type: "boolean"},
     help: {type: "boolean"},
   }});
-  if (v.help) return "Usage: node tools/osd-hitlist.mjs [--diff] PROFILE [AFTER] [--names names.json] [--counts counts.json] [--tag key=value] [--top N] [--min-flat PERCENT] [--host HOST] [--commit SHA] [--format markdown|json] [--out FILE]\n";
+  if (v.help) return "Usage: node tools/osd-hitlist.mjs [--diff] PROFILE [AFTER] [--symbols symbols.json] [--names names.json] [--counts counts.json] [--tag key=value] [--top N] [--min-flat PERCENT] [--host HOST] [--commit SHA] [--format markdown|json] [--out FILE]\n";
   const isDiff = v.diff || positionals.length === 2;
   if (positionals.length !== (isDiff ? 2 : 1)) throw new Error("supply one profile, or two for --diff");
   if (!["markdown", "json"].includes(v.format)) throw new Error("--format must be markdown or json");
@@ -43,10 +44,14 @@ export function run(args) {
   const reports = positionals.map(file => {
     const p = readProfile(file);
     if (p.schema === "osd-hitlist/v1") {
-      if (v.tag?.length || v.names || v.counts) throw new Error("--tag/--names/--counts require raw profiles; convert each input first");
+      if (v.tag?.length || v.names || v.counts || v.symbols) throw new Error("--tag/--names/--counts/--symbols require raw profiles; convert each input first");
       return p;
     }
-    return hitlist(p, options);
+    // pprof mappings name the profiled executable. Also accept a capture
+    // placed in its build output directory. Resolve independently for diffs.
+    const candidates = [...(p.mappings ?? []).filter(m => m.file && !m.file.startsWith("[")).map(m => join(dirname(resolve(m.file)), "symbols.json")), join(dirname(resolve(file)), "symbols.json")];
+    const symbolFile = v.symbols ?? candidates.find(existsSync);
+    return hitlist(p, {...options, symbols: symbolFile ? json(symbolFile) : undefined});
   });
   const report = selectRows(isDiff ? diff(...reports) : reports[0], {top, minFlat});
   const text = v.format === "json" ? JSON.stringify(report, null, 2) + "\n" : markdown(report);

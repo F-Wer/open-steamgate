@@ -40,6 +40,32 @@ export function abapSite(frame) {
     method, file: normalized(frame.file), line: frame.line};
 }
 
+// A map is authoritative: unlisted frames remain unattributed. Ambiguous
+// bare names never select an arbitrary package's symbol.
+export function symbolResolver(map) {
+  if (map.schema !== "gogen-symbols/1" || typeof map.build !== "string" || !map.symbols || Array.isArray(map.symbols) || typeof map.symbols !== "object")
+    throw new Error("invalid gogen-symbols/1 symbol map");
+  const bare = new Map();
+  for (const entry of Object.values(map.symbols)) {
+    if (!entry || typeof entry.go !== "string" || typeof entry.abap !== "string" || typeof entry.file !== "string" || !Number.isSafeInteger(entry.line) || entry.line < 1 || !["method", "form", "fm", "local", "closure"].includes(entry.kind) || (entry.owner !== undefined && typeof entry.owner !== "string"))
+      throw new Error("invalid symbol map entry");
+    bare.set(entry.go, bare.has(entry.go) ? null : entry);
+  }
+  return frame => {
+    const start = frame.name.lastIndexOf("/") + 1;
+    const dot = frame.name.indexOf(".", start);
+    const name = dot < 0 ? frame.name : frame.name.slice(dot + 1);
+    const entry = (Object.hasOwn(map.symbols, frame.name) ? map.symbols[frame.name] : null) ?? bare.get(frame.name) ?? bare.get(name);
+    if (!entry) return null;
+    const split = entry.abap.indexOf("=>");
+    const cls = entry.owner || (split < 0 ? entry.abap : entry.abap.slice(0, split));
+    const method = split < 0 ? entry.abap : entry.abap.slice(split + 2);
+    const line = entry.kind !== "closure" && /\.abap$/i.test(frame.file) && frame.line > 0 ? frame.line : entry.line;
+    return {key: `${entry.abap}:${line}`, abap: entry.abap, class: cls, method,
+      owner: entry.owner ?? null, kind: entry.kind, file: normalized(entry.file), line};
+  };
+}
+
 function tsName(site, names) {
   const cls = site.class.toLowerCase(), method = site.method.toLowerCase();
   const exact = names[site.key] ?? names[`${site.file}:${site.line}`];
@@ -69,13 +95,14 @@ function exactCalls(row, counts) {
   return null;
 }
 
-export function hitlist(profile, {tags = [], names = {}, counts = {}, host, commit} = {}) {
+export function hitlist(profile, {tags = [], names = {}, counts = {}, host, commit, symbols} = {}) {
   if (profile.format === "v8" && tags.length) throw new Error("V8 CPU profiles have no pprof labels; --tag is unavailable");
   const filters = tags.map(tag => {
     const pos = tag.indexOf("=");
     if (pos < 1) throw new Error("--tag requires key=value");
     return [tag.slice(0, pos), tag.slice(pos + 1)];
   });
+  const siteFor = symbols ? symbolResolver(symbols) : abapSite;
   const rows = new Map();
   let totalWeight = 0, totalSamples = 0, unattributedWeight = 0;
   for (const sample of profile.samples) {
@@ -85,7 +112,7 @@ export function hitlist(profile, {tags = [], names = {}, counts = {}, host, comm
     const seen = new Set();
     let flat = true;
     for (let i = 0; i < sample.frames.length; i++) {
-      const site = abapSite(sample.frames[i]);
+      const site = siteFor(sample.frames[i]);
       if (!site || seen.has(site.key)) continue;
       seen.add(site.key);
       let row = rows.get(site.key);
@@ -105,7 +132,7 @@ export function hitlist(profile, {tags = [], names = {}, counts = {}, host, comm
         flat = false;
       }
       // The runtime frame nearest this ABAP caller (including inlined frames).
-      const callee = sample.frames.slice(0, i).reverse().find(f => !abapSite(f));
+      const callee = sample.frames.slice(0, i).reverse().find(f => !siteFor(f));
       if (callee) {
         const c = row.callees.get(callee.name) ?? {name: callee.name, weight: 0, samples: sample.samples === null ? null : 0};
         c.weight += sample.weight;
@@ -123,7 +150,8 @@ export function hitlist(profile, {tags = [], names = {}, counts = {}, host, comm
       calls: exactCalls(row, counts.counts ?? counts), topCallee};
   }).sort((a,b) => b.flatWeight - a.flatWeight || b.cumWeight - a.cumWeight || a.key.localeCompare(b.key))
     .map((row, i) => ({rank: i + 1, ...row}));
-  return {schema: "osd-hitlist/v1", kind: "hitlist", metadata: {host: host ?? profile.format, commit: commit ?? "unknown",
+  return {schema: "osd-hitlist/v1", kind: "hitlist", metadata: {host: host ?? profile.format, commit: commit ?? symbols?.build ?? "unknown",
+    identities: symbols ? "exact (symbol map)" : "decoded (lossy, no symbol map)",
     durationSeconds: profile.durationSeconds, format: profile.format, metric: profile.metric, tags,
     buildIds: profile.mappings?.map(m => m.buildId).filter(Boolean) ?? [],
     totalWeight, totalSamples: profile.samples.some(s => s.samples === null) ? null : totalSamples,

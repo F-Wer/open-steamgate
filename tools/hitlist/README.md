@@ -4,16 +4,26 @@
 (gzip or uncompressed), V8 `.cpuprofile`, or this tool's JSON hit list.
 No npm dependency or Go subprocess is required. pprof CPU captures already
 contain file/line and inline symbols, including the emitter's `//line`
-ABAP paths. Namespace owners, local `OWNER:LOCAL` classes and interface
-methods are decoded into ABAP identities. Newly emitted local static functions
-use an explicit class/method separator; older underscore-only local static
-symbols are ambiguous and require a fresh build for reliable attribution.
+ABAP paths. `--symbols FILE` reads the build-time `gogen-symbols/1` map.
+The reader auto-discovers `symbols.json` beside the executable named in pprof
+mappings, then beside the capture in a build output directory. Explicit
+`--symbols` takes precedence. Qualified pprof function keys match first,
+then unambiguous `go` bare names. Identities come only from the map; unknown
+frames remain unattributed. `abap` is the display spelling, `owner` groups
+local classes/forms under their global owner, and `kind: "closure"` assigns
+func literals to their enclosing ABAP method and source position.
+
+The map has `{schema: "gogen-symbols/1", build: "<commit>", symbols: {"main.ZDEMO_RUN":
+{go: "ZDEMO_RUN", abap: "ZDEMO=>RUN", kind: "method", file: "zdemo.clas.abap", line: 42}}}`.
+The map's build supplies the commit unless overridden by `--commit`.
+Without a map, underscore decoding remains available, but namespace and method
+boundaries are ambiguous. The header says `identities: decoded (lossy, no symbol map)`.
 For an unsymbolized profile, first use
 `go tool pprof -proto -output symbolized.pb.gz BINARY PROFILE`.
 
 ```
 node tools/osd-hitlist.mjs cpu.pb.gz --host osgo --commit <build-sha> --top 20
-node tools/osd-hitlist.mjs cpu.pb.gz --tag method=GET --tag path=/sap/opu/odata/sap/ZSTG_DEMO_SRV/ --format json --out before.json
+node tools/osd-hitlist.mjs cpu.pb.gz --tag method=GET --tag path=/sap/opu/odata/sap/ZSTG_DEMO_SRV/TravelSet --format json --out before.json
 node tools/osd-hitlist.mjs after.pb.gz --format json --out after.json
 node tools/osd-hitlist.mjs --diff before.json after.json
 node tools/osd-hitlist.mjs cpu.pb.gz --names out/names.json --counts exact.json --min-flat 0.1
