@@ -1,15 +1,15 @@
+import {writeGo} from "./symbols.mjs";
 // Reproducible benchmarks over frontend-generated owned-memory methods.
 // Run under osd-heavy; the positional output directory preserves generated Go.
 import {cpSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {compileProgram} from './frontend.mjs';
-import {emitGo} from './emit-go.mjs';
 const out = resolve(process.argv[2] ?? 'tools/gogen/.out/owned-bench');
 const program = compileProgram({folders: [join(import.meta.dirname, 'testdata')], objects: ['ZCL_GOGEN_T_OWNEDBENCH']});
 if (program.partial.length || program.broken.length) throw new Error(JSON.stringify(program.partial));
 cpSync(join(import.meta.dirname, 'go'), out, {recursive: true});
 mkdirSync(join(out, 'ownedbench'), {recursive: true});
-writeFileSync(join(out, 'ownedbench/generated.go'), emitGo(program).replace('package main', 'package ownedbench'));
+writeGo(join(out, 'ownedbench/generated.go'), program, 'ownedbench', null, false, {}, 'osg/gogen/ownedbench');
 writeFileSync(join(out, 'ownedbench/generated_test.go'), `package ownedbench
 import ("testing"; "fmt"; "strings"; "osg/gogen/abap")
 var result int32

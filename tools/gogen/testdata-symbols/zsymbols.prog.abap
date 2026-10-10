@@ -1,0 +1,18 @@
+REPORT zsymbols.
+START-OF-SELECTION.
+  PERFORM n_helper_run.
+FORM n_helper_run.
+  DATA n TYPE i.
+  DO 1000000 TIMES.
+    n = n + 1.
+  ENDDO.
+ENDFORM.
+CLASS lcl_report DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(r) TYPE i.
+ENDCLASS.
+CLASS lcl_report IMPLEMENTATION.
+  METHOD run.
+    r = 7.
+  ENDMETHOD.
+ENDCLASS.

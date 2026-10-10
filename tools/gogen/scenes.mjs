@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // A scene of the ZO4D demo, compiled to Go and checked against a recording
 // taken on A4H (docs/frame-comparison.md): the recording is the oracle.
 //
@@ -13,7 +14,7 @@ import {mkdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync} fr
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo, funcName} from "./emit-go.mjs";
+import {funcName} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 import {SCENES} from "./scene-defs.mjs";
@@ -46,7 +47,7 @@ if (program.skipped.length) console.log(`skipped:\n  ${program.skipped.join("\n 
 if (!render) throw new Error("render_frame did not compile");
 const dir = join(here, "go", "cmd", "scene");
 mkdirSync(dir, {recursive: true});
-writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+writeGo(join(dir, "zz_generated.go"), program);
 // a recording runs on past the end of its scene into the next one; only the
 // frames the scene itself drew are its oracle
 const frames = readFileSync(recording, "utf8").trim().split("\n").map((l) => JSON.parse(l)).filter((f) => f.e === scene);

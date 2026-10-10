@@ -1,0 +1,5 @@
+FUNCTION z_symbols.
+  DO 1000000 TIMES.
+    ev_n = 1.
+  ENDDO.
+ENDFUNCTION.

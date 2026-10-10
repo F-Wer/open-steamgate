@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // ABAP semantics pinned against A4H: each class in testdata/ has a static
 // RUN returning a string, and EXPECT below is what A4H returned for the same
 // code (ABAP Unit probe, 2026-09-23), except entries marked unmeasured.
@@ -9,7 +10,7 @@ import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, 
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo, funcName} from "./emit-go.mjs";
+import {funcName} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 
@@ -880,7 +881,7 @@ const out = join(here, ".out", "semantics");
 mkdirSync(out, {recursive: true});
 const dir = join(here, "go", "cmd", "semantics");
 mkdirSync(dir, {recursive: true});
-writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+writeGo(join(dir, "zz_generated.go"), program);
 // the database of the Go harness: the transpiler's CREATE TABLEs for this
 // registry (zgogen_t_dbw among them), no rows; each RUN is one dialog step
 // the same entry gateway.mjs builds its database script from: a module the

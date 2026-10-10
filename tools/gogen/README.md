@@ -1760,3 +1760,19 @@ private instance attributes. The static owned fixture checks constructor
 initialization, snapshots, section reads, stores, self-append and reset between
 test classes. Friend pools and reference actuals keep string storage. The
 generated 16-page equal-length store allocates zero bytes.
+
+Every Go build writes a deterministic `symbols.json` beside the generated Go,
+with schema `gogen-symbols/1`, the OSG Git commit (`unknown` outside a checkout),
+and one entry per ABAP routine keyed by the exact package-qualified pprof name
+(including pointer receivers and full import paths in layered unit builds).
+Entries carry the bare Go name, original `CLASS=>METHOD` (including `INTF~METH`),
+kind (`method`, `local`, `form`, or `fm`), ABAP file and statement line; locals
+retain the frontend's `OWNER:LOCAL` spelling, and locals, FORMs and function
+modules carry their owning class, report or function group. Constructors, class
+constructors and event handlers are ordinary methods. Generated function literals
+use their enclosing routine's entry: consumers strip trailing `.funcN` suffixes
+(including nested numeric suffixes such as `.func1.1`) and classify the resolved
+frame as `closure`. Synthetic runtime helpers without an ABAP statement are
+omitted. Layered unit builds also write a combined map beside the main package.
+The consumer is dell's `tools/hitlist` in [PR #709](https://github.com/oisee/open-steamgate/pull/709),
+which converts CPU profiles to ABAP hit lists without guessing at underscores.

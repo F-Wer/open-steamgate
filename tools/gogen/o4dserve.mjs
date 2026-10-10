@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // Build the two stands for the ZO4D player, one per runtime, from the same
 // IR as tools/gogen/demo.mjs:
 //
@@ -12,7 +13,6 @@ import {copyFileSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 
@@ -27,7 +27,7 @@ const objects = ["zif_o4d_effect", ...new Set(readdirSync(pack).filter((f) => /^
 const program = compileProgram({folders: [pack, `${home}/.local/lars/open-abap-core/src`, `${home}/.local/lars/open-abap-apc/src`], objects});
 const out = join(here, ".out", "o4dserve");
 mkdirSync(out, {recursive: true});
-writeFileSync(join(here, "go", "cmd", "o4dserve", "zz_generated.go"), emitGo(program));
+writeGo(join(here, "go", "cmd", "o4dserve", "zz_generated.go"), program);
 execFileSync("gofmt", ["-w", join(here, "go", "cmd", "o4dserve")]);
 const tags = process.argv.includes("--libm") ? "libm" : "";
 execFileSync("go", ["build", "-trimpath", `-tags=${tags}`, "-ldflags=-s -w", "-o", join(out, "o4dserve"), "./cmd/o4dserve"],

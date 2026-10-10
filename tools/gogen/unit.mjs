@@ -1,3 +1,4 @@
+import {funcName, writeGo, writeSymbols, refreshSymbolBuild} from "./symbols.mjs";
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.
 import {spawnSync} from "node:child_process";
@@ -7,7 +8,7 @@ import {dirname, join, resolve} from "node:path";
 import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo, referencedClasses, funcName} from "./emit-go.mjs";
+import {referencedClasses} from "./emit-go.mjs";
 import {reconcile, killedGoTool, markBuildFailure} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
@@ -87,6 +88,7 @@ const cache = {status: !cacheEnabled ? "bypass" : cacheMeta ? "hit" : "miss",
   key: cacheInputs?.key};
 let program, rows, ready, groups, layerInfo, writeGeneratedGo;
 if (cacheMeta) {
+  refreshSymbolBuild(goDir);
   rows = cacheMeta.rows;
   layerInfo = cacheMeta.layers;
   ready = rows.filter((x) => x.status === "READY");
@@ -354,9 +356,10 @@ const eventsFor = (i) => new Map([...program.events].filter(([, ev]) =>
   (layer.get(ev.decl) ?? interfaceLayer.get(ev.decl) ?? 0) === i));
 writeGeneratedGo = function (dir) {
   if (args.includes("--unlayered") || fixture) {
-    writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", null, true));
+    writeGo(join(dir, "zz_generated.go"), program, "main", null, true);
     return;
   }
+  const symbols = {};
   const coreDir = join(goDir, "generated", "core");
   const appDir = join(goDir, "generated", "app");
   mkdirSync(coreDir, {recursive: true});
@@ -371,22 +374,23 @@ writeGeneratedGo = function (dir) {
     const owner = classSymbols.find(({symbol}) => name.startsWith(symbol + "__"));
     return Math.max(owner ? layer.get(owner.name) : 0, typeLayer(c.type)) === i;
   }));
-  writeFileSync(join(coreDir, "zz_generated.go"), emitGo(program, "core", {
+  writeGo(join(coreDir, "zz_generated.go"), program, "core", {
     classes: layerClasses[0], visibleClasses: new Set([...allClassNames].filter((n) => layer.get(n) <= 0)), structs: structsAt(0), consts: constsAt(0), tables: tablesAt(0),
     interfaces: coreInterfaces, events: eventsFor(0), externalClasses: new Set([...allClassNames].filter((n) => !coreNames.has(n))),
     marker: "GogenCoreLayer",
-  }, true));
-  writeFileSync(join(appDir, "zz_generated.go"), emitGo(program, "app", {
+  }, true, symbols);
+  writeGo(join(appDir, "zz_generated.go"), program, "app", {
     classes: layerClasses[1], visibleClasses: new Set([...allClassNames].filter((n) => layer.get(n) <= 1)), structs: structsAt(1), consts: constsAt(1), tables: tablesAt(1),
     interfaces: appInterfaces, events: eventsFor(1), externalClasses: new Set([...allClassNames].filter((n) => !appNames.has(n))),
     imports: ["osg/gogen/generated/core"], importMarkers: ["GogenCoreLayer"], marker: "GogenAppLayer",
-  }, true));
-  writeFileSync(join(dir, "zz_generated.go"), emitGo(program, "main", {
+  }, true, symbols);
+  writeGo(join(dir, "zz_generated.go"), program, "main", {
     classes: layerClasses[2], visibleClasses: new Set([...allClassNames].filter((n) => layer.get(n) <= 2)), structs: structsAt(2), consts: constsAt(2), tables: tablesAt(2),
     interfaces: new Set(), events: eventsFor(2), externalClasses: new Set([...allClassNames].filter((n) => layer.get(n) < 2)),
     imports: ["osg/gogen/generated/core", "osg/gogen/generated/app"],
     importMarkers: ["GogenCoreLayer", "GogenAppLayer"],
-  }, true));
+  }, true, symbols);
+  writeSymbols(dir, symbols);
 }
 
 timingMs.discovery = Math.round(performance.now() - commandStarted - timingMs.frontendClosureRounds.reduce((a, b) => a + b, 0));
