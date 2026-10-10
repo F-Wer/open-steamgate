@@ -7,7 +7,7 @@ import {dirname, join, resolve} from "node:path";
 import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo, referencedClasses} from "./emit-go.mjs";
+import {emitGo, referencedClasses, funcName} from "./emit-go.mjs";
 import {reconcile, killedGoTool, markBuildFailure} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
@@ -432,7 +432,7 @@ for (const {key, methods} of groups) {
   // one LUW chain as the Node unit run has (abap.BeginUnitLUW): COMMIT and
   // ROLLBACK WORK end it, nothing between the methods does
   if (methods.some((m) => m.db)) generated.push("classError = caught(func(){ if err := abap.OpenDBImage(dbImage); err != nil { panic(err) }; abap.BeginUnitLUW() }); classSite = lastSite");
-  if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${T}_CLASS_SETUP(s) }); classSite = lastSite }`);
+  if (c.methods.some((m) => m.name === "CLASS_SETUP")) generated.push(`if classError == "" { classError = caught(func(){ ${funcName(key, "CLASS_SETUP")}(s) }); classSite = lastSite }`);
   for (const row of methods) {
     generated.push(`{ r := result{Class:${JSON.stringify(owner)}, Testclass:${JSON.stringify(local)}, Method:${JSON.stringify(row.method)}, Status:"SUCCESS"}`,
       "if stopClass { r.Status = \"SKIPPED\"; r.Message = \"stopped after teardown failure\" } else if classError != \"\" { r.Status = \"FAILED\"; if isNotCompiled(classError) { r.Status = \"NOT_COMPILED\" }; r.Message = \"class_setup: \" + classError; r.Where = classSite } else {",
@@ -446,7 +446,7 @@ for (const {key, methods} of groups) {
       "if err != \"\" { r.Status = \"FAILED\"; if isNotCompiled(err) { r.Status = \"NOT_COMPILED\" }; r.Message = err; r.Where = site }", "}", "results = append(results, r)", "}");
   }
   if (c.methods.some((m) => m.name === "CLASS_TEARDOWN")) generated.push(
-    `if err := caught(func(){ ${T}_CLASS_TEARDOWN(s) }); err != "" { for i := groupStart; i < len(results); i++ { results[i].Status = "FAILED"; if isNotCompiled(err) { results[i].Status = "NOT_COMPILED" }; results[i].Message += " class_teardown: " + err; if lastSite != "" { if results[i].Where == "" { results[i].Where = lastSite } else { results[i].Where += " class_teardown: " + lastSite } } } }`);
+    `if err := caught(func(){ ${funcName(key, "CLASS_TEARDOWN")}(s) }); err != "" { for i := groupStart; i < len(results); i++ { results[i].Status = "FAILED"; if isNotCompiled(err) { results[i].Status = "NOT_COMPILED" }; results[i].Message += " class_teardown: " + err; if lastSite != "" { if results[i].Where == "" { results[i].Where = lastSite } else { results[i].Where += " class_teardown: " + lastSite } } } }`);
   generated.push("abap.EndTestClass(s)", `durations[${JSON.stringify(key)}] = float64(time.Since(classStarted).Microseconds()) / 1000`,
     'checkpoint("")', "}");
 }
