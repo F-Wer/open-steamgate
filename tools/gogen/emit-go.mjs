@@ -1324,6 +1324,21 @@ function stmt(st, ctx, d) {
   if (loop) (ctx.loopStack ??= []).push(st);
   let lines;
   try { lines = stmtLines(st, ctx, d); } finally { if (loop) ctx.loopStack.pop(); }
+  // Instrument the actual routing decisions. These values belong to the
+  // router table / registered model, never the parsed request's segments.
+  if (st.s === "assign" && ((ctx.cls.name === "ZCL_OSD_ADT_ROUTER" && ctx.method.name === "DISPATCH") || (ctx.cls.name === "ZCL_STG_DISPATCHER" && ctx.method.name === "RUN"))) {
+    const target = place(st.target, ctx);
+    if (ctx.cls.name === "ZCL_OSD_ADT_ROUTER" && target === "ls_request.pattern")
+      lines.push(`${tab(d)}if s.ProfileRoute != nil { s.ProfileRoute(ls_route.pattern) }`);
+    if (ctx.cls.name === "ZCL_STG_DISPATCHER") {
+      if (target === "ls_service")
+        lines.push(`${tab(d)}if s.ProfileRoute != nil && (ls_request.is_metadata == "X" || ls_request.is_service_root == "X" || ls_request.is_batch == "X") { s.ProfileRoute("/sap/opu/odata/sap/" + ls_service.name) }`);
+      if (target === "ls_set")
+        lines.push(`${tab(d)}if s.ProfileRoute != nil { s.ProfileRoute("/sap/opu/odata/sap/" + ls_service.name + "/" + ls_set.name) }`);
+      if (target === "ls_action")
+        lines.push(`${tab(d)}if s.ProfileRoute != nil && ls_action.name != "" { s.ProfileRoute("/sap/opu/odata/sap/" + ls_service.name + "/" + ls_action.name) }`);
+    }
+  }
   if (LINES && st.pos && lines.length > 0) lines[0] = lines[0].replace(/^(\t*)/, `$1/*line ${st.pos.file}:${st.pos.row}*/ `);
   return lines;
 }

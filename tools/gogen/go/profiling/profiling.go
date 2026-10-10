@@ -9,8 +9,6 @@ import (
 	"net"
 	"net/http"
 	httppprof "net/http/pprof"
-	"net/url"
-	"regexp"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -76,74 +74,27 @@ func HTTP(enabled bool, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pprof.Do(r.Context(), pprof.Labels("method", r.Method, "path", labelPath(r)), func(ctx context.Context) {
-			next.ServeHTTP(w, r.WithContext(ctx))
+		pprof.Do(r.Context(), pprof.Labels("method", r.Method, "path", "unmatched"), func(ctx context.Context) {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, httpLabelsKey{}, true)))
 		})
 	})
 }
 
-// The ABAP router is downstream of this host wrapper and does not expose
-// its matched template here. Mirror its session-id position explicitly;
-// other paths use conservative, syntactic identifier recognition.
-var idSegment = regexp.MustCompile(`^(?:[0-9]+|[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|'.*'|".*")$`)
+// Matched is called only with a dispatcher-owned template or registry name,
+// after validation and matching. Never pass any part of the request URL.
+// It changes live CPU/goroutine labels as well as the request context.
+type httpLabelsKey struct{}
 
-func labelPath(r *http.Request) string {
-	path := r.URL.EscapedPath()
-	// Hosts that already know a matched route may supply its template.
-	if r.Pattern != "" {
-		path = r.Pattern
-		if i := strings.IndexByte(path, ' '); i >= 0 {
-			path = path[i+1:]
-		}
+func Matched(r *http.Request, template string) {
+	if r.Context().Value(httpLabelsKey{}) != true {
+		return
 	}
-	parts := strings.Split(withoutPredicates(path), "/")
-	for i, part := range parts {
-		decoded, err := url.PathUnescape(part)
-		if err != nil {
-			decoded = part
-		}
-		if i == 7 && strings.Join(parts[:i], "/") == "/sap/bc/adt/core/http/sessions" {
-			parts[i] = "{id}"
-		} else if idSegment.MatchString(decoded) {
-			parts[i] = "{id}"
-		}
+	if template == "" {
+		template = "unmatched"
 	}
-	return strings.Join(parts, "/")
-}
-
-// Scan escaped bytes without rewriting static path spelling. Quotes protect
-// parentheses and slashes inside OData keys; an unclosed predicate drops its
-// remaining input rather than exposing a partial key.
-func withoutPredicates(path string) string {
-	var out strings.Builder
-	depth := 0
-	quoted := false
-	for i := 0; i < len(path); {
-		ch, width := path[i], 1
-		if ch == '%' && i+2 < len(path) {
-			if n, err := strconv.ParseUint(path[i+1:i+3], 16, 8); err == nil {
-				ch, width = byte(n), 3
-			}
-		}
-		if depth == 0 {
-			if ch == '(' {
-				out.WriteString("{key}")
-				depth = 1
-			} else {
-				out.WriteString(path[i : i+width])
-			}
-		} else if ch == '\'' {
-			quoted = !quoted
-		} else if !quoted {
-			if ch == '(' {
-				depth++
-			} else if ch == ')' {
-				depth--
-			}
-		}
-		i += width
-	}
-	return out.String()
+	ctx := pprof.WithLabels(r.Context(), pprof.Labels("path", template))
+	*r = *r.WithContext(ctx)
+	pprof.SetGoroutineLabels(ctx)
 }
 
 // Report selects the execution function once, outside report/job execution.

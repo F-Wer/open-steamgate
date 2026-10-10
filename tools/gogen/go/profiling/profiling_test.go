@@ -105,13 +105,13 @@ func TestHTTPLabels(t *testing.T) {
 	h := HTTP(true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		labels := map[string]string{}
 		pprof.ForLabels(r.Context(), func(k, v string) bool { labels[k] = v; return true })
-		if !reflect.DeepEqual(labels, map[string]string{"method": "POST", "path": "/odata/a%20b"}) {
+		if !reflect.DeepEqual(labels, map[string]string{"method": "POST", "path": "unmatched"}) {
 			t.Fatalf("labels: %v", labels)
 		}
 		// A goroutine profile carries the live goroutine labels, not merely context values.
 		var buf byteWriter
 		pprof.Lookup("goroutine").WriteTo(&buf, 1)
-		if !contains(buf.b, `"method":"POST"`) || !contains(buf.b, `"path":"/odata/a%20b"`) {
+		if !contains(buf.b, `"method":"POST"`) || !contains(buf.b, `"path":"unmatched"`) {
 			t.Fatalf("goroutine labels absent: %s", buf.b)
 		}
 	}))
@@ -174,40 +174,24 @@ func BenchmarkHTTP(b *testing.B) {
 	}
 }
 
-func TestHTTPPathNormalization(t *testing.T) {
-	for _, tc := range []struct{ path, want string }{
-		{"/sap/bc/adt/core/http/sessions/opaque-session", "/sap/bc/adt/core/http/sessions/{id}"},
-		{"/sap/bc/adt/core/http/sessions", "/sap/bc/adt/core/http/sessions"},
-		{"/odata/Users('example')", "/odata/Users{key}"},
-		{"/odata/Users(42)", "/odata/Users{key}"},
-		{"/odata/Users(Name='example',Number=42)/Items", "/odata/Users{key}/Items"},
-		{"/odata/Users(Number=42,Other=7)", "/odata/Users{key}"},
-		{"/odata/Users%28%27example%27%29", "/odata/Users{key}"},
-		{"/odata/Users('example)secret')/Items(7)", "/odata/Users{key}/Items{key}"},
-		{"/odata/Users('example/secret')/Items", "/odata/Users{key}/Items"},
-		{"/odata/Users('example''s)secret')", "/odata/Users{key}"},
-		{"/odata/Users%28%27example%29secret%27%29", "/odata/Users{key}"},
-		{"/odata/Users('unclosed", "/odata/Users{key}"},
-		{"/odata/$batch", "/odata/$batch"},
-		{"/plain/path", "/plain/path"},
-		{"/items/42", "/items/{id}"},
-		{"/items/'example'", "/items/{id}"},
-		{"/items/" + strings.Join([]string{strings.Repeat("a", 8), "bbbb", "cccc", "dddd", strings.Repeat("e", 12)}, "-"), "/items/{id}"},
-		{"/items/12345678123412341234123456789abc", "/items/{id}"},
+func TestMatchedLabels(t *testing.T) {
+	for _, tc := range []struct{ path, template string }{
+		{"/odata/Users('opaque')", "/odata/Users"},
+		{"/sap/bc/adt/core/http/sessions/opaque", "/sap/bc/adt/core/http/sessions/:id"},
+		{"/users/opaque", "/users/:name"},
+		{"/users/rejected", ""},
 	} {
-		t.Run(tc.path, func(t *testing.T) {
-			h := HTTP(true, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-				got, _ := pprof.Label(r.Context(), "path")
-				if got != tc.want {
-					t.Fatalf("path = %q, want %q", got, tc.want)
-				}
-			}))
-			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", tc.path, nil))
-		})
-	}
-	r := httptest.NewRequest("GET", "/items/opaque", nil)
-	r.Pattern = "GET /items/{id}"
-	if got := labelPath(r); got != "/items/{id}" {
-		t.Fatal(got)
+		h := HTTP(true, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			Matched(r, tc.template)
+			got, _ := pprof.Label(r.Context(), "path")
+			want := tc.template
+			if want == "" {
+				want = "unmatched"
+			}
+			if got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		}))
+		h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", tc.path, nil))
 	}
 }

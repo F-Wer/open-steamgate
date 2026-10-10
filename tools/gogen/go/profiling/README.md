@@ -9,13 +9,12 @@ normalized to IPv4 loopback). Wildcards and network addresses are refused
 with a clear startup error, regardless of `OSD_BIND` or `-addr`.
 No profiler handler is mounted on the application HTTP or HTTPS listener.
 
-HTTP labels are `method` and `path`. The path omits the query and replaces
-OData key predicates with `{key}`, ADT session IDs and numeric, GUID or quoted
-segments with `{id}`. A route template is preferred when the host supplies it.
-Other path segments remain visible; arbitrary identifiers in those segments
-are not guaranteed to be removed. Report labels are `report` and, when
-supplied by a job host, `job`. Bodies and selection-screen inputs are not read
-by this module. OSABAP enables report labels
+HTTP labels are `method` and `path`: labels contain only route templates or 'unmatched'.
+The dispatcher supplies the matched ICF node, registered OData service/entity set,
+ADT route template, or static app prefix after matching and validation. Unrouted
+and rejected requests remain `unmatched`. Raw URL segments, keys, query strings
+and bodies never supply label values. Report labels are `report` and, when
+supplied by a job host, `job`. OSABAP enables report labels
 when `OSABAP_CPUPROFILE` is set or `OSD_PPROF=1`; it retains its existing
 file-based CPU capture. OSGo currently has no background-job execution seam;
 `Report` is ready for that host to select at job startup.
@@ -27,6 +26,12 @@ allocation equality; `go test ./profiling -bench . -benchmem` compares the
 bare and disabled paths. Enabled labels intentionally allocate. Labels are
 used by CPU and goroutine profiles; heap/GC worker samples often have no
 request label and cannot be assigned to an ABAP caller.
+
+After a full `node tools/gogen/osgo.mjs` generation, run
+`go test -race -tags profilingroutes ./profiling ./abap ./cmd/osgo` from
+`tools/gogen/go` to exercise the real ADT/OData dispatcher labels, opaque
+segments, rejected bodies and static app prefixes. The tag requires the full
+OSGo classes rather than the echo generation.
 
 Capture: `curl -o cpu.pb.gz 'http://127.0.0.1:6060/debug/pprof/profile?seconds=5'`.
 Convert with [osd-hitlist](../../../hitlist/README.md).
