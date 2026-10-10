@@ -97,7 +97,9 @@ function tsName(site, names) {
 }
 
 function exactCalls(row, counts) {
-  const keys = [row.siteId, row.key, `${row.file}:${row.line}`, `${basename(row.file)}:${row.line}`].filter(Boolean);
+  // Generated scaffolding has no source position, so it has no source-based key.
+  const sourced = row.file ? [`${row.file}:${row.line}`, `${basename(row.file)}:${row.line}`] : [];
+  const keys = [row.siteId, row.key, ...sourced].filter(Boolean);
   for (const key of keys) if (Object.hasOwn(counts, key)) {
     const value = counts[key];
     const calls = typeof value === "number" ? value : value.calls ?? value.count;

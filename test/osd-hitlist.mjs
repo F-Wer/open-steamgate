@@ -76,6 +76,25 @@ describe("native ABAP hit lists", () => {
     assert.throws(() => symbolResolver({schema: "gogen-symbols/1", build: "b", symbols: {x: {go: "x", abap: "A=>B", kind: "generated", file: "a.abap", line: 1}}}), /invalid symbol map entry/);
   });
 
+  it("keeps generated frames in a hit list with and without exact counts", () => {
+    const map = {schema: "gogen-symbols/1", build: "b", symbols: {
+      "main.(*ZCL_OSABAP_R).ZIF_GG_LIST_PROCESSING_V1__AT_PF": {go: "ZIF_GG_LIST_PROCESSING_V1__AT_PF", abap: "ZCL_OSABAP_R=>ZIF_GG_LIST_PROCESSING_V1~AT_PF", kind: "generated"},
+      "main.(*ZCL_OSABAP_R).FORM_SPIN": {go: "FORM_SPIN", abap: "ZR=>SPIN", owner: "ZR", kind: "form", file: "zr.prog.abap", line: 6}}};
+    const profile = {format: "pprof", samples: [
+      {frames: [{name: "main.(*ZCL_OSABAP_R).ZIF_GG_LIST_PROCESSING_V1__AT_PF", file: "/x/zcl_osabap_r.clas.abap", line: 7}], labels: {}, weight: 1, samples: 1},
+      {frames: [{name: "main.(*ZCL_OSABAP_R).FORM_SPIN", file: "/x/zr.prog.abap", line: 9}], labels: {}, weight: 3, samples: 3}]};
+    for (const counts of [{}, {"zr.prog.abap:9": 3000000}]) {
+      const r = hitlist(profile, {symbols: map, counts});
+      const gen = r.rows.find(row => row.kind === "generated");
+      assert.ok(gen, "generated frame row present");
+      assert.equal(gen.file, null);
+      assert.equal(gen.calls, null);
+      const spin = r.rows.find(row => row.abap === "ZR=>SPIN");
+      assert.equal(spin.calls, Object.keys(counts).length ? 3000000 : null);
+      assert.ok(markdown(r).includes("ZCL_OSABAP_R=>ZIF_GG_LIST_PROCESSING_V1~AT_PF"));
+    }
+  });
+
   it("discovers maps beside captures and profiled binaries and marks lossy fallback", () => {
     const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "hitlist-symbols-"));
     try {
