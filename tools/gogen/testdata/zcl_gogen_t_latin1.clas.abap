@@ -1,4 +1,5 @@
-* Unmeasured regression: ISO-8859-1 byte-to-code-point contract.
+* Regression: ISO-8859-1 byte-by-byte decoding.
+* 80-9F: unmeasured on A4H; follows TextDecoder per #255.
 CLASS zcl_gogen_t_latin1 DEFINITION PUBLIC FINAL CREATE PUBLIC.
   PUBLIC SECTION.
     CLASS-METHODS run RETURNING VALUE(rv) TYPE string.

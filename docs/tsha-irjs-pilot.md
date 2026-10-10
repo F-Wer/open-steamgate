@@ -626,8 +626,10 @@ with equality, inequality and ordered generic comparisons.
 ### PR #708, fix round 2: ISO-8859-1 decoder
 
 Go now visits every input byte instead of ranging over UTF-8 rune boundaries.
-Both Go and IR-JS map byte values directly to Unicode code points, including
-NUL and C1 controls; the former Windows-1252 substitution table is removed.
+Both Go and IR-JS retain the Windows-1252 table from #255 for 80 through 9F,
+including U+FFFD for 81, 8D, 8F, 90 and 9D. SAP behavior for that range is
+unmeasured on A4H; it follows TextDecoder per #255. Other bytes map directly
+to Unicode code points, including NUL.
 `C3A4` decodes to U+00C3 U+00A4. The other Go Latin-1 decoder, used by HTTP,
 already iterates a byte slice and needs no correction.
 

@@ -72,12 +72,17 @@ func main(){b,_:=os.ReadFile(os.Args[1]);var cases struct{Decoders []D;Pairs [][
 test('decoder whitelist, UTF-16 refusals and UTF-8 replacement match Go',()=>{
   assert.deepEqual(decoders.map(d=>outcome(()=>A.XToHex(Buffer.from(decodeText(d.enc,d.ignore,binary(d.hex)),'utf8').toString('latin1')))),go().decode);
 });
-test('ISO-8859-1 maps every byte to its own code point on Go and JS', () => {
+test('ISO-8859-1 decodes byte by byte with the pinned Windows-1252 mapping on Go and JS', () => {
   const cases = decoders.map((d, i) => ({d, i})).filter(({d}) => d.enc === 'iso-8859-1');
   for (const {d, i} of cases) {
     const bytes = binary(d.hex);
-    assert.equal(decodeText(d.enc, d.ignore, bytes), bytes);
-    assert.equal(go().decode[i], Buffer.from(bytes, 'utf8').toString('hex').toUpperCase());
+    const controls = '€�‚ƒ„…†‡ˆ‰Š‹Œ�Ž��‘’“”•–—˜™š›œ�žŸ';
+    const expected = [...bytes].map(c => {
+      const b = c.charCodeAt(0);
+      return b >= 0x80 && b <= 0x9F ? controls[b - 0x80] : c;
+    }).join('');
+    assert.equal(decodeText(d.enc, d.ignore, bytes), expected);
+    assert.equal(go().decode[i], Buffer.from(expected, 'utf8').toString('hex').toUpperCase());
   }
 });
 test('output N uses UTF-16 units and UTF-8 preserves lone surrogates as Go WTF-8',()=>{

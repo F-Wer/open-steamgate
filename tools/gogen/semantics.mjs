@@ -35,8 +35,8 @@ const EXPECT = {
   // Unmeasured regression: recursive MESSAGE masking and nested classic mappings.
   ZCL_GOGEN_T_CALLSCOPE: {Go: "continue/outer/7/ZZ/S/007/nested/9/continue/outer3/0//5/11/continue/outer3/0/continue/",
     JS: "ERROR NOT_COMPILED in abap.MessageRaise: a host function of the Go runtime"},
-  // Unmeasured: ISO-8859-1 maps every byte to the same code point, including C1.
-  ZCL_GOGEN_T_LATIN1: "C383C2A400C3BFC280C281C282C283C284C285C286C287C288C289C28AC28BC28CC28DC28EC28FC290C291C292C293C294C295C296C297C298C299C29AC29BC29CC29DC29EC29F",
+  // ISO-8859-1 80-9F: unmeasured on A4H; follows TextDecoder per #255.
+  ZCL_GOGEN_T_LATIN1: "C383C2A400C3BFE282ACEFBFBDE2809AC692E2809EE280A6E280A0E280A1CB86E280B0C5A0E280B9C592EFBFBDC5BDEFBFBDEFBFBDE28098E28099E2809CE2809DE280A2E28093E28094CB9CE284A2C5A1E280BAC593EFBFBDC5BEC5B8",
   // Unmeasured: Go contract for generic reference equality, including repeated GET REFERENCE.
   ZCL_GOGEN_T_REFCMP: {Go: "11011", JS: "ERROR NOT_COMPILED in comparison: data reference identity is not modelled in IR-JS"},
   ZCL_GOGEN_T__PILOT: "7/1/X/X/X///7/C3A4/00D8/AA/007/hello/2",

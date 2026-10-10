@@ -33,8 +33,16 @@ export function decodeText(encoding, ignoreErrors, bytes) {
     }
     return text;
   }
-  // Xstrings already hold one code unit per byte; C1 bytes remain controls.
-  if (encoding === 'iso-8859-1') return bytes;
+  if (encoding === 'iso-8859-1') {
+    // Preserve the Windows-1252 mapping from #255; SAP behaviour unmeasured.
+    const controls = '€�‚ƒ„…†‡ˆ‰Š‹Œ�Ž��‘’“”•–—˜™š›œ�žŸ';
+    let out = '';
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes.charCodeAt(i);
+      out += b >= 0x80 && b <= 0x9F ? controls[b - 0x80] : bytes[i];
+    }
+    return out;
+  }
   if (encoding !== 'utf8') refused('IN', `encoding ${encoding}`);
   const input = Buffer.from(bytes, 'latin1');
   try { return new TextDecoder('utf8', {fatal: true, ignoreBOM: true}).decode(input); }
