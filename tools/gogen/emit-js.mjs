@@ -135,21 +135,16 @@ function descDecls() {
  */
 function bind(p, ctx) {
   const caps = [];
-  let root, keys = [];
   const cap = (code) => { const n = `$c${caps.length}`; caps.push(`const ${n} = ${code};`); return n; };
   const path = (q) => {
     switch (q.e) {
-      case "var": case "const":
-        ctx.refScope = true; root = q.box ? ident(q.name) : '$refScope'; keys = [q.box ? 'v' : q.name]; return place(q, ctx);
-      case "attr": root = 'me'; keys = [ident(q.name)]; return place(q, ctx);
-      case "static": root = typeName(q.owner); keys = [ident(q.name)]; return place(q, ctx);
-      case "field": { const base = path(q.base); keys.push(ident(q.name)); return `${base}.${ident(q.name)}`; }
-      case "fs": root = cap(ident(q.name)); keys = []; return root;
-      case "refattr": root = cap(expr(q.base, ctx)); keys = [ident(q.name)]; return `${root}.${ident(q.name)}`;
+      case "var": case "attr": case "static": case "const": return place(q, ctx);
+      case "field": return `${path(q.base)}.${ident(q.name)}`;
+      case "fs": return cap(ident(q.name));
+      case "refattr": return `${cap(expr(q.base, ctx))}.${ident(q.name)}`;
       case "row": {
         const b = cap(path(q.base));
-        const index = cap(`abap.Idx(${b}.length, ${expr(q.index, ctx)})`);
-        root = b; keys = [index]; return `${b}[${index}]`;
+        return `${b}[${cap(`abap.Idx(${b}.length, ${expr(q.index, ctx)})`)}]`;
       }
       default: throw new Error(`not a place: ${q.e}`);
     }
@@ -162,8 +157,7 @@ function bind(p, ctx) {
   const set = !whole ? `($v) => { ${at} = $v; }`
     : composite(p.type) ? `($v) => { abap.Overwrite(${desc(p.type)}, ${at}, $v); }`
       : `() => { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`a write through generic data bound to the typed field symbol ${p.name} of an elementary type: the JS backend holds its value, not its slot`)}); }`;
-  const address = `[${keys.map(k => k.startsWith("$c") ? k : JSON.stringify(k)).join(", ")}]`;
-  const b = `abap.RefBinding({get: () => ${at}, set: ${set}, t: ${desc(p.type)}}, ${root}, ${address})`;
+  const b = `{get: () => ${at}, set: ${set}, t: ${desc(p.type)}}`;
   return caps.length ? `(() => { ${caps.join(" ")} return ${b}; })()` : b;
 }
 
@@ -319,7 +313,6 @@ function method(cls, m) {
   const odd = (m.fieldSymbols ?? []).find((f) => f.type.k !== "struct" && f.type.k !== "data" && !["i", "int8", "string", "c", "n", "p", "d", "t", "x", "xstring", "f"].includes(f.type.k));
   if (odd) lines.push(`    throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: field symbol ${odd.name} of a ${odd.type.k}: the JS emitter holds only rows of structures`)});`);
   else lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
-  if (ctx.refScope) lines.splice(lines.indexOf(head) + 1, 0, "    const $refScope = {};");
   if (ret) lines.push(`    return ${ret};`);
   lines.push("  }");
   return lines;

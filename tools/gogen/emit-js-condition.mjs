@@ -12,6 +12,7 @@ export function emitCondition(c, ctx, {expr, zero, place, ident, cond}) {
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat}, ${!!c.csubject})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
+      if ([c.type, c.l.type, c.r.type].some(t => t?.k === "dref")) return "abap.DataRefCompare()";
       if (c.l.e === "unwrap_chars" || c.r.e === "unwrap_chars") {
         const side = x => x.e === "unwrap_chars" ? expr(x.x, ctx) : `abap.cell(${expr(x, ctx)}, abap.TString)`;
         return `abap.CmpData(${side(c.l)}, ${side(c.r)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;

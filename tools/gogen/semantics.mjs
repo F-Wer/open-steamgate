@@ -36,7 +36,7 @@ const EXPECT = {
   ZCL_GOGEN_T_CALLSCOPE: {Go: "continue/outer/7/ZZ/S/007/nested/9/continue/outer3/0//5/11/continue/outer3/0/continue/",
     JS: "ERROR NOT_COMPILED in abap.MessageRaise: a host function of the Go runtime"},
   // Unmeasured: Go contract for generic reference equality, including repeated GET REFERENCE.
-  ZCL_GOGEN_T_REFCMP: "11011",
+  ZCL_GOGEN_T_REFCMP: {Go: "11011", JS: "ERROR NOT_COMPILED in comparison: data reference identity is not modelled in IR-JS"},
   ZCL_GOGEN_T__PILOT: "7/1/X/X/X///7/C3A4/00D8/AA/007/hello/2",
   // Unmeasured: ABAP value semantics
   ZCL_GOGEN_T_MOVCLR: "clear:3,0 append:1,9 delete:2,2 free:4,2,8 deep:6,10 component:14,16 object:18,19 loop:11,2,13",

@@ -6,6 +6,9 @@ import {mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync} from 'node:
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import * as A from './js/abap.mjs';
+import {createRequire} from 'node:module';
+import {compileProgram} from './frontend.mjs';
+import {emitJs} from './emit-js.mjs';
 import {decodeText, convertOut} from './js/codepage.mjs';
 
 const decoders = [
@@ -59,8 +62,6 @@ func main(){b,_:=os.ReadFile(os.Args[1]);var cases struct{Decoders []D;Pairs [][
  for _,p:=range cases.Pairs {for _,q:=range [][2]V{p,{p[1],p[0]}} {out["compare"]=append(out["compare"],caught(func()string{return fmt.Sprint(abap.CmpData(data(q[0]),data(q[1])))}))}}
  for _,d:=range cases.Dumpers {out["dump"]=append(out["dump"],abap.UnitDumpToString(nil,data(d)))}
  for _,s:=range []string{"😀",abap.UTF16String([]uint16{0xD800})} {for _,enc:=range []string{"utf8","utf16le"} {for _,n:=range []int32{-1,0,1,2,3} {out["encode"]=append(out["encode"],caught(func()string{return abap.XToHex(abap.EncodeText(enc,abap.SubS(s,0,n)))}))}}}
- var a,bref abap.Data; x:=int32(7);a=abap.Data{P:&x,T:abap.TI};bref=a;c:=int32(7);other:=abap.Data{P:&c,T:abap.TI};z:=abap.Data{}
- for _,p:=range [][2]abap.Data{{z,z},{a,bref},{a,other},{a,z}} {u,v:=p[0],p[1];out["refs"]=append(out["refs"],fmt.Sprint(abap.CmpData(abap.Data{P:&u,T:abap.TRef},abap.Data{P:&v,T:abap.TRef})))}
  json.NewEncoder(os.Stdout).Encode(out)
 }`);
     oracle=JSON.parse(execFileSync('go',['run',join(dir,'main.go'),join(dir,'cases.json')],{cwd:resolve('tools/gogen/go'),encoding:'utf8',timeout:120000}));
@@ -77,15 +78,9 @@ test('output N uses UTF-16 units and UTF-8 preserves lone surrogates as Go WTF-8
   assert.deepEqual(got,go().encode);
   assert.throws(()=>convertOut({},'utf8','a',2,{v:''},'X'),/CX_SY_RANGE_OUT_OF_BOUNDS/);
 });
-test('generic byte pairs, numeric widths, text, NUMC and data-reference identity match Go',()=>{
+test('generic byte pairs, numeric widths, text and NUMC match Go',()=>{
   assert.deepEqual(pairs.flatMap(([a,b])=>[[a,b],[b,a]].map(([x,y])=>outcome(()=>A.CmpData(data(x),data(y))))),go().compare);
-  const target=A.cell(7,A.TI), other=A.cell(7,A.TI);
-  const root={};
-  const first=A.RefBinding(A.cell(7,A.TI),root,['field']);
-  const again=A.RefBinding(A.cell(7,A.TI),root,['field']);
-  assert.equal(A.CmpData(A.cell(first,A.TRef),A.cell(again,A.TRef)),0);
-  assert.equal(A.CmpData(A.cell(A.copy(first),A.TRef),A.cell(again,A.TRef)),0);
-  assert.deepEqual([[null,null],[target,target],[target,other],[target,null]].map(([a,b])=>outcome(()=>A.CmpData(A.cell(a,A.TRef),A.cell(b,A.TRef)))),go().refs);
+
 });
 test('initial date/time/NUMC assertion dumps match Go',()=>{
   assert.deepEqual(dumpers.map(d=>A.UnitDumpToString({},data(d))),go().dump);
@@ -147,4 +142,59 @@ ENDCLASS.`;
     }
     assert.deepEqual(statuses.JS,statuses.Go);
   } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+
+test('data-reference comparisons refuse identity, including nested references and initial slots', () => {
+  const reason = /NOT_COMPILED in comparison: data reference identity is not modelled in IR-JS/;
+  const target = A.cell(7, A.TI);
+  for (const [a, b] of [[null, null], [target, target], [target, A.cell(7, A.TI)], [target, null]]) {
+    assert.throws(() => A.CmpData(A.cell(a, A.TRef), A.cell(b, A.TRef)), reason);
+  }
+  const row = {kind:'u', comps:[{key:'ref', t:A.TRef}]};
+  for (const t of [row, {kind:'h', row}]) {
+    const v = t === row ? {ref:target} : [{ref:target}];
+    assert.throws(() => A.CmpData(A.cell(v, t), A.cell(v, t)), reason);
+  }
+});
+
+test('critic alias, shifted row and reused index reproducers refuse JS identity comparisons', async () => {
+  const require = createRequire(import.meta.url);
+  const core = createRequire(require.resolve('@abaplint/transpiler/package.json'))('@abaplint/core');
+  const config = core.Config.getDefault().get();
+  config.syntax = {...config.syntax, version:'v758', errorNamespace:'.'};
+  config.rules = {check_syntax:true, parser_error:true};
+  const bodies = [
+    `GET REFERENCE OF row-x INTO a. b = field( row ).`,
+    `APPEND row TO rows. APPEND row TO rows REFERENCE INTO a. DELETE rows INDEX 1. GET REFERENCE OF rows[ 1 ] INTO b.`,
+    `APPEND row TO rows REFERENCE INTO a. DELETE rows INDEX 1. APPEND row TO rows REFERENCE INTO b.`,
+  ];
+  for (const body of bodies) for (const op of ['=', '<>', '<', '>']) {
+    const source = `CLASS zcl_probe DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION.
+TYPES: BEGIN OF ty, x TYPE i, END OF ty.
+CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+CLASS-METHODS field IMPORTING row TYPE ty RETURNING VALUE(rv) TYPE REF TO i.
+CLASS-METHODS eq IMPORTING a TYPE any b TYPE any RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_probe IMPLEMENTATION.
+METHOD field. GET REFERENCE OF row-x INTO rv. ENDMETHOD.
+METHOD eq. IF a ${op} b. rv = '1'. ELSE. rv = '0'. ENDIF. ENDMETHOD.
+METHOD run.
+DATA rows TYPE STANDARD TABLE OF ty WITH DEFAULT KEY.
+DATA row TYPE ty.
+DATA a TYPE REF TO data. DATA b TYPE REF TO data.
+${body}
+rv = eq( a = a b = b ).
+ENDMETHOD. ENDCLASS.`;
+    const reg = new core.Registry(new core.Config(JSON.stringify(config)))
+      .addFile(new core.MemoryFile('zcl_probe.clas.abap', source)).parse();
+    const program = compileProgram({folders:[], objects:['ZCL_PROBE'], registry:reg});
+    assert.deepEqual(program.partial, []);
+    const code = emitJs(program, new URL('./js/abap.mjs', import.meta.url).href);
+    assert.doesNotMatch(code, /RefBinding|refScope/);
+    const m = await import('data:text/javascript,' + encodeURIComponent(code));
+    assert.throws(() => m.ZCL_PROBE.RUN({sy:{}}),
+      /NOT_COMPILED in comparison: data reference identity is not modelled in IR-JS/, body + op);
+  }
 });

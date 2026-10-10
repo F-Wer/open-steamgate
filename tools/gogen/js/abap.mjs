@@ -808,27 +808,11 @@ export const TX = (n) => sizedType("X", n);
 export const TP = (n, dec) => sizedType("P", n, dec);
 export const TN = (n) => sizedType("N", n);
 
-// Address identity is separate from the wrapper that reads/writes the slot.
-// Weak roots avoid retaining expired method scopes, objects or tables.
-const refAddresses = new WeakMap();
-export function RefBinding(binding, root, keys) {
-  if (root.refRoot) { keys = [...root.refKeys, ...keys]; root = root.refRoot; }
-  binding.refRoot = root; binding.refKeys = keys;
-  let addresses = refAddresses.get(root);
-  if (!addresses) refAddresses.set(root, addresses = new Map());
-  const path = JSON.stringify(keys);
-  if (!addresses.has(path)) addresses.set(path, {});
-  binding.refID = addresses.get(path);
-  return binding;
-}
-const dataRefID = ref => ref == null ? null : ref.refID ?? ref;
-
 // a value that is no place of its own, seen as generic data: a slot of its own
 export function cell(v, t, table) {
   const c = {v};
   const check = () => { if (table && !table.includes(v)) throw new AbapError("GETWA_NOT_ASSIGNED", "reference to a deleted table row"); };
-  const binding = {get: () => { check(); return c.v; }, set: (x) => { check(); c.v = x; }, t};
-  return table ? RefBinding(binding, table, [table.indexOf(v)]) : binding;
+  return {get: () => { check(); return c.v; }, set: (x) => { check(); c.v = x; }, t};
 }
 
 const notAssigned = (op) => new AbapError("GETWA_NOT_ASSIGNED", op);
@@ -842,7 +826,7 @@ export function Component(d, name) {
   const n = String(name).replace(/ +$/, "").toUpperCase();
   const c = typeof name === "number" ? (name > 0 ? d.t.comps[name - 1] : undefined) : d.t.comps.find((x) => x.name === n);
   if (c === undefined) return null;
-  return RefBinding({get: () => d.get()[c.key], set: (v) => { d.get()[c.key] = v; }, t: c.t}, d, [c.key]);
+  return {get: () => d.get()[c.key], set: (v) => { d.get()[c.key] = v; }, t: c.t};
 }
 
 // lines( ) of a generic table
@@ -900,7 +884,7 @@ export function Row(d, i) {
     if (d.get() !== a || tableVersion(a) !== version || i >= a.length || (value !== null && typeof value === "object" && a[i] !== value))
       throw new AbapError("GETWA_NOT_ASSIGNED", "table row binding after structural mutation");
   };
-  return RefBinding({get: () => { check(); return a[i]; }, set: (v) => { check(); a[i] = v; }, t: d.t.row}, a, [i]);
+  return {get: () => { check(); return a[i]; }, set: (v) => { check(); a[i] = v; }, t: d.t.row};
 }
 
 const tableVersions = new WeakMap();
@@ -923,7 +907,7 @@ export function bindRow(current, index) {
 // An elementary REFERENCE INTO uses the same row slot and validity as
 // ASSIGNING. A plain cell would only change its private copy of the value.
 export function rowCell(current, index, t) {
-  return RefBinding({...bindRow(current, index), t}, current(), [index]);
+  return {...bindRow(current, index), t};
 }
 
 // a generic elementary value moved into a string
@@ -1741,9 +1725,14 @@ export function FindResults(s, p, kind, icase, all) {
 
 // Pairwise generic comparisons, following go/abap/gencmp.go. The pair,
 // rather than either operand alone, decides numeric versus text comparison.
+export function DataRefCompare() {
+  throw new AbapError("NOT_COMPILED", "comparison: data reference identity is not modelled in IR-JS");
+}
 export function CmpData(a, b) {
   if (a === null || b === null) throw notAssigned('comparison');
-  const ka = a.t.kind, kb = b.t.kind, av = a.get(), bv = b.get();
+  const ka = a.t.kind, kb = b.t.kind;
+  if (ka === 'l' || kb === 'l') return DataRefCompare();
+  const av = a.get(), bv = b.get();
   const cmp = (x, y) => x < y ? -1 : x > y ? 1 : 0;
   const numeric = k => ['I', '8', 'P', 'F'].includes(k);
   const text = k => ['C', 'g', 'D', 'T'].includes(k);
@@ -1763,7 +1752,6 @@ export function CmpData(a, b) {
     return 0;
   }
   if (ka === 'r' && kb === 'r') return RefEq(av, bv) ? 0 : 1;
-  if (ka === 'l' && kb === 'l') return dataRefID(av) === dataRefID(bv) ? 0 : 1;
   if (byte(ka) && byte(kb)) {
     const width = Math.max(av.length, bv.length);
     return ka === 'X' && kb === 'X' ? cmp(av.padEnd(width, '\0'), bv.padEnd(width, '\0')) : cmp(av, bv);

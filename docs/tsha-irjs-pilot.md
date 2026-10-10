@@ -606,3 +606,18 @@ exit 0; the same two untouched inherited size breaches remain. All heavy
 commands used the requested cache, RAM scratch, range 50-59 and `nice -n10`.
 The post-slot resource gates recorded IO `some avg10` 0.00-0.18, available
 memory above 81 GB and load below 8.1. No unrelated process was signalled.
+
+
+### PR #708, fix round 2: reference identity refusal
+
+IR-JS refuses data-reference comparisons with `NOT_COMPILED` and the reason
+`data reference identity is not modelled in IR-JS`. Generic comparisons,
+including references nested in structures or table rows, use this refusal.
+Object-reference equality and byte comparisons retain their existing behavior.
+The access-path and table-index address machinery from round 1 is removed:
+parameter aliases, shifted rows and reused indices cannot supply stable identity.
+
+The `REFCMP` semantics fixture retains Go's `11011` result and records the
+expected JS-only refusal. Focused regressions cover forwarded component aliases,
+row deletion shifting a retained row, and deletion followed by index reuse,
+with equality, inequality and ordered generic comparisons.
