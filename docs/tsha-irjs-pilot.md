@@ -621,3 +621,28 @@ The `REFCMP` semantics fixture retains Go's `11011` result and records the
 expected JS-only refusal. Focused regressions cover forwarded component aliases,
 row deletion shifting a retained row, and deletion followed by index reuse,
 with equality, inequality and ordered generic comparisons.
+
+
+### PR #708, fix round 2: ISO-8859-1 decoder
+
+Go now visits every input byte instead of ranging over UTF-8 rune boundaries.
+Both Go and IR-JS map byte values directly to Unicode code points, including
+NUL and C1 controls; the former Windows-1252 substitution table is removed.
+`C3A4` decodes to U+00C3 U+00A4. The other Go Latin-1 decoder, used by HTTP,
+already iterates a byte slice and needs no correction.
+
+Go and differential regressions cover every byte from 00 through FF, the
+valid-UTF-8 byte pair C3A4, and both IGNORE_CERR values. An unmeasured ABAP
+semantics fixture checks conversion to UTF-8 for C3A4, 00, FF and 80 through 9F.
+Fresh semantics validation: **192 Go + 192 JS outcomes, all ok, 0 FAIL**;
+focused tests: **22 pass, 0 fail**; `go test ./abap` passes.
+
+Final round-2 lexer validation: **44/44 cases on both hosts**, plus the combined
+case; three fresh-process zabapgit samples per host all return `X`, **609,647
+tokens** and the unchanged SHA-256
+`9b118dd1e5ed640bbe07f1e8f4848b8fcaaa6a25c5ab126a12f018c46664df40`.
+The former input directory had moved; the replay uses the retained closure and
+original benchmark source copied into gitignored scratch. Logs and artifacts
+are under `.local/irjs-fix/round2-*`. Size budget (`--changed origin/main`) and
+explicit changed-file leak scan exit 0; the two untouched inherited budget
+breaches are still reported. No allowance was raised and nothing was pushed.

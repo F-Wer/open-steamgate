@@ -16,7 +16,8 @@ const decoders = [
   ...['utf16le','utf-16le'].flatMap(enc=>['41','00D8','00DC','00D84100','00D800D8'].flatMap(hex=>[false,true].map(ignore=>({enc,hex,ignore})))),
   ...['FFFF','FFFE41FF','E08080','EDA080','F4908080','EFBFBD','EFBBBF','F09F9880','C3A4'].flatMap(hex=>[false,true].map(ignore=>({enc:'utf8',hex,ignore}))),
   {enc:'utf16le',hex:'3DD800DEFFFE',ignore:false},
-  {enc:'iso-8859-1',hex:'80818D8F909DFF',ignore:false},
+  ...['C3A4','00','FF','808182838485868788898A8B8C8D8E8F909192939495969798999A9B9C9D9E9F',
+    Buffer.from(Array.from({length:256}, (_,i)=>i)).toString('hex')].flatMap(hex=>[false,true].map(ignore=>({enc:'iso-8859-1',hex,ignore}))),
 ];
 const val=(k,v,len=0,dec=0)=>({k,v:String(v),len,dec});
 const byte=(hex,k='X')=>val(k,hex,hex.length/2);
@@ -70,6 +71,14 @@ func main(){b,_:=os.ReadFile(os.Args[1]);var cases struct{Decoders []D;Pairs [][
 }
 test('decoder whitelist, UTF-16 refusals and UTF-8 replacement match Go',()=>{
   assert.deepEqual(decoders.map(d=>outcome(()=>A.XToHex(Buffer.from(decodeText(d.enc,d.ignore,binary(d.hex)),'utf8').toString('latin1')))),go().decode);
+});
+test('ISO-8859-1 maps every byte to its own code point on Go and JS', () => {
+  const cases = decoders.map((d, i) => ({d, i})).filter(({d}) => d.enc === 'iso-8859-1');
+  for (const {d, i} of cases) {
+    const bytes = binary(d.hex);
+    assert.equal(decodeText(d.enc, d.ignore, bytes), bytes);
+    assert.equal(go().decode[i], Buffer.from(bytes, 'utf8').toString('hex').toUpperCase());
+  }
 });
 test('output N uses UTF-16 units and UTF-8 preserves lone surrogates as Go WTF-8',()=>{
   const got=[];

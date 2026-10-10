@@ -33,10 +33,8 @@ export function decodeText(encoding, ignoreErrors, bytes) {
     }
     return text;
   }
-  if (encoding === 'iso-8859-1') {
-    const controls = '€�‚ƒ„…†‡ˆ‰Š‹Œ�Ž��‘’“”•–—˜™š›œ�žŸ';
-    return [...bytes].map(c => { const b = c.charCodeAt(0); return b >= 0x80 && b <= 0x9F ? controls[b - 0x80] : c; }).join('');
-  }
+  // Xstrings already hold one code unit per byte; C1 bytes remain controls.
+  if (encoding === 'iso-8859-1') return bytes;
   if (encoding !== 'utf8') refused('IN', `encoding ${encoding}`);
   const input = Buffer.from(bytes, 'latin1');
   try { return new TextDecoder('utf8', {fatal: true, ignoreBOM: true}).decode(input); }

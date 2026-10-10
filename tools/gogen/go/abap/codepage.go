@@ -76,18 +76,11 @@ func DecodeText(encoding string, ignoreErrors bool, data string) string {
 		}
 		return data
 	case "iso-8859-1":
-		// TextDecoder uses the Windows-1252 table for this encoding label.
-		var control = [...]rune{
-			'€', '�', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '�', 'Ž', '�',
-			'�', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '�', 'ž', 'Ÿ',
-		}
+		// ISO-8859-1 maps each byte to the same Unicode code point,
+		// including C1 controls. A string range would skip UTF-8 continuations.
 		runes := make([]rune, len(data))
-		for i := range data {
-			b := data[i]
-			runes[i] = rune(b)
-			if b >= 0x80 && b <= 0x9f {
-				runes[i] = control[b-0x80]
-			}
+		for i := 0; i < len(data); i++ {
+			runes[i] = rune(data[i])
 		}
 		return string(runes)
 	case "utf16le", "utf-16le":

@@ -73,7 +73,7 @@ test('synchronous codepages preserve the Go byte and N contracts', () => {
   assert.equal(encodeText('utf8', '\ud800'), '\xED\xA0\x80');
   assert.equal(encodeText('utf16le', '\ud800'), '\x00\xD8');
   assert.equal(decodeText('utf8', false, '\xEF\xBB\xBFa'), '\uFEFFa');
-  assert.equal(decodeText('iso-8859-1', false, '\x80'), '€');
+  assert.equal(decodeText('iso-8859-1', false, '\x80'), '\u0080');
   assert.throws(() => decodeText('utf8', false, '\xFF'), /CX_SY_CONVERSION_CODEPAGE/);
   assert.equal(decodeText('utf8', true, '\xFF'), '\uFFFD');
   const result = {v: 'before'};
