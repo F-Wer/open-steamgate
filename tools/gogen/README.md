@@ -1763,10 +1763,14 @@ generated 16-page equal-length store allocates zero bytes.
 
 Every Go build writes a deterministic `symbols.json` beside the generated Go,
 with schema `gogen-symbols/1`, the OSG Git commit (`unknown` outside a checkout),
-and one entry per ABAP routine keyed by the exact package-qualified pprof name
+and entries keyed by the exact package-qualified pprof name
 (including pointer receivers and full import paths in layered unit builds).
 Entries carry the bare Go name, original `CLASS=>METHOD` (including `INTF~METH`),
-kind (`method`, `local`, `form`, or `fm`), ABAP file and statement line; locals
+kind (`method`, `local`, `form`, `fm`, `event`, or `generated`); source routines
+carry their ABAP file and statement line. Report events use `REPORT (EVENT)`
+with the original event header position, or the first executable statement
+for implicit START-OF-SELECTION. Converter scaffolding remains listed as
+`generated` without a source file or line. Locals
 retain the frontend's `OWNER:LOCAL` spelling, and locals, FORMs and function
 modules carry their owning class, report or function group. Constructors, class
 constructors and event handlers are ordinary methods. Generated function literals

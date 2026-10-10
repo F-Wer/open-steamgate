@@ -13,6 +13,51 @@ const here = import.meta.dirname;
 const fixture = join(here, "testdata-symbols");
 const gui = libraryPath(home, "open-abap-gui");
 
+test("converted report events keep original provenance, including implicit and empty events", async () => {
+  const {convertProgram} = await import(join(gui, "converter/src/api.mjs"));
+  for (const [source, events] of [
+    ["REPORT zsymbols.\nWRITE / 'hello'.\n", [["START_OF_SELECTION", "START-OF-SELECTION", 2]]],
+    ["REPORT zsymbols. WRITE / 'hello'.", [["START_OF_SELECTION", "START-OF-SELECTION", 1]]],
+    ["REPORT zsymbols.\nDATA n TYPE i.\nn = 1.\nSTART-OF-SELECTION.\nn = 2.\n",
+      [["START_OF_SELECTION", "START-OF-SELECTION", 3]]],
+    ["REPORT zsymbols.\nPARAMETERS p_name TYPE string.\nINITIALIZATION.\np_name = 'hello'.\nAT SELECTION-SCREEN ON p_name.\nWRITE / p_name.\nAT SELECTION-SCREEN.\nWRITE / p_name.\nSTART-OF-SELECTION.\nWRITE / p_name.\nEND-OF-SELECTION.\n",
+      [["INITIALIZATION", "INITIALIZATION", 3], ["AT_SELECTION_SCREEN_ON_FIELD", "AT SELECTION-SCREEN ON P_NAME", 5],
+        ["AT_SELECTION_SCREEN", "AT SELECTION-SCREEN", 7], ["START_OF_SELECTION", "START-OF-SELECTION", 9],
+        ["END_OF_SELECTION", "END-OF-SELECTION", 11]]],
+    ["REPORT zsymbols.\nLOAD-OF-PROGRAM.\nSTART-OF-SELECTION.\nWRITE / 'hello'.\n",
+      [["LOAD_OF_PROGRAM", "LOAD-OF-PROGRAM", 2], ["START_OF_SELECTION", "START-OF-SELECTION", 3]]],
+    ["REPORT zsymbols.\nSTART-OF-SELECTION.\nWRITE / 'hello'.\nTOP-OF-PAGE.\nWRITE / 'heading'.\nAT LINE-SELECTION.\nWRITE / 'detail'.\n",
+      [["START_OF_SELECTION", "START-OF-SELECTION", 2], ["TOP_OF_PAGE", "TOP-OF-PAGE", 4, "ZIF_GG_LIST_PROCESSING_V1"],
+        ["AT_LINE_SELECTION", "AT LINE-SELECTION", 6, "ZIF_GG_LIST_PROCESSING_V1"]]],
+  ]) {
+    const dir = mkdtempSync(join(tmpdir(), "gogen-report-symbols-"));
+    try {
+      const converted = await convertProgram({source, filename: "zsymbols.prog.abap", mode: "strict",
+        nativePassthrough: true, className: "ZCL_SYMBOL_REPORT", transactionCode: "ZSYMBOLS"});
+      assert.equal(converted.supported, true);
+      writeFileSync(join(dir, "zcl_symbol_report.clas.abap"), converted.classSource);
+      const program = compileProgram({folders: [join(libraryPath(home, "open-abap-core"), "src"),
+        join(gui, "framework"), dir], objects: ["ZCL_SYMBOL_REPORT"]});
+      reportSymbols(program, converted, "ZSYMBOLS", "zsymbols.prog.abap");
+      writeGo(join(dir, "zz_generated.go"), program);
+      const {symbols} = JSON.parse(readFileSync(join(dir, "symbols.json"), "utf8"));
+      for (const [method, label, line, intf = "ZIF_GG_REPORT_V1"] of events) {
+        const go = `${intf}__${method}`;
+        assert.deepEqual(symbols[`main.(*ZCL_SYMBOL_REPORT).${go}`], {
+          go, abap: `ZSYMBOLS (${label})`, owner: "ZSYMBOLS", kind: "event", file: "zsymbols.prog.abap", line,
+        });
+      }
+      const helpers = Object.values(symbols).filter((s) => s.abap.startsWith("ZCL_SYMBOL_REPORT=>"));
+      assert.ok(helpers.length > 0);
+      for (const helper of helpers) {
+        assert.equal(helper.kind, "generated", helper.abap);
+        assert.equal("file" in helper, false, helper.abap);
+        assert.equal("line" in helper, false, helper.abap);
+      }
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  }
+});
+
 test("symbol map round-trips ABAP names and real pprof frames", async () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-symbols-"));
   try {
@@ -53,6 +98,8 @@ test("symbol map round-trips ABAP names and real pprof frames", async () => {
     }
     assert.deepEqual(map.symbols["main.ZCL_SYMBOL_REPORT_H1_RUN"], {go: "ZCL_SYMBOL_REPORT_H1_RUN",
       abap: "ZSYMBOLS:LCL_REPORT=>RUN", owner: "ZSYMBOLS", kind: "local", file: "zsymbols.prog.abap", line: 15});
+    assert.deepEqual(map.symbols["main.(*ZCL_SYMBOL_REPORT_H1).CONSTRUCTOR"], {go: "CONSTRUCTOR",
+      abap: "ZCL_SYMBOL_REPORT_H1=>CONSTRUCTOR", kind: "generated"});
     assert.equal(map.symbols["main.(*ZCL_SYMBOL_REPORT).ZIF_GG_REPORT_V1__START_OF_SELECTION"].line, 2);
     writeGo(join(out, "zz_generated.go"), program);
     assert.equal(readFileSync(join(out, "symbols.json"), "utf8"), json);
