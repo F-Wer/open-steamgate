@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // Zork, the whole interpreter, compiled from packs/zork through the IR to Go
 // and to JS, and played by its own speedrun: the story file and the script
 // of the pack, the same commands on both, the logs compared line by line.
@@ -11,7 +12,6 @@ import {copyFileSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 
@@ -29,7 +29,7 @@ if (program.skipped.length) console.log(`not compiled: ${program.skipped.join(";
 const out = join(here, ".out", "zork");
 mkdirSync(out, {recursive: true});
 writeFileSync(join(out, "commands.json"), JSON.stringify(commands));
-writeFileSync(join(here, "go", "cmd", "zork", "zz_generated.go"), emitGo(program));
+writeGo(join(here, "go", "cmd", "zork", "zz_generated.go"), program);
 execFileSync("gofmt", ["-w", join(here, "go", "cmd", "zork")]);
 execFileSync("go", ["build", "-trimpath", "-ldflags=-s -w", "-o", join(out, "zork"), "./cmd/zork"], {cwd: join(here, "go"), stdio: "inherit"});
 // --seed n: both runtimes draw the same random sequence, so the whole

@@ -8,6 +8,10 @@ import {parsePprof} from "../tools/hitlist/pprof.mjs";
 import {parseV8} from "../tools/hitlist/v8.mjs";
 import {abapSite, diff, hitlist, selectRows, symbolResolver} from "../tools/hitlist/hitlist.mjs";
 import {markdown} from "../tools/hitlist/markdown.mjs";
+import {libraryPath} from "../tools/osd-lib-path.mjs";
+import {home} from "../tools/gogen/home.mjs";
+import {compileProgram} from "../tools/gogen/frontend.mjs";
+import {writeGo} from "../tools/gogen/symbols.mjs";
 import {emitGo, funcName, typeName} from "../tools/gogen/emit-go.mjs";
 import {run} from "../tools/osd-hitlist.mjs";
 
@@ -38,6 +42,25 @@ const parsed = () => parsePprof(gzipSync(fixture()));
 
 describe("native ABAP hit lists", () => {
   const symbols = JSON.parse(readFileSync(new URL("./fixtures/hitlist-symbols.json", import.meta.url)));
+  it("reads exact identities from this compiler's emitted map", function () {
+    this.timeout(15000);
+    const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "hitlist-emitted-"));
+    try {
+      const program = compileProgram({folders: [join(libraryPath(home, "open-abap-core"), "src"), "tools/gogen/testdata-symbols"],
+        objects: ["/MY_NS/DEMO", "ZSYMBOLS"], includeTests: true});
+      writeGo(join(dir, "generated.go"), program);
+      const map = JSON.parse(readFileSync(join(dir, "symbols.json"), "utf8"));
+      const samples = Object.keys(map.symbols).map(name => ({frames: [{name, file: "generated.go", line: 999}], labels: {}, weight: 1, samples: 1}));
+      const result = hitlist({format: "pprof", samples}, {symbols: map});
+      assert.equal(result.metadata.identities, "exact (symbol map)");
+      for (const entry of Object.values(map.symbols)) {
+        const row = result.rows.find(row => row.abap === entry.abap);
+        assert.ok(row, entry.abap);
+        assert.equal(row.class, entry.owner ?? entry.abap.split("=>")[0]);
+      }
+      console.log(`emitted map identities: ${result.metadata.identities}`);
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
   it("uses exact qualified and bare symbols, including closures and owners", () => {
     const profile = frames => ({format:"pprof", samples:frames.map(name => ({frames:[{name,file:"generated.go",line:999}],labels:{},weight:1,samples:1}))});
     const names = Object.keys(symbols.symbols);

@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // OSG's own gateway through the Go backend: every ABAP object of src/, gen/
 // and the libraries of abap_transpile.json compiled (a statement outside the
 // subset raises NOT_COMPILED at its ABAP line when it runs), then the start
@@ -30,7 +31,6 @@ import {readFileSync} from "node:fs";
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
-import {emitGo} from "./emit-go.mjs";
 import {compileOsg, osgDatabase} from "./osg-build.mjs";
 
 const argv = process.argv.slice(2);
@@ -87,7 +87,7 @@ const dir = join(here, "go", "cmd", "gateway");
 mkdirSync(dir, {recursive: true});
 if (!reuse) {
 console.log(summary);
-writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+writeGo(join(dir, "zz_generated.go"), program);
 const db = await osgDatabase(program);
 writeFileSync(join(dir, "zz_db.json"), JSON.stringify(db.statements));
 console.log(db.summary);

@@ -20,6 +20,22 @@ execFileSync("go", ["test", "-tags", "nodatabase,osabap_hello", "./cmd/osabap"],
 
 const run = (args, input) => spawnSync(binary, args, {encoding: "utf8", input});
 
+test("hello symbol map distinguishes converter scaffolding from report events", () => {
+  const {symbols} = JSON.parse(readFileSync(join(here, "go/cmd/osabap/symbols.json"), "utf8"));
+  for (const method of ["ZIF_GG_TRANSACTION_V1__GET_TRANSACTION", "ZIF_GG_REPORT_V1__LOAD_OF_PROGRAM"]) {
+    const helper = symbols[`main.(*ZCL_OSABAP_HELLO).${method}`];
+    assert.ok(helper, method);
+    assert.equal(helper.kind, "generated", method);
+    assert.equal("file" in helper, false, method);
+    assert.equal("line" in helper, false, method);
+  }
+  const event = symbols["main.(*ZCL_OSABAP_HELLO).ZIF_GG_REPORT_V1__START_OF_SELECTION"];
+  assert.equal(event.kind, "event");
+  assert.equal(event.abap, "ZHELLO (START-OF-SELECTION)");
+  assert.equal(event.file, "zhello.prog.abap");
+  assert.equal(event.line, 7);
+});
+
 test("positionals and repeatable select-option flags", () => {
   const result = run(["Alice", "--s-tag", "alpha", "--s-tag", "beta"]);
   assert.equal(result.status, 0, result.stderr);

@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // SMW0 media through the Go host, checked by bytes: every W3MI object of the
 // o4d and zork packs is copied into a media directory (media.mjs), read back
 // by compiled ABAP (testdata-media/zcl_gogen_t_w3miload: WWWDATA_IMPORT, then
@@ -9,7 +10,6 @@ import {execFileSync} from "node:child_process";
 import {mkdirSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {collectMedia, writeMedia} from "./media.mjs";
 
@@ -21,7 +21,7 @@ const program = compileProgram({folders: [join(here, "testdata-media"), `${home}
 if (program.skipped.length || program.partial.length) throw new Error(`not compiled: ${[...program.skipped, ...program.partial].join("; ")}`);
 const dir = join(here, "go", "cmd", "mediacheck");
 mkdirSync(dir, {recursive: true});
-writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+writeGo(join(dir, "zz_generated.go"), program);
 // the originals, not the copies: what is compared is the pack's file
 writeFileSync(join(dir, "zz_cases.json"), JSON.stringify([...objects.map((o) => ({id: o.id, size: o.size, file: o.file, audio: /\.(mp3|m4a|ogg|wav)$/i.test(o.name)})),
   {id: "ZGOGEN_NO_SUCH_OBJECT", size: 10, file: "", audio: false}]));

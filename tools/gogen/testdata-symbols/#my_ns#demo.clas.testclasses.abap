@@ -1,0 +1,19 @@
+CLASS ltcl_local DEFINITION FOR TESTING.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(r) TYPE i.
+  PRIVATE SECTION.
+    CLASS-METHODS class_setup.
+ENDCLASS.
+CLASS ltcl_local IMPLEMENTATION.
+  METHOD run.
+    DO 1000000 TIMES.
+      r = r + 1.
+    ENDDO.
+  ENDMETHOD.
+  METHOD class_setup.
+    DATA n TYPE i.
+    DO 1000000 TIMES.
+      n = n + 1.
+    ENDDO.
+  ENDMETHOD.
+ENDCLASS.

@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // The Go backend spike, end to end:
 //
 //   node tools/gogen/run.mjs [samples-folder]
@@ -15,7 +16,6 @@ import {mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} f
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {readClass} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {compileProgram} from "./frontend.mjs";
 import {copyFileSync} from "node:fs";
@@ -62,9 +62,9 @@ const t0 = performance.now();
 const classes = readClass(samples);
 const ir = JSON.stringify(classes, null, 1);
 writeFileSync(join(out, "ir.json"), ir);
-const goSource = emitGo(classes);
+
 const genPath = join(here, "go", "cmd", "bench", "zz_generated.go");
-writeFileSync(genPath, goSource);
+const goSource = writeGo(genPath, classes);
 execFileSync("gofmt", ["-w", genPath]);
 const tFront = performance.now() - t0;
 const bin = join(out, "bench");

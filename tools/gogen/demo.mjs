@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // The whole ZO4D demo, compiled to Go and to JS from one IR, against the A4H
 // recordings: the handler, the demo director and every effect class of the
 // pack, nothing rewritten.
@@ -19,7 +20,6 @@ import {copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wr
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 
@@ -42,7 +42,7 @@ rmSync(out, {recursive: true, force: true});
 mkdirSync(out, {recursive: true});
 const dir = join(here, "go", "cmd", "demo");
 mkdirSync(dir, {recursive: true});
-writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+writeGo(join(dir, "zz_generated.go"), program);
 
 // the ticks of each recording: frames are consecutive ticks from the first
 const runs = recordings.map((r) => ({scene: r.scene, frames: readFileSync(r.file, "utf8").trim().split("\n").map((l) => JSON.parse(l))}));

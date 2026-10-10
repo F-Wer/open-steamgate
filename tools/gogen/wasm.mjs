@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // A scene of ZO4D in a browser three ways, measured with one instrument:
 // the scene compiled by gogen to Go and built for GOOS=js GOARCH=wasm, the
 // same IR emitted as JS, and the transpiler's JS. Headless Chromium through
@@ -16,7 +17,6 @@ import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {brotliCompressSync, constants, gzipSync} from "node:zlib";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 import {SCENES} from "./scene-defs.mjs";
@@ -65,7 +65,8 @@ for (const scene of scenes) {
   const dir = join(here, "go", "cmd", "scenewasm");
   mkdirSync(dir, {recursive: true});
   // the tag keeps the command out of a native `go build ./...`
-  writeFileSync(join(dir, "zz_generated.go"), `//go:build js && wasm\n\n${emitGo(program)}`);
+  const go = writeGo(join(dir, "zz_generated.go"), program);
+  writeFileSync(join(dir, "zz_generated.go"), `//go:build js && wasm\n\n${go}`);
   writeFileSync(join(dir, "zz_main.go"), wasmMain(sc));
   execFileSync("gofmt", ["-w", dir]);
   const env = {...process.env, GOOS: "js", GOARCH: "wasm"};

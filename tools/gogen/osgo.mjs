@@ -1,3 +1,4 @@
+import {writeGo} from "./symbols.mjs";
 // OSGo: build the Go host of open-steamgate (go/cmd/osgo) out of OSG's own
 // ABAP, compiled as gateway.mjs compiles it (osg-build.mjs), with the ICF
 // shim in front: a browser can use it.
@@ -15,7 +16,6 @@ import {execFileSync} from "node:child_process";
 import {existsSync, mkdirSync, rmSync, writeFileSync} from "node:fs";
 import {join, relative} from "node:path";
 import {columnRegistry, compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {adtSourceHash} from "../osd-adt-gogen-gate.mjs";
 
@@ -115,8 +115,7 @@ if (echo) {
   webapps = webappsOf(home).map((p) => ({path: `/app/${p.name}`, dir: p.dir}));
 }
 
-const go = emitGo(program);
-writeFileSync(join(dir, "zz_generated.go"), go);
+const go = writeGo(join(dir, "zz_generated.go"), program);
 writeFileSync(join(dir, "zz_db.json"), JSON.stringify(statements));
 writeFileSync(join(dir, "zz_store.json"), store);
 // the table registry as JSON, the column registry a dynamic WHERE parser reads

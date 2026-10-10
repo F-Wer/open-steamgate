@@ -647,15 +647,15 @@ function functionGroupIr(ctx0, g) {
   for (const x of fms) {
     const name = upper(x.module.getName());
     const sig = x.sig;
-    const skip = (why) => {
-      program.skipped.push(`${owner}=>${name}: ${why}`);
-      if (!sig.unsupported) cls.stubs.push({...sig, reason: why});
-    };
-    if (sig.unsupported) { skip(sig.unsupported); continue; }
     const file = g.getABAPFiles().find((f) => f.getStructure()?.findAllStructures(Structures.FunctionModule)
       .some((fm) => upper(fm.findFirstExpression(Expressions.Field)?.concatTokens() ?? "") === name));
     const node = file?.getStructure()?.findAllStructures(Structures.FunctionModule)
       .find((fm) => upper(fm.findFirstExpression(Expressions.Field)?.concatTokens() ?? "") === name);
+    const skip = (why) => {
+      program.skipped.push(`${owner}=>${name}: ${why}`);
+      if (!sig.unsupported) cls.stubs.push({...sig, reason: why, ...(node ? {pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}} : {})});
+    };
+    if (sig.unsupported) { skip(sig.unsupported); continue; }
     if (!file || !node) { skip("no source"); continue; }
     try {
       const scope = findScopeNamed(x.top, "function", name);
@@ -1644,7 +1644,7 @@ function classIr(ctx0, obj) {
       // a method with a typed signature still exists as a stub that raises
       // when called, so its callers compile; only an untyped signature
       // cannot be called at all
-      if (typed.has(name)) cls.stubs.push({...typed.get(name), reason: why});
+      if (typed.has(name)) cls.stubs.push({...typed.get(name), reason: why, pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
       else signatures.set(name, {name, unsupported: why});
     };
     if (sig === undefined) { skip("no signature"); continue; }

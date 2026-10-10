@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {writeGo, reportSymbols} from "./symbols.mjs";
 // Build one classic ABAP report as a small native command. The report's
 // selection screen is its command-line contract; the Go host is deliberately
 // separate from OSGo's HTTP/OData/database host.
@@ -6,7 +7,6 @@ import {execFileSync} from "node:child_process";
 import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {basename, dirname, join, resolve} from "node:path";
 import {compileProgram} from "./frontend.mjs";
-import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
@@ -255,7 +255,8 @@ for (const parameter of [...readParams, ...readLists]) {
   const attribute = program.classes.find((cls) => cls.name === className)?.attributes.find((attr) => attr.name === member);
   if (!["c", "string"].includes(attribute?.type?.k)) throw new Error(`osabap: read grant: ${parameter} must be a character PARAMETERS field`);
 }
-writeFileSync(join(dir, "zz_generated.go"), emitGo(program));
+reportSymbols(program, converted, name, basename(report));
+writeGo(join(dir, "zz_generated.go"), program);
 
 // the report's own tables: their CREATE TABLEs, as the transpiler writes them
 // for the Node host, go into the binary for -db; a report without tables is

@@ -20,3 +20,6 @@ go/zork
 go/gateway
 go/httpc
 go/scenewasm
+
+# Build-time Go profiler provenance, emitted beside generated source.
+go/**/symbols.json
