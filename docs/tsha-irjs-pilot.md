@@ -46,10 +46,10 @@ Changes:
   A keyed miss raises CX_SY_ITAB_LINE_NOT_FOUND. CHECK continues the innermost
   loop or returns from the method. GET RUN TIME uses monotonic microseconds
   from the first call, with signed-i wrapping, as Go does.
-- The synchronous CONV_IN_CE / CONV_OUT_CE adapters use the Buffer/TextDecoder
-  primitives in open-abap-core's kernel bodies. IR-JS bytes are Latin-1 strings,
-  rather than the vanilla runtime's hex strings. BOM preservation, fatal/ignored
-  decode errors, supplied output N and Go's explicit input-N refusal are retained.
+- The synchronous CONV_IN_CE / CONV_OUT_CE adapters mirror Go's codepage
+  contract. IR-JS bytes are Latin-1 strings, rather than the vanilla runtime's
+  hex strings. The PR #708 fix round below pins encoding refusals, BOM
+  preservation, invalid-byte replacement, UTF-16 output N and WTF-8 output.
   Generators stage the companion codepage module beside the existing runtime.
 
 Reachability was inspected from START_OF_SELECTION, LOAD_OF_PROGRAM and
@@ -543,3 +543,66 @@ go tool pprof -top -cum -nodecount=30 <scratch-go-binary> <scratch>/go.cpu
 
 The final original assembly/hash replay is recorded in `final-original.log`.
 Nothing was pushed; statements and structures remain unmeasured here.
+
+
+## PR #708 parity fix round (2026-10-10)
+
+The last critic verdict identified five runtime/host mismatches and the stale
+IR-JS growth policy. The fixes preserve Go as the contract:
+
+- Decoding accepts only Go's encoding labels. Odd UTF-16 lengths and unpaired
+  surrogates always refuse with `NOT_COMPILED`, including with ignored errors.
+  Ignored invalid UTF-8 replaces each contiguous invalid-byte run once; the
+  ISO-8859-1 adapter uses Go's Windows-1252 control table, including its undefined
+  entries. BOMs are retained.
+- Output N slices UTF-16 units, including half a supplementary character.
+  UTF-8 output retains lone surrogates as WTF-8; negative N retains the full
+  input as Go's `SubS` does. Out-of-range N raises the same range error.
+- Generic comparisons cover fixed-byte right padding, xstring prefix ordering,
+  uppercase hex against text, signed last-four/last-eight-byte numeric conversion,
+  exact NUMC comparison, and data-reference target equality. Binding address
+  identities survive repeated `GET REFERENCE`, component/row bindings and
+  structure copies containing references.
+- Every unit lifecycle phase distinguishes `NOT_COMPILED` from `FAILED`.
+  Teardown keeps an earlier setup/test error; class teardown replaces the status
+  as Go does. Refusals print separately and return exit 2; failures return exit 1.
+- Assertion dumps normalize initial dates, times and NUMC to their width's zeros.
+  The README records Alice's decision to grow IR-JS for TS-HA layer by layer,
+  matching Go's semantics and refusals.
+
+`tools/gogen/parity.test.mjs` has one regression per runtime/host finding.
+All five failed against `4309d5f96` before the fixes. Four compare values and
+error messages directly with `go/abap`; the lifecycle regression runs the actual
+JS host with an in-memory compiled class, exercising ordinary failures and
+refusals in all five phases and simultaneous test/teardown errors. An additional
+compiled fixture triggers `FIND` with `OCC = 0` in each lifecycle phase and
+compares both real unit hosts' statuses and refusal exit codes. The new
+`REFCMP` semantics fixture checks initial references, repeated addresses,
+different equal-valued targets, reference assignment and references in copied
+structures through both emitters. These are Go-contract regressions, not new
+A4H measurements. The prior Buffer replacement expectation was corrected to
+Go's WTF-8 contract; no failing check was skipped.
+
+Reproduce with the same resource-gated heavy wrapper above:
+
+```sh
+node --test tools/gogen/parity.test.mjs tools/gogen/unit-js.test.mjs tools/gogen/pilot.test.mjs
+node tools/gogen/semantics.mjs
+```
+
+Logs, the pre-fix failures and fresh lexer replay artifacts remain gitignored
+under `.local/irjs-fix/`. The runtime size allowance grows by 29 lines for the
+ported comparison/address/dump rules and their regression coverage; the emitter
+stays within its existing allowance. Nothing is pushed.
+
+Final verification: focused tests **19 pass, 0 fail**; semantics **191 Go +
+191 JS outcomes, all ok, 0 FAIL**, including the existing refusal suites;
+individual lexer cases **44/44 on both hosts**, plus the original combined
+case and its completion teardown. Three fresh-process zabapgit samples per
+host all return `X`, **609,647 tokens**, and the unchanged SHA-256
+`9b118dd1e5ed640bbe07f1e8f4848b8fcaaa6a25c5ab126a12f018c46664df40`.
+Size budget (`--changed origin/main`) and the explicit changed-file leak scan
+exit 0; the same two untouched inherited size breaches remain. All heavy
+commands used the requested cache, RAM scratch, range 50-59 and `nice -n10`.
+The post-slot resource gates recorded IO `some avg10` 0.00-0.18, available
+memory above 81 GB and load below 8.1. No unrelated process was signalled.

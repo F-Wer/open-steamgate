@@ -67,9 +67,11 @@ test('keyed table expressions read and write rows, and a miss raises CX_SY_ITAB_
   assert.equal((await load(program)).Z_PILOT.RUN({sy: {}}), '9');
 });
 
-test('synchronous codepages use vanilla Buffer/TextDecoder primitives and the Go N contract', () => {
-  for (const encoding of ['utf8', 'utf16le']) for (const text of ['', 'ä€🙂', '\uFEFFab', '\ud800'])
+test('synchronous codepages preserve the Go byte and N contracts', () => {
+  for (const encoding of ['utf8', 'utf16le']) for (const text of ['', 'ä€🙂', '\uFEFFab'])
     assert.equal(encodeText(encoding, text), Buffer.from(text, encoding).toString('latin1'));
+  assert.equal(encodeText('utf8', '\ud800'), '\xED\xA0\x80');
+  assert.equal(encodeText('utf16le', '\ud800'), '\x00\xD8');
   assert.equal(decodeText('utf8', false, '\xEF\xBB\xBFa'), '\uFEFFa');
   assert.equal(decodeText('iso-8859-1', false, '\x80'), '€');
   assert.throws(() => decodeText('utf8', false, '\xFF'), /CX_SY_CONVERSION_CODEPAGE/);

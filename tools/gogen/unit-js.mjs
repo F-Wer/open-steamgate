@@ -35,6 +35,7 @@ for (let round = 0; round < 12; round++) {
 writeFileSync(join(out, 'program.mjs'), emitJs(program, pathToFileURL(join(home, 'tools/gogen/js/abap.mjs')).href));
 writeFileSync(join(out, 'diagnostics.json'), JSON.stringify({partial: program.partial, skipped: program.skipped, broken: program.broken}, null, 2));
 const moduleUrl = pathToFileURL(join(out, 'program.mjs')).href;
+const status = e => e.cls === 'NOT_COMPILED' || failure(e).includes('NOT_COMPILED in ') ? 'NOT_COMPILED' : 'FAILED';
 const failure = e => e.cls === 'KERNEL_CX_ASSERT' ? e.obj.msg : e.message;
 const jsName = n => n.toUpperCase().replace(/=>|~|-/g, '__').replace(/[^A-Z0-9_]/g, '_');
 const rows = [];
@@ -50,34 +51,34 @@ for (const owner of owners) {
       const C = mod[jsName(name)];
       const groupStart = rows.length;
       let classFailure;
-      try { if (methods.has('CLASS_SETUP')) C.CLASS_SETUP(s); } catch (e) { classFailure = failure(e); }
+      try { if (methods.has('CLASS_SETUP')) C.CLASS_SETUP(s); } catch (e) { classFailure = e; }
       let stopClass = false;
       for (const method of def.methods.filter(m => m.isForTesting)) {
         const row = {class: owner, testclass: def.name.toUpperCase(), method: method.name.toUpperCase(), status: 'SUCCESS', message: ''};
         if (stopClass) { row.status = 'SKIPPED'; row.message = 'stopped after teardown failure'; }
-        else if (classFailure) { row.status = 'FAILED'; row.message = `class_setup: ${classFailure}`; }
+        else if (classFailure) { row.status = status(classFailure); row.message = `class_setup: ${failure(classFailure)}`; }
         else if (!methods.has(row.method)) { row.status = 'NOT_COMPILED'; row.message = 'test method missing'; }
         else {
           let instance;
           try {
-            if (classFailure) throw new Error(`class_setup: ${classFailure}`);
             instance = C.$new(s);
             if (methods.has('SETUP')) instance.SETUP(s);
             instance[jsName(row.method)](s);
-          } catch (e) { row.status = 'FAILED'; row.message = failure(e); }
+          } catch (e) { row.status = status(e); row.message = failure(e); }
           finally {
             try { if (instance && methods.has('TEARDOWN')) instance.TEARDOWN(s); }
-            catch (e) { row.status = 'FAILED'; if (!row.message) row.message = `teardown: ${failure(e)}`; if (e.cls === 'KERNEL_CX_ASSERT' && !e.assertionQuitNo) stopClass = true; }
+            catch (e) { if (!row.message) { row.status = status(e); row.message = `teardown: ${failure(e)}`; } if (e.cls === 'KERNEL_CX_ASSERT' && !e.assertionQuitNo) stopClass = true; }
           }
         }
         rows.push(row);
 
       }
       try { if (methods.has('CLASS_TEARDOWN')) C.CLASS_TEARDOWN(s); }
-      catch (e) { for (const row of rows.slice(groupStart)) { row.status = 'FAILED'; row.message += ` class_teardown: ${failure(e)}`; } }
+      catch (e) { for (const row of rows.slice(groupStart)) { row.status = status(e); row.message += ` class_teardown: ${failure(e)}`; } }
     }
   }
 }
-for (const row of rows) console.log(`${row.status === 'SUCCESS' ? 'PASS' : 'FAIL'} ${row.class}/${row.testclass}/${row.method} ${row.message}`);
+for (const row of rows) console.log(`${row.status === 'SUCCESS' ? 'PASS' : row.status === 'NOT_COMPILED' ? 'NOT_COMPILED' : 'FAIL'} ${row.class}/${row.testclass}/${row.method} ${row.message}`);
 writeFileSync(join(out, 'results.json'), JSON.stringify(rows, null, 2));
-if (!rows.length || rows.some(r => r.status !== 'SUCCESS')) process.exitCode = 1;
+if (!rows.length || rows.some(r => r.status === 'FAILED')) process.exitCode = 1;
+else if (rows.some(r => r.status === 'NOT_COMPILED')) process.exitCode = 2;
