@@ -2,6 +2,9 @@ import * as abap from "./js/abap.mjs";
 
 // Refuse unknown conversions; only literal, exception-free values leave entry.
 function fold(e) {
+  // Character converters are only proven backend-equivalent for ASCII.
+  // Keep Unicode literals (including structure fields) at their entry site.
+  if (["chars", "str"].includes(e.e) && /[^\x00-\x7f]/.test(e.value)) return undefined;
   if (["int", "float", "chars", "str", "xbytes"].includes(e.e)) return e;
   const x = e.x && fold(e.x);
   if (!x) return undefined;

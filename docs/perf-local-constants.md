@@ -5,7 +5,7 @@ can prove their VALUE conversion exception-free at build time. The proof
 uses the existing JS runtime converters (`ParseF`, `ParseI`, character,
 date/time and numeric-text fitting), not a separate numeric parser. Successful
 conversions fold to exact Go/JS literal IR. Unknown conversions, negative zero,
-and conversions that raise remain on the ordinary per-entry path, in declaration
+non-ASCII character literals, and conversions that raise remain on the ordinary per-entry path, in declaration
 order alongside `DATA ... VALUE`. Literal byte and already-folded packed values
 also use program storage; int8 conversions currently remain per-entry.
 
