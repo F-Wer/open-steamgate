@@ -81,7 +81,7 @@ const rowValue = (table, item) => stable(table) ? `(*(${item}))` : item;
 const rowAddress = (table, item) => stable(table) ? item : `&${item}`;
 const rowStored = (table, value) => stable(table) ? `abap.Ptr(${value})` : value;
 const rowRef = (table, tb, item) => stable(table) ? `abap.RowRef(&${tb}, ${item}, ${desc(table.row)})` : `abap.Data{P: &${item}, T: ${desc(table.row)}}`;
-const boundRow = (table, tb, index) => !stable(table) && table.row.k !== "struct" ? `abap.BindRow(&${tb}, int(${index}))` : rowAddress(table, `${tb}[${index}]`);
+const boundRow = (table, tb, index) => table.row.k === "data" ? rowValue(table, `${tb}[${index}]`) : !stable(table) && table.row.k !== "struct" ? `abap.BindRow(&${tb}, int(${index}))` : rowAddress(table, `${tb}[${index}]`);
 
 // a p field holds its decimals: initial is 0, 0.0, 0.00 ... (go/abap packed.go)
 const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
@@ -219,7 +219,7 @@ function descFuncs() {
       out.push(`var ${d.name} = &abap.Type{}`);
       if (t.k === "table") {
         const g = goType(t);
-        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return ${rowAddress(t, `(*p.(*${g}))[i]`)} }, ${t.hashed || t.sorted ? "" : `Append: func(p any) any { *p.(*${g}) = append(*p.(*${g}), ${rowStored(t, zero(t.row))}); return ${rowAddress(t, `(*p.(*${g}))[len(*p.(*${g}))-1]`)} }, Delete: func(p any, i int) { *p.(*${g}) = append((*p.(*${g}))[:i], (*p.(*${g}))[i+1:]...) }, `}${copyZero(t)}}`);
+        inits.push(`\t*${d.name} = abap.Type{Kind: 'h', Row: ${desc(t.row)}, Lines: func(p any) int { return len(*p.(*${g})) }, At: func(p any, i int) any { return ${rowAddress(t, `(*p.(*${g}))[i]`)} }, ${t.hashed || t.sorted ? "" : `Append: func(p any) any { *p.(*${g}) = append(*p.(*${g}), ${rowStored(t, zero(t.row))}); return ${rowAddress(t, `(*p.(*${g}))[len(*p.(*${g}))-1]`)} }, `}${t.hashed ? "" : `Delete: func(p any, i int) { *p.(*${g}) = append((*p.(*${g}))[:i], (*p.(*${g}))[i+1:]...); clear((*p.(*${g}))[len(*p.(*${g})):len(*p.(*${g}))+1]) }, `}${copyZero(t)}}`);
       } else {
         const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
         // a structure with a string, a table or a reference in it is deep: 'v' (A4H)
@@ -1765,7 +1765,7 @@ ${t}	}`));
       return [`${t}if !(${cond(st.cond, ctx)}) {`, `${t}\tpanic(abap.ArithmeticError{Class: "ASSERTION_FAILED", Op: ${JSON.stringify(st.text)}})`, `${t}}`];
     case "assign_comp":
       return [`${t}if c, ok := abap.Component(${expr(st.from, ctx)}, ${expr(st.name, ctx)}); ok {`, `${t}\t${ident(st.fs.name)} = c`, `${t}\ts.Sy.Subrc = 0`,
-        `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}} else {`, ...(st.name.type.k === "i" ? [`${t}\t${ident(st.fs.name)} = abap.Data{}`] : []), `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref":
       return [`${t}if r := ${expr(st.ref, ctx)}; r.P != nil {`, `${t}\t${ident(st.fs.name)} = r`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     case "assign_deref_typed":
@@ -1830,8 +1830,12 @@ ${t}	}`));
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
     }
     // DELETE / READ TABLE ... INDEX on a generic table (ultra/sadl, the SADL DPC's paging)
-    case "delete_index_data":
-      return [`${t}if abap.DeleteIndex(${expr(st.table, ctx)}, ${expr(st.index, ctx)}) {`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    case "delete_index_data": {
+      const n = `idx${ctx.loop++}`;
+      return [`${t}if ${n} := ${expr(st.index, ctx)}; abap.DeleteIndex(${expr(st.table, ctx)}, ${n}) {`,
+        ...(st.tokens ?? []).map((token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
+        `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+    }
     case "read_index_data": {
       const n = `idx${ctx.loop++}`;
       return [`${t}if ${n}, tb${n} := ${expr(st.index, ctx)}, ${expr(st.table, ctx)}; ${n} >= 1 && int(${n}) <= abap.Lines(tb${n}) {`,
@@ -1840,6 +1844,7 @@ ${t}	}`));
     case "loop_data": return withBuilders(st.body, ctx, t, () => {
       const n = ctx.loop++;
       const tb = `tab${n}`;
+      st.token.idxVar = `i${n}`;
       return [`${t}{`, `${t}\t${tb} := ${expr(st.table, ctx)}`, `${t}\tsave${n} := s.Sy.Tabix`, `${t}\ts.Sy.Subrc = 4`,
         `${t}\tfor i${n} := 0; i${n} < abap.Lines(${tb}); i${n}++ {`,
         `${t}\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\ts.Sy.Subrc = 0`,
@@ -2123,7 +2128,9 @@ ${t}	}`));
       const n = `idx${ctx.loop++}`;
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
-        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\tabap.BumpTable(&${tb})`, `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
+        `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\tabap.BumpTable(&${tb})`,
+        ...(st.tokens ?? []).map((token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
+        `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "delete_range": {
       const n = ctx.loop++;

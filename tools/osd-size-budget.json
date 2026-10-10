@@ -151,8 +151,8 @@
       "reason": "Register the value-free -no-default-reads host flag without reserving a report option."
     },
     "go:runtimeclock": {
-      "lines": 25,
-      "reason": "GET RUN TIME FIELD monotonic clock in its own package; no abap growth."
+      "lines": 29,
+      "reason": "GET RUN TIME FIELD monotonic clock in its own package; no abap growth. Record the existing 29-line implementation from #473; no runtimeclock code changed in the generic loop fix."
     },
     "go:sandbox": {
       "lines": 829,
@@ -215,12 +215,12 @@
       "reason": "#36: generated host-class hook dispatch and ABAP Raise/error bridging on top of the merged emitter baseline. #38/#39 add lock-call emission and trim the arithmetic string result only for arithmetic sources. Rebased on #675 (step-first host hooks). #43: emit update-task marking and explicit-statement LUW bindings. ADT 10-08: DELETE TABLE itab FROM wa on a keyed table (ADT request XML namespace bindings). abapiti 017: c2n into int8. abapiti Registry run 10-09: APPEND LINES of plain rows in one append, DELETE clears the vacated tail. abapiti 042: READ and DELETE TABLE by a hashed secondary key. abapiti 044: move then CLEAR"
     },
     "tools/gogen/emit-js.mjs": {
-      "lines": 1224,
-      "reason": "baseline 2026-10-01 abapiti 042: READ and DELETE TABLE by a hashed secondary key."
+      "lines": 1231,
+      "reason": "baseline 2026-10-01 abapiti 042: READ and DELETE TABLE by a hashed secondary key. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor."
     },
     "tools/gogen/frontend.mjs": {
-      "lines": 7067,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds. abapiti 042: READ and DELETE TABLE by a hashed secondary key. abapiti 043: WHERE compares in int8."
+      "lines": 7080,
+      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds. abapiti 042: READ and DELETE TABLE by a hashed secondary key. abapiti 043: WHERE compares in int8. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 278,
@@ -565,6 +565,10 @@
     "go:yieldsleep": {
       "lines": 18,
       "reason": "#39 dispatches yield sleep through a narrow Session interface so the package does not import go/abap."
+    },
+    "go:osdbind": {
+      "lines": 130,
+      "reason": "Record the existing loopback binding package from #453, including Selected, ListenAll and startup hints; no osdbind code changed in the generic loop fix."
     }
   },
   "readmeMissing": [

@@ -137,16 +137,17 @@ func itoa(n int) string {
 	return string(b)
 }
 
-// Component is ASSIGN COMPONENT name OF STRUCTURE d: false (sy-subrc 4) when
-// d is not a structure or has no component of that name.
-func Component(d Data, name string) (Data, bool) {
+// Component selects a name or 1-based int32 position; missing components return false.
+func Component(d Data, name any) (Data, bool) {
 	d.Check()
 	if d.P == nil || d.T == nil || (d.T.Kind != 'u' && d.T.Kind != 'v') {
 		return Data{}, false
 	}
-	n := strings.ToUpper(strings.TrimRight(name, " "))
-	for _, c := range d.T.Comps {
-		if c.Name == n {
+	index, positional := name.(int32)
+	key, _ := name.(string)
+	key = strings.ToUpper(strings.TrimRight(key, " "))
+	for i, c := range d.T.Comps {
+		if (positional && index == int32(i+1)) || (!positional && c.Name == key) {
 			return Data{P: c.Get(d.P), T: c.T, Valid: d.Valid}, true
 		}
 	}
@@ -209,6 +210,8 @@ func DataString(d Data) string {
 	switch d.T.Kind {
 	case 'g', 'C', 'D', 'T', 'N':
 		return *d.P.(*string)
+	case 'X', 'y':
+		return XToHex(*d.P.(*string))
 	case 'I':
 		return IToString(*d.P.(*int32))
 	case 'P':
@@ -216,17 +219,14 @@ func DataString(d Data) string {
 	}
 	panic(NotCompiled("move", "a generic value of type kind "+string(d.T.Kind)+" into a string"))
 }
-
 // DataI is a generic value moved into an i.
 func DataI(d Data) int32 {
 	d.Check()
-	switch d.T.Kind {
-	case 'I':
+	if d.T.Kind == 'I' {
 		return *d.P.(*int32)
 	}
 	panic(NotCompiled("move", "a generic value of type kind "+string(d.T.Kind)+" into an i"))
 }
-
 // FmtData is a generic value in a string template.
 func FmtData(d Data) string {
 	d.Check()

@@ -792,14 +792,14 @@ export function cell(v, t, table) {
 
 const notAssigned = (op) => new AbapError("GETWA_NOT_ASSIGNED", op);
 
-// ASSIGN COMPONENT name OF STRUCTURE d: null (sy-subrc 4) when d is not a
-// structure or has no component of that name; the name in any case (A4H).
+// ASSIGN COMPONENT name or 1-based position: null (sy-subrc 4) for a
+// non-structure or missing component; names are case-insensitive (A4H).
 // The component is reached through d each time, so it stays the field of
 // whatever structure d's slot holds.
 export function Component(d, name) {
   if (d === null || (d.t.kind !== "u" && d.t.kind !== "v")) return null;
   const n = String(name).replace(/ +$/, "").toUpperCase();
-  const c = d.t.comps.find((x) => x.name === n);
+  const c = typeof name === "number" ? (name > 0 ? d.t.comps[name - 1] : undefined) : d.t.comps.find((x) => x.name === n);
   if (c === undefined) return null;
   return {get: () => d.get()[c.key], set: (v) => { d.get()[c.key] = v; }, t: c.t};
 }
@@ -890,7 +890,7 @@ export function DataString(d) {
   if (d === null) throw notAssigned("move");
   switch (d.t.kind) {
     case "g": case "C": case "D": case "T": case "N": return d.get();
-    case "I": return IToString(d.get());
+    case "X": case "y": return XToHex(d.get()); case "I": return IToString(d.get());
     case "P": return PToString(d.get(), d.t.dec);
     default: throw new AbapError("NOT_COMPILED", `move: a generic value of type kind ${d.t.kind} into a string`);
   }

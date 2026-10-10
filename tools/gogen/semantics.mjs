@@ -15,6 +15,11 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // Unmeasured: documented TABLES aliasing, positional components, nested rows,
+  // and DELETE INDEX at / before / after the loop cursor (or a missing index).
+  ZCL_GOGEN_T_GENLOOP: "std:0/before/1/written/nested sorted:0/before/1/written/nested hashed:0/before/1/written/nested sorted-delete:abc/0 fm1:abc/0 any1:abc/0 typed1:abc/0 fm2:abc/1 any2:abc/1 typed2:abc/1 fm3:abc/3 any3:abc/3 typed3:abc/3 fm4:ac/1 any4:ac/1 typed4:ac/1 fm5:abc/0 any5:abc/0 typed5:abc/0",
+  // unmeasured; ABAP documentation: generic binary rows, writable components, and failed assignment.
+  ZCL_GOGEN_T_BINARY: "x:0102A0B0 miss:4/free miss:4/free/CCDD/CCDD s:1122 second:0/Q miss:4/free/CCDD/Q any:CCDDCCDD miss:4/free miss:4/free omitted:[]",
   // Unmeasured regression: nested classic mappings; OTHERS cannot take a class exception.
   ZCL_GOGEN_T_CLASSICNEST: "0/3/7/9/class",
   // Unmeasured regression: recursive MESSAGE masking and nested classic mappings.
@@ -129,7 +134,7 @@ const EXPECT = {
   // CHANGING fields keep their values and the TABLES rows appended stay;
   // an optional importing left out is initial, OTHERS takes an exception
   // not named
-  ZCL_GOGEN_T_FM: "ok:0/6/11/2/in:3/0/10/1 boom:4/5/10/3/keep opt:0/11/4 oth:7/11/5,X0,F3,F4,F0,F0",
+  ZCL_GOGEN_T_FM: "ok:0/6/11/2/in:3/0/10/1 boom:4/5/10/3/keep opt:0/11/4 oth:7/11/5,X0,F3,F4,F0,F0 omitted:in:0/0/11/0 omitted:in:0/0/12/0",
   ZCL_GOGEN_T_RTTIOL: {Go: "C/80/0/10 C/2/0/80 C/10/0/5 P/8/0/19 N/4/0/1 ",
     JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   // ultra/itab, A4H 2026-09-24 ($ZOSG_TMP_0400, ABAP Unit probes of the same

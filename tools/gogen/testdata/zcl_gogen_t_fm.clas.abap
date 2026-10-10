@@ -72,5 +72,9 @@ CLASS zcl_gogen_t_fm IMPLEMENTATION.
     LOOP AT lt INTO ls.
       rv = |{ rv },{ ls-id }{ ls-val }|.
     ENDLOOP.
+    DO 2 TIMES.
+      CALL FUNCTION 'ZGOGEN_T_FM' IMPORTING ev_s = lv_s CHANGING cv_n = lv_c.
+      rv = |{ rv } omitted:{ lv_s }|.
+    ENDDO.
   ENDMETHOD.
 ENDCLASS.

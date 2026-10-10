@@ -3974,3 +3974,12 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Regression: open-abap-core `cl_abap_zip.clas.testclasses.abap` (from #1282), carried by the pin.
 - Upstream: https://github.com/open-abap/open-abap-core/pull/1282 (merged); JS overflow: https://github.com/abaplint/transpiler/pull/1955
 - Upstream version containing a fix: open-abap-core main after 2026-10-02.
+
+### ANOMALY-2026-10-10-gogen-binary-rows - generic TABLES rows and positional ASSIGN COMPONENT
+
+- Status: fixed locally on `fix/gogen-generic-loop-assign`.
+- Discovery: newer open-abap-core `SCMS_BINARY_TO_XSTRING` loops over a generic `BINARY_TAB`, then selects the first component of structured rows.
+- Actual local behaviour: Go assigned `*abap.RowBinding[abap.Data]` to `abap.Data`; positional component selection was refused as `ASSIGN COMPONENT by a i`.
+- Expected behaviour: unmeasured; ABAP documentation. Generic field symbols bind to the original row storage; positional components are 1-based, and an out-of-range selection returns sy-subrc 4 with an unassigned target. Non-structures follow the existing by-name failure path.
+- Related seam: generic binary values moved into a string now use the existing hexadecimal conversion, as SCMS does when joining its parts.
+- Regression: `tools/gogen/testdata/zcl_gogen_t_binary.clas.abap` and `ZGOGEN_T_BINARY`: elementary binary rows, structured binary rows, writes through both bindings, positional variable selection, and failed assignment after a successful binding, on Go and IR-JS.

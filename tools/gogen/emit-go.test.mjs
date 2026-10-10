@@ -7,7 +7,7 @@ import {dirname, join, basename} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
-import {CmpNumericData, cell, TP, TI, TF} from "./js/abap.mjs";
+import {CmpNumericData, Component, DataString, MoveData, cell, TP, TI, TF, TX} from "./js/abap.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -823,4 +823,31 @@ test("a binding made in the constructor keeps the clone (044 critic round 5)", (
   cls.constructor.fieldSymbols = [...(cls.constructor.fieldSymbols ?? []), {name: "<ROW>", type: pair.value.type.row}];
   cls.constructor.body = [{s: "read_index", table: pair.value, index: {e: "int", value: 1, type: {k: "i"}}, fs: "<ROW>"}, ...(cls.constructor.body ?? [])];
   assert.match(emitGo(program), /result.items = clone_\d+\(me.items\)/);
+});
+
+
+test("generic TABLES retain the caller descriptor in both emitters", async () => {
+  const program = compileProgram({folders: [join(here, "testdata")], objects: ["ZGOGEN_T_FG", "ZCL_GOGEN_T_BINARY"]});
+  const go = emitGo(program);
+  assert.match(go, /ZGOGEN_T_BINARY\(s \*abap.Session, ev_text \*string, binary_tab \*abap.Data\)/);
+  assert.match(go, /_ls_row_ = abap.Row\(tab\d+, i\d+\)/);
+  assert.doesNotMatch(go, /BindRow\(&\(\*binary_tab\)/);
+  assert.doesNotMatch(go, /ASSIGN COMPONENT by a i/);
+  const {emitJs} = await import("./emit-js.mjs");
+  const js = emitJs(program);
+  assert.match(js, /_ls_row_ = abap.Row\(tab\d+, i\d+\)/);
+});
+
+test("JS positional components retain writable storage and reject invalid positions", () => {
+  const row = {first: "\x01\x02", second: "Q"};
+  const t = {kind: "u", comps: [{name: "FIRST", key: "first", t: TX(2)}, {name: "SECOND", key: "second", t: {kind: "C", len: 1}}]};
+  const d = cell(row, t);
+  const c = Component(d, 1);
+  assert.equal(DataString(c), "0102");
+  MoveData(c, cell("\xCC\xDD", TX(2)));
+  assert.equal(row.first, "\xCC\xDD");
+  assert.equal(DataString(Component(d, 2)), "Q");
+  for (const i of [-1, 0, 3]) assert.equal(Component(d, i), null);
+  assert.equal(Component(cell("x", {kind: "C", len: 1}), 1), null);
+  assert.equal(Component(null, 1), null);
 });
