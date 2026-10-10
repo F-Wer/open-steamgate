@@ -75,7 +75,7 @@
       "reason": "baseline 2026-10-01; 95 as measured on main 2026-10-08 (grown there before this record); the APC step adapter now passes the channel session"
     },
     "go:cmd/osabap": {
-      "lines": 1136,
+      "lines": 1139,
       "reason": "Compute explicit user read grants and pin sandbox handles before constructing any ABAP report; expose granting parameters and the opt-out in help. Native profiling: startup-only label selection in go/profiling."
     },
     "go:cmd/osgo": {
