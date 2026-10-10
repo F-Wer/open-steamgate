@@ -51,8 +51,10 @@ RUN after lexer count, dump and hash validation. The lexer time excludes
 assembly, dumping, hashing and compilation. Each timing is a fresh Go
 process; the result is the median of three. Before uses the unmodified
 frontend/emitter from `7720f6e`; eager hoist uses `be3d8da44`; lazy hoist
-uses `7d0e15f03`; safe folding uses round 3. All use the same runtime and
-harness. The final frontend emits byte-identical Go source to the measured build.
+uses `7d0e15f03`; safe folding uses rounds 3 and 4. All use the same Go
+runtime and harness.
+Round 4 keeps non-ASCII character conversions at entry and fixes JS CFit to
+count UTF-16 units, preserving a lone half when cutting a surrogate pair.
 
 | Go | Three lexer samples (µs) | Median (s) |
 |---|---|---|
@@ -60,14 +62,15 @@ harness. The final frontend emits byte-identical Go source to the measured build
 | Eager hoist | 1738195, 1738357, 1869464 | 1.738357 |
 | Lazy hoist (round 2) | 1851495, 1909630, 1759769 | 1.851495 |
 | Safe folding (round 3) | 1843536, 1807025, 1826166 | 1.826166 |
+| ASCII folding (round 4) | 1754904, 1817066, 1873160 | 1.817066 |
 
-Safe folding retains a **22.3%** lexer improvement over the original median.
+ASCII folding retains a **22.7%** lexer improvement over the original median.
 The generated ADD method reads folded float bounds without a per-entry
 conversion or initialization guard.
 The generated binaries use Go 1.26.0. These are lexer-only measurements;
 no end-to-end improvement was measured.
 
-All twelve retained runs return `X`, 609,647 tokens and SHA-256
+All fifteen retained runs return `X`, 609,647 tokens and SHA-256
 `9b118dd1e5ed640bbe07f1e8f4848b8fcaaa6a25c5ab126a12f018c46664df40`.
 All 953 input files still match lexre's manifest. Runs use
 `GOFLAGS=-buildvcs=false`, the shared Go cache, RAM scratch, `nice -n10` and
@@ -77,17 +80,23 @@ limits attribution of small timing differences.
 
 ## Validation
 
-- Full `semantics.mjs`: 388 Go/JS checks, 0 FAIL, including the entry/retry and byte
+- Full `semantics.mjs`: 406 checks, 0 FAIL, including the entry/retry and byte
   regressions, initializer ordering and function-module constants.
-- Emitter and frontend-cache tests: 43 passed, 0 failed. They cover safe
+- Emitter, frontend-cache, folding and CFit parity tests: 50 passed, 0 failed.
+  They cover safe
   loading, per-entry retry, literal folding, local classes, interface-method
   names, collision refusal, read-only targets and helper cache invalidation.
   Generated Go passes a 32-concurrent-first-calls race test outside WorkProcess.
+  Unicode scalar/structure c(2)/c(3) constants match ordinary DATA and the
+  per-entry Go baseline (`😀/😀z/😀/😀z`). Direct Go/JS CFit parity includes
+  lengths 1/2/3, both lone surrogate halves, blanks and long flat strings.
 - `go test -race ./abap ./intarith ./packedint`, changed size budget and staged
-  leak scan all exit 0.
+  leak scan all exit 0. `go test ./...` additionally attempted the command
+  packages: seven require generated artifacts absent in this clone and fail
+  setup/build; runtime package tests pass.
 
 Scratch scripts and logs are retained in `.local/constants-once/`. The new
-lexer build and three samples are in RAM scratch `constants-round3`; round 2
-remains in `constants-fix`, and original
+lexer build and three samples are in RAM scratch `constants-round4`; round 3
+remains in `constants-round3`, round 2 in `constants-fix`, and original
 before/after runs remain in `constants-before` and `constants-after`.
 No benchmark input or harness source is committed.
