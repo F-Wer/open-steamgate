@@ -4,7 +4,7 @@ import {spawnSync} from 'node:child_process';
 import {mkdtempSync,readFileSync,writeFileSync,mkdirSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {cell,TI,TF,TP,TC,TString,CmpData,UnitDumpToString,EncodeBase64,DecodeBase64,SubS,Strlen,ParseI,ParseF,CFit} from './js/abap.mjs';
+import {cell,TI,TF,TP,TC,TString,CmpData,UnitDumpToString,EncodeBase64,DecodeBase64,SubS,Strlen,ParseI,ParseF,CFit,FindStmt,FindResults,ReplaceFn,bindRow,bumpTable,Row} from './js/abap.mjs';
 
 test('numeric and flat-string fast paths preserve boundaries and fallbacks', () => {
   assert.equal(ParseI('2147483647'),2147483647);
@@ -93,4 +93,46 @@ ENDCLASS.`);
     assert.deepEqual(rows.map(r=>r.status),['SUCCESS','FAILED']);
     assert.equal(rows[1].message,"Expected 'number: 2, text: ', got 'number: 1, text: '");
   } finally {rmSync(dir,{recursive:true,force:true});}
+});
+
+test('POSIX regex syntax guards ignore escaped literals and bracket contents', () => {
+  const find = (text, pattern) => FindStmt(text, pattern, true, false, 0);
+  assert.deepEqual(find('*', String.raw`^\*?$`), [true, 0, 1, []]);
+  assert.deepEqual(find('?', String.raw`^[*+?]*$`), [true, 0, 1, []]);
+  assert.deepEqual(find('#', String.raw`^[\#]$`), [true, 0, 1, []]);
+  assert.deepEqual(find('\\#', String.raw`^\\#$`), [true, 0, 2, []]);
+  assert.equal(find('?', String.raw`[^/(?]*`)[0], true);
+  assert.deepEqual(find('a', '(?:a)'), [true, 0, 1, []]);
+  assert.deepEqual(FindResults('*', String.raw`\*?`, 'R', false, false), [[0, 1]]);
+  assert.equal(ReplaceFn('*', String.raw`\*?`, 'x', true, 1), 'x');
+  for (const pattern of ['a*?', 'a+?', 'a??', String.raw`[\]]+?`])
+    assert.throws(() => find('a', pattern), /CX_SY_INVALID_REGEX/);
+  for (const pattern of ['(?=a)', '(?!a)', '(?i:a)'])
+    assert.throws(() => find('a', pattern), /NOT_COMPILED/);
+  assert.throws(() => find('a\rb', '^b'), /NOT_COMPILED/);
+  assert.deepEqual(find('a\nb', '^b'), [true, 2, 1, []]);
+});
+
+test('lazy table epochs invalidate existing bindings after mutation or replacement', () => {
+  let table = [1, 2];
+  for (let i = 0; i < 10; i++) bumpTable(table); // no binding yet
+  const first = bindRow(() => table, 0);
+  assert.equal(first.get(), 1);
+  first.set(7);
+  assert.equal(first.get(), 7); // replacing an elementary value keeps its slot
+  table.push(3); bumpTable(table);
+  assert.throws(() => first.get(), /GETWA_NOT_ASSIGNED/);
+  assert.throws(() => first.set(9), /GETWA_NOT_ASSIGNED/);
+  const second = bindRow(() => table, 0);
+  assert.equal(second.get(), 7);
+  table = table.slice();
+  assert.throws(() => second.get(), /GETWA_NOT_ASSIGNED/);
+  const third = bindRow(() => table, 0);
+  assert.equal(third.get(), 7);
+  const generic = Row({get: () => table, t: {row: TI}}, 1);
+  assert.equal(generic.get(), 2);
+  table.splice(0, 1); bumpTable(table);
+  assert.throws(() => third.get(), /GETWA_NOT_ASSIGNED/);
+  assert.throws(() => generic.get(), /GETWA_NOT_ASSIGNED/);
+  assert.equal(bindRow(() => table, 0).get(), 2);
 });
