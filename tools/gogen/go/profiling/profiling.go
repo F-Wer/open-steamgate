@@ -85,7 +85,6 @@ func HTTP(enabled bool, next http.Handler) http.Handler {
 // The ABAP router is downstream of this host wrapper and does not expose
 // its matched template here. Mirror its session-id position explicitly;
 // other paths use conservative, syntactic identifier recognition.
-var keyPredicate = regexp.MustCompile(`\([^)]*\)`)
 var idSegment = regexp.MustCompile(`^(?:[0-9]+|[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|'.*'|".*")$`)
 
 func labelPath(r *http.Request) string {
@@ -97,7 +96,7 @@ func labelPath(r *http.Request) string {
 			path = path[i+1:]
 		}
 	}
-	parts := strings.Split(path, "/")
+	parts := strings.Split(withoutPredicates(path), "/")
 	for i, part := range parts {
 		decoded, err := url.PathUnescape(part)
 		if err != nil {
@@ -107,16 +106,44 @@ func labelPath(r *http.Request) string {
 			parts[i] = "{id}"
 		} else if idSegment.MatchString(decoded) {
 			parts[i] = "{id}"
-		} else if strings.Contains(decoded, "(") {
-			// Drop malformed/unclosed predicates too, rather than exposing a key.
-			cleaned := keyPredicate.ReplaceAllString(decoded, "{key}")
-			if at := strings.IndexByte(cleaned, '('); at >= 0 {
-				cleaned = cleaned[:at] + "{key}"
-			}
-			parts[i] = strings.ReplaceAll(url.PathEscape(cleaned), "%7Bkey%7D", "{key}")
 		}
 	}
 	return strings.Join(parts, "/")
+}
+
+// Scan escaped bytes without rewriting static path spelling. Quotes protect
+// parentheses and slashes inside OData keys; an unclosed predicate drops its
+// remaining input rather than exposing a partial key.
+func withoutPredicates(path string) string {
+	var out strings.Builder
+	depth := 0
+	quoted := false
+	for i := 0; i < len(path); {
+		ch, width := path[i], 1
+		if ch == '%' && i+2 < len(path) {
+			if n, err := strconv.ParseUint(path[i+1:i+3], 16, 8); err == nil {
+				ch, width = byte(n), 3
+			}
+		}
+		if depth == 0 {
+			if ch == '(' {
+				out.WriteString("{key}")
+				depth = 1
+			} else {
+				out.WriteString(path[i : i+width])
+			}
+		} else if ch == '\'' {
+			quoted = !quoted
+		} else if !quoted {
+			if ch == '(' {
+				depth++
+			} else if ch == ')' {
+				depth--
+			}
+		}
+		i += width
+	}
+	return out.String()
 }
 
 // Report selects the execution function once, outside report/job execution.
