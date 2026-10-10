@@ -1,5 +1,6 @@
 import {typeName, funcName} from "./symbols.mjs";
 export {typeName, funcName} from "./symbols.mjs";
+import {localConstant} from "./emit-local-constants.mjs";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
@@ -888,6 +889,8 @@ export function hexBytes(text, len) {
 }
 
 function constLiteral(c) {
+  const hoisted = localConstant(c, {fields: STRUCTDEFS, expr, zero, ident, struct: (t, v) => `${t.go}{${v}}`});
+  if (hoisted !== undefined) return hoisted;
   // a structured constant: its components, an unset one initial
   if (c.type.k === "struct") {
     const fields = STRUCTDEFS.get(c.type.go)?.fields ?? [];

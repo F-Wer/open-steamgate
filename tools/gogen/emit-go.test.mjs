@@ -851,3 +851,52 @@ test("JS positional components retain writable storage and reject invalid positi
   assert.equal(Component(cell("x", {kind: "C", len: 1}), 1), null);
   assert.equal(Component(null, 1), null);
 });
+
+test("literal local constants are converted outside Go and JS method bodies", async () => {
+  const {emitJs} = await import("./emit-js.mjs");
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-local-constants-"));
+  try {
+    writeFileSync(join(sourceDir, "zcl_local_constants.clas.abap"), `
+CLASS zcl_local_constants DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE f.
+ENDCLASS.
+CLASS zcl_local_constants IMPLEMENTATION.
+  METHOD run.
+    CONSTANTS lower TYPE f VALUE '-2147483648'.
+    CONSTANTS upper TYPE f VALUE '2147483647'.
+    CONSTANTS: BEGIN OF bounds,
+      exponent TYPE f VALUE '1E+2',
+      END OF bounds.
+    DO 3 TIMES.
+      rv = lower + upper + bounds-exponent.
+    ENDDO.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_LOCAL_CONSTANTS"]});
+    assert.deepEqual(program.skipped, []);
+    const go = emitGo(program), js = emitJs(program);
+    assert.match(go, /var ZCL_LOCAL_CONSTANTS__LOCAL_CONSTANT__.* = abap.ParseF\("-2147483648"\)/);
+    assert.doesNotMatch(go.slice(go.indexOf("func ZCL_LOCAL_CONSTANTS_RUN(")), /abap\.ParseF/);
+    assert.match(js, /const ZCL_LOCAL_CONSTANTS__LOCAL_CONSTANT__.* = abap.ParseF\("-2147483648"\)/);
+    assert.doesNotMatch(js.slice(js.indexOf("static RUN(")), /abap\.ParseF/);
+    assert.match(js, /Object.freeze\(\{exponent: abap.ParseF\("1E\+2"\)/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
+
+test("local constants reject scalar and structure component writes", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-constant-write-"));
+  try {
+    const file = join(sourceDir, "zcl_constant_write.clas.abap");
+    const source = (decl, write) => `CLASS zcl_constant_write DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+CLASS zcl_constant_write IMPLEMENTATION. METHOD run.
+${decl} ${write} ENDMETHOD. ENDCLASS.`;
+    writeFileSync(file, source("CONSTANTS c TYPE f VALUE '100'.", "c = 1."));
+    assert.throws(() => compileProgram({folders: [sourceDir], objects: ["ZCL_CONSTANT_WRITE"]}), /cannot be modified.*readonly/);
+    writeFileSync(file, source("CONSTANTS: BEGIN OF c, f TYPE f VALUE '100', END OF c.", "c-f = 1."));
+    const p = compileProgram({folders: [sourceDir], objects: ["ZCL_CONSTANT_WRITE"]});
+    assert.match(p.classes[0].methods[0].body.find((st) => st.s === "stub").reason, /write to constant/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
