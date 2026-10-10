@@ -539,8 +539,8 @@
       "reason": "SYSTEM SESSION, LOCK_HANDLE, LOCK_RELEASE and LOCK_HOLDER of an ADT request answered as tools/osd-store-destination.mjs, bound per calling step, no go/abap import"
     },
     "go:compiler": {
-      "lines": 935,
-      "reason": "Fix1: optional logicalPath per snapshot file and optional saved CHECK mode preserve contract v1; per-occurrence mappings permit multiple logical includes backed by one shared digest file."
+      "lines": 943,
+      "reason": "PR #709 review: clear pprof labels at persistent reader and Unix/Windows exit watcher entry points. Fix1: optional logicalPath per snapshot file and optional saved CHECK mode preserve contract v1; per-occurrence mappings permit multiple logical includes backed by one shared digest file."
     },
     "go:storecheck": {
       "lines": 204,

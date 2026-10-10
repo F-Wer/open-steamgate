@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime/pprof"
 	"sync/atomic"
 )
 
@@ -46,6 +47,7 @@ type processLifecycle struct {
 }
 
 func (p *proc) read() {
+	pprof.SetGoroutineLabels(context.Background())
 	defer close(p.done)
 	defer p.stdout.Close()
 	reader := bufio.NewReader(p.stdout)
