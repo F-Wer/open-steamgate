@@ -32,20 +32,6 @@ func TestSelectedEnvAndFlag(t *testing.T) {
 	}
 }
 
-func TestPprofAddrKeepsToTheBind(t *testing.T) {
-	for in, want := range map[string]string{
-		"":               "",
-		"6060":           "127.0.0.1:6060",
-		":6060":          "127.0.0.1:6060",
-		"0.0.0.0:6060":   "0.0.0.0:6060",
-		"127.0.0.1:6061": "127.0.0.1:6061",
-	} {
-		if got := PprofAddr(in, "127.0.0.1"); got != want {
-			t.Errorf("PprofAddr(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func dial(t *testing.T, host string, port int) error {
 	t.Helper()
 	c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 2*time.Second)

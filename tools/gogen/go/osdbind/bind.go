@@ -70,23 +70,6 @@ func optionalBindError(err error) bool {
 		errors.Is(err, syscall.EADDRINUSE)
 }
 
-// PprofAddr: OSGO_PPROF as given when it names a host, else the bind host,
-// so "6060" or ":6060" does not open the profiler to the network.
-func PprofAddr(value, bind string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if !strings.Contains(value, ":") {
-		return net.JoinHostPort(bind, value)
-	}
-	host, port, err := net.SplitHostPort(value)
-	if err == nil && host == "" {
-		return net.JoinHostPort(bind, port)
-	}
-	return value
-}
-
 // Describe lists the listeners' addresses for a log line.
 func Describe(lns []net.Listener) string {
 	parts := make([]string, 0, len(lns))

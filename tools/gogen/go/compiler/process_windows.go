@@ -1,9 +1,11 @@
 package compiler
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime/pprof"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -60,6 +62,7 @@ func startProcess(cmd *exec.Cmd) (processLifecycle, error) {
 	}
 	exited := make(chan struct{})
 	go func() {
+		pprof.SetGoroutineLabels(context.Background())
 		defer close(exited)
 		_ = wait()
 	}()

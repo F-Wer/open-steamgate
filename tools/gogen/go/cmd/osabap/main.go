@@ -17,6 +17,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"osg/gogen/abap"
 	"osg/gogen/filepick"
+	"osg/gogen/profiling"
 	"osg/gogen/readgrant"
 	"osg/gogen/reportargs"
 	"osg/gogen/sysid"
@@ -39,6 +40,7 @@ func hostRunRequest(s *abap.Session, report ZIF_GG_REPORT_V1, input []ZIF_GG_SEL
 }
 
 var stopProfile = func() {}
+var profileReports bool
 var dialogSandbox *abap.Sandbox
 
 func main() {
@@ -51,10 +53,11 @@ func main() {
 			stopProfile = func() { pprof.StopCPUProfile(); f.Close() }
 		}
 	}
+	profileReports = os.Getenv("OSD_PPROF") == "1" || os.Getenv("OSABAP_CPUPROFILE") != ""
 	var result ZCL_GG_HOST__TY_RESULT
 	failed := false
 	cancelled := false
-	func() {
+	profiling.Report(profileReports, appProgram, "", func() {
 		defer func() {
 			if r := recover(); r != nil {
 				fmt.Fprintln(os.Stderr, "osabap:", withoutDB(r))
@@ -101,7 +104,7 @@ func main() {
 			}
 			abap.DialogStep(func() { result = hostRun(s, report, input, "", "") })
 		}
-	}()
+	})()
 	if dialogSandbox != nil {
 		_ = dialogSandbox.Close()
 	}

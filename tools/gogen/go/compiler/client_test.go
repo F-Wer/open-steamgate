@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"testing"
@@ -549,6 +551,34 @@ func startDescendant() {
 	for {
 		if raw, err := os.ReadFile(os.Getenv("COMPILER_MARKER") + ".pid"); err == nil && len(raw) > 0 {
 			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestPersistentWorkersClearRequestLabels(t *testing.T) {
+	c := fake(t, "answer")
+	pprof.Do(context.Background(), pprof.Labels("request", "compiler-first-request"), func(ctx context.Context) {
+		if _, err := c.Check(ctx, Snapshot{}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	// Startup is asynchronous: wait until both persistent entry points are
+	// parked. Inspect live goroutine labels, rather than the request context.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var buf bytes.Buffer
+		if err := pprof.Lookup("goroutine").WriteTo(&buf, 1); err != nil {
+			t.Fatal(err)
+		}
+		profile := buf.String()
+		reader := strings.Contains(profile, "compiler.(*proc).read")
+		watcher := strings.Contains(profile, "compiler.startProcess.func")
+		if reader && watcher && !strings.Contains(profile, "compiler-first-request") {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("workers retain request labels or are absent:\n%s", profile)
 		}
 		time.Sleep(time.Millisecond)
 	}

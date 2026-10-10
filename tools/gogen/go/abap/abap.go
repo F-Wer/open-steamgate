@@ -73,6 +73,10 @@ func (s *Session) EnqRaise(object, name, msgno, holder string) {
 // puts it down: nothing ties a Session to the goroutine that ran it last.
 // Only one goroutine may use a Session at a time. Its zero value is ready to use.
 type Session struct {
+	// ProfileRoute receives only matched dispatcher templates / model names.
+	// Nil when profiling is disabled or outside an HTTP request.
+	ProfileRoute func(string)
+
 	// Statics holds class attributes, constructor flags and event registrations. Nil creates a private
 	// store on first access. Shared stores require serialized access.
 	Statics *Statics

@@ -3,8 +3,10 @@
 package compiler
 
 import (
+	"context"
 	"os"
 	"os/exec"
+	"runtime/pprof"
 	"sync"
 	"syscall"
 )
@@ -20,6 +22,7 @@ func startProcess(cmd *exec.Cmd) (processLifecycle, error) {
 	var once sync.Once
 	markExited := func() { once.Do(func() { close(exited) }) }
 	go func() {
+		pprof.SetGoroutineLabels(context.Background())
 		// Only an observed exit closes exited: a failed wait must not make a
 		// healthy sidecar look dead (the reader still sees a real death as EOF).
 		// ECHILD is not proof of exit (a debugger can reparent a live child);

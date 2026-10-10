@@ -28,12 +28,12 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"runtime/debug"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +44,7 @@ import (
 	"osg/gogen/compiler"
 	"osg/gogen/objstore"
 	"osg/gogen/osdbind"
+	"osg/gogen/profiling"
 	"osg/gogen/storecompiler"
 	"osg/gogen/sysid"
 )
@@ -226,7 +227,7 @@ func dumpText(r any) string {
 // step runs one ICF request through the shim as a dialog step. The dump, if
 // there is one, comes back with its ABAP frames; the response is then not
 // the shim's.
-func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
+func step(x *abap.ICFExchange, base string, profileRoute func(string)) (dump any, frames []string) {
 	workProcess.Lock()
 	defer workProcess.Unlock()
 	func() {
@@ -235,7 +236,7 @@ func step(x *abap.ICFExchange, base string) (dump any, frames []string) {
 				dump, frames = r, abapStack(r)
 			}
 		}()
-		s := &abap.Session{Statics: abap.ProcessStatics}
+		s := &abap.Session{Statics: abap.ProcessStatics, ProfileRoute: profileRoute}
 		dialog := func() { abap.DialogStepIn(s, func() { runShim(s, x, base) }) }
 		runDialogStep(s, dialog, base == "/sap/bc/adt" || base == "/sap/public/bc/icf/logoff")
 	}()
@@ -282,7 +283,16 @@ func icfHandler(class, base string, onDump func(w http.ResponseWriter, r *http.R
 			http.Error(w, e.Text, e.Status)
 			return
 		}
-		if dump, frames := step(x, base); dump != nil {
+		// Body parsing has accepted the request. ADT and OData set their
+		// finer labels inside the generated dispatchers.
+		if class != "ZCL_OSD_ADT_HANDLER" && class != "ZCL_STG_HTTP_HANDLER" {
+			profiling.Matched(r, base)
+		}
+		var label func(string)
+		if _, ok := pprof.Label(r.Context(), "path"); ok {
+			label = func(template string) { profiling.Matched(r, template) }
+		}
+		if dump, frames := step(x, base, label); dump != nil {
 			log.Printf("runtime error: %s %s: %s  at %s", r.Method, r.RequestURI, dumpText(dump), strings.Join(frames, " <- "))
 			onDump(w, r, dump, frames)
 			return
@@ -397,6 +407,7 @@ func serveStatic(prefix, dir string, next http.HandlerFunc) http.HandlerFunc {
 		}
 		if st.IsDir() {
 			if !strings.HasSuffix(rel, "/") {
+				profiling.Matched(r, prefix)
 				to := r.URL.EscapedPath() + "/"
 				if r.URL.RawQuery != "" {
 					to += "?" + r.URL.RawQuery
@@ -421,6 +432,7 @@ func serveStatic(prefix, dir string, next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		defer f.Close()
+		profiling.Matched(r, prefix)
 		ext := strings.ToLower(filepath.Ext(file))
 		ct, ok := staticTypes[ext]
 		if !ok {
@@ -479,6 +491,8 @@ func main() {
 	compilerStatus := flag.Bool("compiler-status", false, "print compiler sidecar status as JSON")
 	version := flag.Bool("version", false, "print release tag and commit")
 	adtFlag := flag.Bool("adt", false, "mount /sap/bc/adt through ZCL_OSD_ADT_HANDLER (also OSD_OSGO_ADT=1; default off)")
+	pprofFlag := flag.Bool("pprof", false, "enable loopback-only profiling (also OSD_PPROF=1)")
+	pprofAddr := flag.String("pprof-addr", "", "separate profiling listener (default 127.0.0.1:6060)")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	// HTTPS beside HTTP, the way a system answers on 443nn next to 80nn: the
@@ -530,16 +544,15 @@ func main() {
 		}
 	}
 	started := time.Now()
-	// OSGO_PPROF=127.0.0.1:<port>: Go's profiler on a listener of its own,
-	// never on the service's port (go tool pprof http://<addr>/debug/pprof/profile)
-	if a := osdbind.PprofAddr(os.Getenv("OSGO_PPROF"), binds[0]); a != "" {
-		pm := http.NewServeMux()
-		pm.HandleFunc("/debug/pprof/", pprof.Index)
-		pm.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		pm.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		// osd-bind-allow: a comes from osdbind.PprofAddr, a bare port stays on the bind host
-		go func() { log.Printf("pprof: %v", http.ListenAndServe(a, pm)) }()
-		log.Printf("pprof: http://%s/debug/pprof/", a)
+	profileConfig := profiling.Selected(*pprofFlag, *pprofAddr, os.Getenv)
+	profileServer, profileListener, err := profileConfig.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if profileListener != nil {
+		defer profileServer.Close()
+		go func() { log.Printf("pprof: %v", profileServer.Serve(profileListener)) }()
+		log.Printf("pprof: http://%s/debug/pprof/ (separate loopback listener)", profileListener.Addr())
 	}
 	abap.HostFacts = append(abap.HostFacts, "host\tosgo: net/http in front of cl_express_icf_shim, one dialog step per request", buildFacts)
 
@@ -622,6 +635,7 @@ func main() {
 			notFound(w, r)
 			return
 		}
+		profiling.Matched(r, "/")
 		if _, err := os.Stat(filepath.Join(webapp, "flp.html")); err == nil {
 			w.Header().Set("Location", "/app/flp.html")
 			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
@@ -636,15 +650,18 @@ func main() {
 	}})
 	// the sandbox's optional external config: an empty merge (tools/osd-sandbox-config.mjs)
 	routes = append(routes, route{"/appconfig/fioriSandboxConfig.json", true, func(w http.ResponseWriter, r *http.Request) {
+		profiling.Matched(r, "/appconfig/fioriSandboxConfig.json")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write([]byte("{}\n"))
 	}})
 	routes = append(routes, route{"/health", true, func(w http.ResponseWriter, r *http.Request) {
+		profiling.Matched(r, "/health")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		fmt.Fprintf(w, "{\"status\":\"ready\",\"version\":%q,\"commit\":%q}\n", releaseTag, releaseCommit)
 	}})
 	// the tiles the packs declare (test/start.mjs pack-tiles), read when this binary was built
 	routes = append(routes, route{"/app/packs.json", true, func(w http.ResponseWriter, r *http.Request) {
+		profiling.Matched(r, "/app/packs.json")
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write([]byte(packTiles))
 	}})
@@ -691,7 +708,7 @@ func main() {
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 
 	upgrade := channelRoutes()
-	mux := routeMatcher(routes, notFound, upgrade)
+	mux := profiling.HTTP(profileConfig.Enabled, routeMatcher(routes, notFound, upgrade))
 
 	for _, svc := range icfServices {
 		log.Printf("ICF service  on http://localhost:%d%s  (%s)", *port, svc.Path, svc.Handler)
