@@ -4,7 +4,11 @@
 (gzip or uncompressed), V8 `.cpuprofile`, or this tool's JSON hit list.
 No npm dependency or Go subprocess is required. pprof CPU captures already
 contain file/line and inline symbols, including the emitter's `//line`
-ABAP paths. For an unsymbolized profile, first use
+ABAP paths. Namespace owners, local `OWNER:LOCAL` classes and interface
+methods are decoded into ABAP identities. Newly emitted local static functions
+use an explicit class/method separator; older underscore-only local static
+symbols are ambiguous and require a fresh build for reliable attribution.
+For an unsymbolized profile, first use
 `go tool pprof -proto -output symbolized.pb.gz BINARY PROFILE`.
 
 ```

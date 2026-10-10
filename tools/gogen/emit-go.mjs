@@ -1,3 +1,5 @@
+import {typeName, funcName} from "./go-symbols.mjs";
+export {typeName, funcName} from "./go-symbols.mjs";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
@@ -36,11 +38,7 @@ export const ident = (name) => {
   return exportedFields ? safe[0].toUpperCase() + safe.slice(1) : safe;
 };
 const selfField = (name) => `${exportedFields ? "Self" : "self"}_${typeName(name)}`;
-const typeName = (s) => {
-  const name = String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
-  return name.startsWith("_") ? `N${name}` : name;
-};
-export const funcName = (cls, method) => `${typeName(cls)}_${typeName(method)}`;
+
 const evType = (key) => `EV_${typeName(key)}`;
 /*
  * ultra/events: CLASS_CONSTRUCTOR runs once, at the first use of the class:

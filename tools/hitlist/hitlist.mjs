@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 import {basename} from "node:path";
+import {typeName as encode} from "../gogen/go-symbols.mjs";
 
 const normalized = s => s.replaceAll("\\", "/");
 
@@ -8,23 +9,44 @@ const normalized = s => s.replaceAll("\\", "/");
 export function abapSite(frame) {
   if (!/\.abap$/i.test(frame.file) || frame.line < 1) return null;
   const owner = basename(normalized(frame.file)).split(".")[0].replaceAll("#", "/").toUpperCase();
-  const safeOwner = owner.replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
-  const ownerSymbol = safeOwner.startsWith("_") ? `N${safeOwner}` : safeOwner;
+  const ownerSymbol = encode(owner);
+  const namespace = /^(\/[^/]+\/)/.exec(owner)?.[1];
+  const decode = symbol => {
+    let value = symbol.toUpperCase();
+    if (namespace && value.startsWith(encode(namespace))) value = namespace + value.slice(encode(namespace).length);
+    else value = value.replace(/^N_([^_]+)_/, "/$1/");
+    return value.replaceAll("__", "~");
+  };
+  const decodeClass = symbol => {
+    const value = symbol.toUpperCase();
+    if (value === ownerSymbol) return owner;
+    if (value.startsWith(ownerSymbol + "_")) return `${owner}:${value.slice(ownerSymbol.length + 1)}`;
+    return decode(value);
+  };
   let name = frame.name.replace(/^main\./, "").replace(/\.(?:func|deferwrap|gowrap)\d+(?:\.\d+)*$/, "");
   const receiver = /^\(\*?([^)]*)\)\.(.+)$/.exec(name);
   let cls = owner, method;
-  if (receiver) { cls = receiver[1].toUpperCase() === ownerSymbol ? owner : receiver[1].toUpperCase(); method = receiver[2]; }
-  else if (name.toUpperCase().startsWith(ownerSymbol + "_")) method = name.slice(ownerSymbol.length + 1);
+  if (receiver) { cls = decodeClass(receiver[1]); method = decode(receiver[2]); }
+  else if (name.includes("__OSD_METHOD__")) {
+    const [symbol, body] = name.split("__OSD_METHOD__");
+    cls = decodeClass(symbol); method = decode(body);
+  }
+  else if (name.toUpperCase().startsWith(ownerSymbol + "_")) method = decode(name.slice(ownerSymbol.length + 1));
   else if (name === `New_${ownerSymbol}`) method = "CONSTRUCTOR";
-  else if (name.includes("=>")) [cls, method] = name.split("=>");
-  else method = name;
-  return {key: `${cls}=>${method.toUpperCase().replaceAll("__", "~")}:${frame.line}`, class: cls,
-    method: method.toUpperCase().replaceAll("__", "~"), file: normalized(frame.file), line: frame.line};
+  else if (name.startsWith("New_")) { cls = decodeClass(name.slice(4)); method = "CONSTRUCTOR"; }
+  else if (name.includes("=>")) [cls, method] = name.toUpperCase().split("=>");
+  else method = decode(name);
+  return {key: `${cls}=>${method}:${frame.line}`, class: cls,
+    method, file: normalized(frame.file), line: frame.line};
 }
 
 function tsName(site, names) {
   const cls = site.class.toLowerCase(), method = site.method.toLowerCase();
-  const entry = names[site.key] ?? names[`${site.file}:${site.line}`] ?? names[cls] ?? names[cls.replaceAll("/", "#")];
+  const exact = names[site.key] ?? names[`${site.file}:${site.line}`];
+  // Method-body mappings can exist without any class entry.
+  const body = site.method.startsWith("Z_") ? names[method] : null;
+  if (!exact && body) return tsName({...site, class: method, method: ""}, {[method]: body});
+  const entry = exact ?? names[cls] ?? names[cls.replaceAll("/", "#")];
   if (!entry) return null;
   if (typeof entry === "object") {
     return {name: entry.name ?? entry.tsName ?? null, file: entry.file ?? entry.tsFile ?? null,
@@ -33,8 +55,6 @@ function tsName(site, names) {
   // abapiti abaplint names.json maps generated class -> "file.ts.Symbol.method".
   // It does not contain TS source line numbers; leave the line unknown.
   const m = /^(.*\.tsx?)(?:[.: ](.*))?$/.exec(entry);
-  const body = site.method.startsWith("Z_") ? names[method] : null;
-  if (body) return tsName({...site, class: method, method: ""}, {[method]: body});
   return {name: m?.[2] ?? entry, file: m?.[1] ?? null, line: null, siteId: null};
 }
 

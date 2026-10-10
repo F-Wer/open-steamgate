@@ -8,6 +8,7 @@ import {parsePprof} from "../tools/hitlist/pprof.mjs";
 import {parseV8} from "../tools/hitlist/v8.mjs";
 import {abapSite, diff, hitlist, selectRows} from "../tools/hitlist/hitlist.mjs";
 import {markdown} from "../tools/hitlist/markdown.mjs";
+import {emitGo, funcName, typeName} from "../tools/gogen/emit-go.mjs";
 import {run} from "../tools/osd-hitlist.mjs";
 
 const vint = n => {
@@ -40,6 +41,53 @@ describe("native ABAP hit lists", () => {
     assert.equal(abapSite({name:"main.(*ZDEMO).IF_REQUEST__RUN.func1",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>IF_REQUEST~RUN:42");
     assert.equal(abapSite({name:"main.New_ZDEMO",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>CONSTRUCTOR:42");
     assert.equal(abapSite({name:"main.(*N_DEMO_CL).RUN",file:"#demo#cl.clas.abap",line:42}).key,"/DEMO/CL=>RUN:42");
+  });
+  it("roundtrips the emitter's owner, namespace, local and interface symbols", () => {
+    for (const owner of ["ZDEMO", "/NS/CL_DEMO", "/MY_NS/CL_DEMO"]) {
+      const file = `${owner.toLowerCase().replaceAll("/", "#")}.clas.locals_imp.abap`;
+      for (const cls of [owner, `${owner}:LCL_HELPER`]) {
+        for (const method of ["RUN", "DO_WORK", "INTF~METH", "/NS/INTF~DO_WORK", `${owner.startsWith("/") ? owner.slice(0, owner.lastIndexOf("/") + 1) : "/NS/"}INTF~METH`]) {
+          for (const symbol of [funcName(cls, method), `(*${typeName(cls)}).${typeName(method)}`]) {
+            const site = abapSite({name:`main.${symbol}.func1`, file, line:42});
+            assert.equal(site.key, `${cls}=>${method}:42`, symbol);
+          }
+        }
+        assert.equal(abapSite({name:`main.New_${typeName(cls)}`,file,line:42}).key,`${cls}=>CONSTRUCTOR:42`);
+      }
+    }
+  });
+  it("emits the same local static identity at its definition and call", () => {
+    const cls = "ZDEMO:LCL_HELPER", method = "DO_WORK";
+    const run = {name:"CALL_WORK",static:true,returning:null,params:[],locals:[],body:[{s:"call",call:{e:"call",owner:cls,method,args:[],type:{k:"void"}}}]};
+    const body = {name:method,static:true,returning:null,params:[],locals:[],body:[]};
+    const source = emitGo([{name:cls,methods:[run,body],attributes:[],constructor:null}]);
+    assert.ok(source.includes(`func ${funcName(cls, method)}(s *abap.Session)`));
+    assert.ok(source.includes(`; ${funcName(cls, method)}(s) }()`));
+    assert.equal(abapSite({name:funcName(cls, method),file:"zdemo.clas.locals_imp.abap",line:42}).key,`${cls}=>${method}:42`);
+  });
+  it("looks up namespace/local names and method bodies without a class entry", () => {
+    const frame = {name:`main.${funcName("/NS/CL_DEMO:LCL_HELPER", "INTF~METH")}`,file:"#ns#cl_demo.clas.locals_imp.abap",line:42};
+    const profile = {format:"pprof",samples:[{frames:[frame],labels:{},weight:1,samples:1}]};
+    for (const key of ["/ns/cl_demo:lcl_helper", "#ns#cl_demo:lcl_helper"]) {
+      assert.equal(hitlist(profile,{names:{[key]:"src/demo.ts.Helper.run"}}).rows[0].ts.name,"Helper.run");
+    }
+    const method = "Z_METHOD_BODY";
+    profile.samples[0].frames[0] = {...frame,name:`main.${funcName("/NS/CL_DEMO", method)}`};
+    for (const names of [{z_method_body:"src/demo.ts.Demo.body"}, {"#ns#cl_demo":"src/class.ts.Demo",z_method_body:"src/demo.ts.Demo.body"}]) {
+      assert.deepEqual(hitlist(profile,{names}).rows[0].ts,{name:"Demo.body",file:"src/demo.ts",line:null,siteId:null});
+    }
+  });
+  it("matches cross-host diffs by decoded namespace/local/interface identity", () => {
+    const cls = "/NS/CL_DEMO:LCL_HELPER", method = "/NS/INTF~DO_WORK";
+    const file = "#ns#cl_demo.clas.locals_imp.abap";
+    const profile = name => ({format:"pprof",samples:[{frames:[{name,file,line:42}],labels:{},weight:1,samples:1}]});
+    const go = hitlist(profile(`main.${funcName(cls, method)}`),{host:"osgo"});
+    const js = hitlist(profile(`${cls}=>${method}`),{host:"node"});
+    const rows = diff(go,js).rows;
+    assert.equal(rows.length,1);
+    assert.equal(rows[0].key,`${cls}=>${method}:42`);
+    assert.ok(rows[0].before && rows[0].after);
+    assert.equal(rows[0].deltaFlatPercent,0);
   });
   it("parses compressed/uncompressed, packed/unpacked protobuf and inline frames", () => {
     assert.deepEqual(parsePprof(fixture(false)), parsed());
