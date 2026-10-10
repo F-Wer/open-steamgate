@@ -4,7 +4,28 @@ import {spawnSync} from 'node:child_process';
 import {mkdtempSync,readFileSync,writeFileSync,mkdirSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {cell,TI,TF,TP,TC,TString,CmpData,UnitDumpToString,EncodeBase64,DecodeBase64,SubS,Strlen} from './js/abap.mjs';
+import {cell,TI,TF,TP,TC,TString,CmpData,UnitDumpToString,EncodeBase64,DecodeBase64,SubS,Strlen,ParseI,ParseF,CFit} from './js/abap.mjs';
+
+test('numeric and flat-string fast paths preserve boundaries and fallbacks', () => {
+  assert.equal(ParseI('2147483647'),2147483647);
+  assert.equal(ParseI('-2147483648'),-2147483648);
+  for (const v of ['2147483648','-2147483649'])
+    assert.throws(()=>ParseI(v),/CX_SY_CONVERSION_OVERFLOW/);
+  assert.throws(()=>ParseI('1234567890\n'),/CX_SY_CONVERSION_NO_NUMBER/);
+  assert.ok(Object.is(ParseI('-0'),-0));
+  assert.equal(ParseI(' 1.5- '),-2);
+  assert.equal(ParseI('0000000000001'),1);
+  assert.equal(ParseF('+999999999999999'),999999999999999);
+  assert.equal(ParseF('1E+2'),100);
+  assert.equal(ParseF('1 2'),1);
+  assert.throws(()=>ParseF('Infinity'),/CX_SY_CONVERSION_OVERFLOW/);
+  assert.throws(()=>ParseF('NaN'),/NOT_COMPILED/);
+  assert.equal(CFit('abc ',3),'abc');
+  assert.equal(CFit('ä z',2),'ä');
+  assert.equal(CFit('a😀z',2),'a😀');
+  assert.equal(CFit('\ud800z',1),'\ud800');
+  assert.equal(CFit('abc',0),'');
+});
 
 test('generic comparison chooses the pair type and keeps packed precision', () => {
   assert.equal(CmpData(cell(-1,TF),cell(-1,TI)),0);

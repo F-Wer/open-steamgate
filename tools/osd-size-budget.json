@@ -459,8 +459,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/js/abap.mjs": {
-      "lines": 1785,
-      "reason": "baseline 2026-10-01; critic round 1: JS time conversion and exception identity. ADT batch 1 (round 5 finding 1): preserve initial c subject CS semantics. abapiti 017: ParseI8 beside ParseI (BigInt). abapiti 042: READ and DELETE TABLE by a hashed secondary key. IR-JS lexer pilot: bounded string-section memo, pairwise generic comparisons, UnitDump assertion messages, assertion QUIT and UTF-8 base64 adapters, covered by unit-js and semantics checks."
+      "lines": 1795,
+      "reason": "baseline 2026-10-01; critic round 1: JS time conversion and exception identity. ADT batch 1 (round 5 finding 1): preserve initial c subject CS semantics. abapiti 017: ParseI8 beside ParseI (BigInt). abapiti 042: READ and DELETE TABLE by a hashed secondary key. IR-JS lexer pilot: bounded string-section memo, pairwise generic comparisons, UnitDump assertion messages, assertion QUIT and UTF-8 base64 adapters, covered by unit-js and semantics checks. Lexer CPU-profile follow-up: 10 lines for bounded integer ParseI/ParseF fast paths and spread-free flat CFit; measured separately and checked against prior-runtime conversions, Unicode cases and semantics."
     },
     "tools/lift.mjs": {
       "lines": 1225,

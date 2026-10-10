@@ -131,6 +131,8 @@ function numSign(t) {
 }
 const decimalDigits = (t) => /^(\d+\.?\d*|\.\d+)$/.test(t);
 export function ParseF(v) {
+  // Exact, bounded integer text avoids the decimal/exponent grammar below.
+  if (/^[+-]?\d{1,15}(?![\s\S])/.test(v)) return Number(v);
   let t = v.replace(/^ +/, "");
   if (t === "") return 0;
   const sp = t.indexOf(" ");
@@ -147,6 +149,13 @@ export function ParseF(v) {
   return neg ? -f : f;
 }
 export function ParseI(v) {
+  // Common integer text needs neither decimal rounding nor sign/space copies.
+  // Ten digits are still exact as a Number; retain the ABAP i range check.
+  if (/^[+-]?\d{1,10}(?![\s\S])/.test(v)) {
+    const n = Number(v);
+    if (n > MAX || n < MIN) throw new AbapError("CX_SY_CONVERSION_OVERFLOW", "c->i");
+    return n;
+  }
   const t = v.replace(/^ +| +$/g, "");
   if (t === "") return 0;
   const {neg, body: raw, ok} = numSign(t);

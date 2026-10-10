@@ -205,7 +205,8 @@ benchmark processes and verification shared the two heavy slots. Observed
 one-minute load was 3.74–8.83, IO `some avg10` 0.00–0.09, and available memory
 64–87 GB. Launch checks satisfied IO < 30, memory > 20 GB and load < 12.
 The wide JS sample range should not be interpreted as idle-host stability.
-The hosts were Node v26.9.0 and Go 1.22.2 on Linux amd64; Node used the
+The hosts were Node v26.9.0 and Go 1.26.0 on Linux amd64 (the Go 1.22.2
+launcher selected the module's newer toolchain); Node used the
 requested 16 GB heap, and all heavy runs used `nice -n10` and range 50–59.
 
 Reproduction (prefix heavy commands with the resource-gated wrapper below):
@@ -250,3 +251,295 @@ Raw measurements, per-case copies, frontend diagnostics, emitted modules,
 binaries and logs remain gitignored under `.local/tsha-lexer/`. The supplied
 vanilla Node times are reference measurements, not new median-of-three runs
 on this host.
+
+## Lexer CPU-profile follow-up (2026-10-10)
+
+Starting HEAD: `14bb3080fa87468fc221b7f47b67c5c7d21b9d68`. The abapiti
+input stayed read-only. This change touches only the JS runtime and its tests;
+it does not change the ABAP lexer, shared IR or either emitter.
+
+The main cost was **numeric text conversion**, not table lookup or string
+sectioning. The baseline lexer interval attributes 40.41% inclusive CPU
+samples to `ParseI`, 14.82% to `ParseF`, and 9.22% to `CFit`. P and A (mapped
+below) repeatedly call these helpers for generated text constants such as
+`"0"`, `"1"` and `"-1"`, as well as runtime values. In particular, integer
+text previously ran trimming, sign-object allocation, decimal grammar,
+zero trimming and rounding logic. `CFit` spread every string into an array,
+even when its characters were ordinary UTF-16 units.
+
+Three fixes, applied cumulatively, each measured in three fresh processes:
+
+1. `ParseI`: signed text of 1–10 digits uses `Number`, followed by the same
+   signed 32-bit overflow check. Other spellings retain the original parser.
+2. `ParseF`: signed text of 1–15 digits uses `Number`; other spellings retain
+   the original decimal/exponent parser and its refusals. The digit bounds
+   keep these fast paths exact and finite. The expressions require the entire
+   string, including rejecting a trailing newline.
+3. `CFit`: strings without surrogates use `length`/`slice` and the existing
+   blank trimming. Surrogate-containing strings retain the code-point spread
+   path, including unpaired surrogates. This is O(n) surrogate classification,
+   with O(1) offset selection on flat strings; it is not an O(1) classifier.
+
+| Runtime | Three `lex_us` samples | Median | Incremental change |
+|---|---|---:|---:|
+| Baseline | 12,737,854; 11,789,074; 11,885,851 | 11,885,851 | — |
+| + integer `ParseI` | 7,717,478; 8,399,249; 7,652,336 | 7,717,478 | −35.1% |
+| + integer `ParseF` | 6,055,094; 6,164,614; 6,141,370 | 6,141,370 | −20.4% |
+| + flat `CFit` | 5,782,144; 6,089,937; 5,771,558 | 5,782,144 | −5.8% |
+
+Overall: **2.06× faster / 51.4% less lexer time**.
+The final median is 1.60× the supplied Go median and
+17.1× the supplied vanilla Node lexer time. The earlier 14.080 s / 3.625 s / 0.338 s medians remain
+reference measurements, not a simultaneous comparison on an idle machine.
+All twelve retained benchmark samples returned `X`, 609,647 tokens and lexer hash
+`9b118dd1e5ed640bbe07f1e8f4848b8fcaaa6a25c5ab126a12f018c46664df40`.
+The final original input-assembly path also returned the identical hash,
+with `lex_us = 6,229,060`.
+
+For repeated samples, the scratch runner joins the same embedded base64
+chunks and decodes them before execution, then supplies the resulting string
+before the original timed lexer call. The lexer call, token dump and hash
+check are unchanged. The decoded input is 5,185,150 UTF-16 units and its UTF-8
+SHA-256 is `aa57853bb7839dd06c946ece94c22c8da1f16cef36e546e3c430be0ce47a2124`.
+This avoids minutes of repeated concatenation *outside* the measured interval.
+It also changes pre-lexer heap state, so comparisons to the earlier original
+assembly medians need that caveat. The retained stages ran sequentially with post-slot IO `avg10 = 0.00`,
+available memory about 84 GiB, and one-minute load 4.06–5.47. Each runtime
+stage is snapshotted; later
+edits cannot change earlier samples. Timing excludes profiling, assembly,
+dump and hashing. The host is shared; these are not idle-host distributions.
+
+Profiling used `node --cpu-prof --trace-gc` with the same 16 GB heap and the
+requested heavy wrapper. A full original-path profile returned the correct
+hash with `lex_us = 12,460,314`. A separate baseline profile marked the lexer
+start/end using monotonic microseconds, stopping after the token count to
+exclude the subsequent dump/hash. Its lexer interval was 18.656 s; the final
+marked profile was 6.720 s. Samples between those markers, rather than the
+whole process, produce the following rankings. The original-path call-tree
+profile independently found the same leading helpers (ParseI 28.85% self,
+ParseF 9.63%, CFit 7.60%); it omits root GC samples, so it is not used for
+GC-share estimates. Inclusive totals deduplicate recursive function labels
+per sampled stack, and include child helpers. They must not be summed.
+
+Coarse, disjoint self-sample categories:
+
+| Category | Baseline | After 3 fixes | Attribution limit |
+|---|---:|---:|---|
+| String sectioning/offsets (`Strlen`, `SubS`, `sectionOf`, `flat`, surrogate regex) | 6.65% | 16.05% | Shared surrogate regex also serves final CFit |
+| String fitting (`CFit`, trailing-blank regex) | 9.22% | 16.36% | Does not isolate native spread allocation |
+| Allocations/GC: sampled collector | 4.33% | 4.32% | Allocation itself is charged to allocating methods/helpers |
+| Table/collection operations | 0.83% | 1.74% | Compiled array/set methods plus named table helpers |
+| Other: numeric conversions and their regex/sign helpers | 58.62% | 29.52% | Includes f/int8/i range and rounding conversions |
+| Other: generated control flow, constructors and remaining helpers | 20.35% | 32.01% | Includes costs that cannot be separated below |
+| `b.v` boxes / per-call try-finally / dispatch | Not separately measurable | Not separately measurable | Inlined property reads, allocations and calls are charged to their enclosing functions |
+
+The trace records 457 GC events / 688.91 ms of reported pauses in the baseline
+lexer interval (3.69% of wall time), versus 166 / 261.19 ms (3.89%) finally.
+The sampled collector fell from 0.808 s to 0.290 s. GC percentages do not show
+allocation throughput, retained heap, or all concurrent collector work; this
+was a CPU/GC investigation, not a leak or retained-heap profile.
+
+The emitter's `callStmt` still creates output/changing parameter boxes and
+emits a `try/finally` even when there is nothing to restore. Its by-value
+output parameters have an additional copy-out box. IMPORTING scalar
+parameters already pass as plain values; eliminating their boxes is therefore
+not an applicable fix. Reference write-back on exceptional return and VALUE
+copy-out only on normal return are semantic requirements. Sampling cannot
+price an empty finally or a `b.v` access separately from P/A. No unsupported
+zero-cost claim is made for them, and they were not changed within this
+three-fix limit. Direct virtual calls and constructors remain in P/A's cost.
+
+Baseline top 30 (self and inclusive total; totals overlap):
+
+| # | Function | Self % | Function | Total % |
+|---:|---|---:|---|---:|
+| 1 | `RT::ParseI` | 26.99 | `(root)` | 100.00 |
+| 2 | `P` | 11.84 | `RUN` | 95.34 |
+| 3 | `RT::ParseF` | 9.10 | `(anonymous) [native/node]` | 95.34 |
+| 4 | `RT::CFit` | 7.64 | `H` | 95.31 |
+| 5 | `RegExp: ^(\d+\.?\d*\|\.\d+)$` | 5.66 | `P` | 93.76 |
+| 6 | `RT::decimalDigits` | 4.70 | `RT::ParseI` | 40.41 |
+| 7 | `RT::sectionOf` | 4.36 | `A` | 27.28 |
+| 8 | `(garbage collector)` | 4.33 | `RT::ParseF` | 14.82 |
+| 9 | `A` | 3.76 | `RT::decimalDigits` | 10.35 |
+| 10 | `RegExp: ^ +\| +$` | 2.84 | `RT::CFit` | 9.22 |
+| 11 | `RegExp: ^0+` | 2.28 | `RegExp: ^(\d+\.?\d*\|\.\d+)$` | 5.66 |
+| 12 | `RT::numSign` | 1.96 | `RT::sectionOf` | 5.01 |
+| 13 | `RegExp:  +$` | 1.59 | `(garbage collector)` | 4.33 |
+| 14 | `H` | 1.44 | `RT::Strlen` | 4.21 |
+| 15 | `RT::I8ToI` | 1.33 | `RegExp: ^ +\| +$` | 2.84 |
+| 16 | `RT::F2I` | 1.19 | `RT::SubS` | 2.44 |
+| 17 | `RegExp: ^([^Ee]*)(?:[Ee]([+-]?)(\d+))?$` | 1.07 | `RegExp: ^0+` | 2.28 |
+| 18 | `RT::ReplaceStmt` | 0.85 | `RT::numSign` | 1.96 |
+| 19 | `SET=>HAS` | 0.79 | `RT::flat` | 1.71 |
+| 20 | `RT::Strlen` | 0.79 | `RegExp:  +$` | 1.59 |
+| 21 | `RT::SubS` | 0.73 | `RT::I8ToI` | 1.33 |
+| 22 | `RegExp: [\uD800-\uDFFF]` | 0.65 | `RT::F2I` | 1.19 |
+| 23 | `RegExp: ^ +` | 0.62 | `COUNT` | 1.14 |
+| 24 | `RT::Uccp` | 0.60 | `RegExp: ^([^Ee]*)(?:[Ee]([+-]?)(\d+))?$` | 1.07 |
+| 25 | `RT::F2I8` | 0.58 | `C506=>CONSTRUCTOR` | 0.94 |
+| 26 | `RT::CO.every callback` | 0.33 | `RT::ReplaceStmt` | 0.85 |
+| 27 | `RT::check8` | 0.30 | `SET=>HAS` | 0.79 |
+| 28 | `RT::CO` | 0.25 | `CB22=>$new` | 0.74 |
+| 29 | `RT::ToUpper` | 0.22 | `CB22=>CONSTRUCTOR` | 0.70 |
+| 30 | `(program)` | 0.20 | `RegExp: [\uD800-\uDFFF]` | 0.65 |
+
+After three fixes top 30 (self and inclusive total; totals overlap):
+
+| # | Function | Self % | Function | Total % |
+|---:|---|---:|---|---:|
+| 1 | `P` | 19.89 | `(root)` | 100.00 |
+| 2 | `RT::CFit` | 13.51 | `(anonymous) [native/node]` | 95.17 |
+| 3 | `RT::sectionOf` | 9.24 | `RUN` | 95.17 |
+| 4 | `RT::ParseI` | 8.99 | `H` | 95.14 |
+| 5 | `RT::ParseF` | 5.45 | `P` | 93.22 |
+| 6 | `RegExp: ^[+-]?\d{1,10}(?![\s\S])` | 5.23 | `A` | 23.84 |
+| 7 | `(garbage collector)` | 4.32 | `RT::CFit` | 18.88 |
+| 8 | `A` | 3.93 | `RT::ParseI` | 14.23 |
+| 9 | `RegExp: [\uD800-\uDFFF]` | 3.43 | `RT::sectionOf` | 10.15 |
+| 10 | `RegExp: ^[+-]?\d{1,15}(?![\s\S])` | 2.85 | `RT::Strlen` | 9.08 |
+| 11 | `RegExp:  +$` | 2.85 | `RT::ParseF` | 8.31 |
+| 12 | `RT::I8ToI` | 2.48 | `RegExp: ^[+-]?\d{1,10}(?![\s\S])` | 5.23 |
+| 13 | `RT::F2I` | 2.09 | `RT::SubS` | 4.43 |
+| 14 | `RT::ReplaceStmt` | 1.99 | `(garbage collector)` | 4.32 |
+| 15 | `SET=>HAS` | 1.71 | `RegExp: [\uD800-\uDFFF]` | 3.43 |
+| 16 | `H` | 1.67 | `RT::flat` | 2.99 |
+| 17 | `RT::F2I8` | 1.66 | `RegExp: ^[+-]?\d{1,15}(?![\s\S])` | 2.85 |
+| 18 | `RT::Strlen` | 1.65 | `RegExp:  +$` | 2.85 |
+| 19 | `RT::SubS` | 1.44 | `RT::I8ToI` | 2.48 |
+| 20 | `RT::CO.every callback` | 1.01 | `C506=>CONSTRUCTOR` | 2.47 |
+| 21 | `RT::CO` | 0.78 | `RT::F2I` | 2.09 |
+| 22 | `RT::check8` | 0.76 | `CB22=>$new` | 2.03 |
+| 23 | `RT::Uccp` | 0.68 | `CB22=>CONSTRUCTOR` | 2.00 |
+| 24 | `RT::ToUpper` | 0.40 | `RT::ReplaceStmt` | 1.99 |
+| 25 | `RT::check` | 0.37 | `RT::CO` | 1.79 |
+| 26 | `RT::flat` | 0.29 | `SET=>HAS` | 1.71 |
+| 27 | `RT::AddI` | 0.27 | `RT::F2I8` | 1.66 |
+| 28 | `(program)` | 0.18 | `RT::CO.every callback` | 1.01 |
+| 29 | `CB22=>CONSTRUCTOR` | 0.13 | `RT::AddI8` | 0.76 |
+| 30 | `C506=>CONSTRUCTOR` | 0.08 | `RT::check8` | 0.76 |
+
+Mapping key (generated JS class/method spellings equal the ABAP class/method spellings):
+
+- `P` = `Z_SRC_ABAP_1_L_22309FB1998E15=>Z_MEMBER_PROCE_57F9D1E4B4E34E`.
+- `A` = `Z_SRC_ABAP_1_L_22309FB1998E15=>Z_MEMBER_ADD_51C1BB18694A11`.
+- `H` = `Z_HARNESS_STRU_2FF666D6BA45A6=>Z_MEMBER_LEX_C6C26EC28914CA`.
+- `RUN` = `ZCL_PHASE3_BENCHMARK=>RUN`.
+- `COUNT` = `Z_SRC_ABAP_1_L_CCA5BD2C711D39=>Z_MEMBER_COUNT_AEF1818D79C2BF`.
+- `SET=>HAS` = `Z_RUNTIME_SET__44559CF8BCC45E=>HAS`.
+- `C506=>CONSTRUCTOR` = `Z_SRC_ABAP_1_L_506101B34E5CC0=>CONSTRUCTOR`.
+- `CB22=>CONSTRUCTOR` = `Z_SRC_ABAP_1_L_B22FDB51F8F4F0=>CONSTRUCTOR`.
+- `CB22=>$new` is the JS allocation factory for the CB22 ABAP class; it calls its ABAP `CONSTRUCTOR`.
+- `RT::name` = `tools/gogen/js/abap.mjs` function `name`; these are host helpers, not ABAP methods. `RT::CO.every callback` is the anonymous predicate inside `CO` (baseline runtime line 371, final line 381).
+- `RegExp:` frames belong to the invoking runtime helper: decimal grammar → `decimalDigits`/`ParseI`/`ParseF`; sign/zero/space expressions → numeric parsing; trailing-space expression → `CFit`; surrogate expression → `sectionOf` and, after fix 3, `CFit`; bounded integer expressions → `ParseI`/`ParseF`.
+- `(root)`, `(program)`, GC and Node anonymous frames have no ABAP method. RUN invokes H, H invokes P; P invokes A and the string/numeric helpers. A invokes the token constructors and numeric helpers.
+
+Go comparison: a scratch copy of the same emitted Go lexer calls
+`pprof.StartCPUProfile` just before the timed lexer and stops profiling just
+after it. It also uses the preassembled input and retains the original
+hash check. The run returned `X`, the identical hash and `lex_us = 4,145,020`;
+this is one **profiled** sample, not a new Go median. Go recorded 4.77 CPU
+seconds during 4.15 wall seconds because concurrent GC workers also count.
+`ParseI` is 0.78 s / 16.35% inclusive, `ParseF` 1.07 s / 22.43%, `CFit`
+0.33 s / 6.92%, `SubS` 0.21 s / 4.40%, `Strlen` 0.36 s / 7.55%, and the
+GC background worker 0.72 s / 15.09%. P costs 83.44% inclusive and A 31.45%.
+Thus Go also pays for the lowered numeric/string representation; it is not
+executing the vanilla TS lexer. CPU-GC percentages are not comparable to JS
+wall-pause percentages.
+
+Toolchain correction to the earlier section: the launcher reports
+`go version go1.22.2`, but `go version -m` on **both** the prior benchmark
+binary and this profile binary reports **go1.26.0** (the generated module's
+`go 1.26.0` directive selects it). Node is v26.9.0. Reading the launcher
+version alone understated the actual Go toolchain used.
+
+Go top 30 (same ABAP P/A/H/RUN mappings; `funcN` denotes a generated call wrapper in that method, not a separate ABAP method; `osg/gogen/abap.X` corresponds to JS `RT::X`):
+
+| # | Go function | Self % | Go function | Total % |
+|---:|---|---:|---|---:|
+| 1 | `P` | 6.71% | `P` | 83.44% |
+| 2 | `indexbytebody` | 6.29% | `RUN` | 83.44% |
+| 3 | `runtime.tryDeferToSpanScan` | 5.87% | `RUN.func1` | 83.44% |
+| 4 | `runtime.scanObjectsSmall` | 4.82% | `H` | 83.44% |
+| 5 | `osg/gogen/abap.ParseI` | 3.56% | `H.func3` | 83.44% |
+| 6 | `strings.ToLower` | 3.56% | `main.main` | 83.44% |
+| 7 | `internal/strconv.readFloat` | 3.35% | `runtime.main` | 83.44% |
+| 8 | `internal/stringslite.Index` | 2.94% | `A` | 31.45% |
+| 9 | `osg/gogen/abap.SubS` | 2.94% | `P.func16` | 28.72% |
+| 10 | `A` | 2.73% | `osg/gogen/abap.ParseF` | 22.43% |
+| 11 | `osg/gogen/abap.memoOf` | 2.73% | `osg/gogen/abap.ParseI` | 16.35% |
+| 12 | `osg/gogen/abap.ParseF` | 2.52% | `runtime.systemstack` | 16.14% |
+| 13 | `unicode/utf8.RuneCountInString (inline)` | 2.52% | `runtime.gcBgMarkWorker` | 15.09% |
+| 14 | `strings.Trim` | 2.31% | `runtime.gcBgMarkWorker.func2` | 15.09% |
+| 15 | `strings.TrimLeft` | 2.31% | `runtime.gcDrain` | 15.09% |
+| 16 | `indexbody` | 2.10% | `runtime.scanSpan` | 12.37% |
+| 17 | `math.Round (inline)` | 2.10% | `runtime.scanObjectsSmall` | 11.74% |
+| 18 | `strings.TrimRight` | 2.10% | `runtime.newobject` | 10.48% |
+| 19 | `osg/gogen/abap.Strlen` | 1.89% | `internal/stringslite.IndexByte (inline)` | 9.01% |
+| 20 | `internal/bytealg.IndexByteString` | 1.68% | `runtime.gcDrainMarkWorkerDedicated (inline)` | 9.01% |
+| 21 | `runtime.mallocgcSmallScanNoHeader` | 1.68% | `runtime.mallocgc` | 9.01% |
+| 22 | `osg/gogen/abap.count16` | 1.47% | `strings.IndexByte (inline)` | 9.01% |
+| 23 | `runtime.(*mspan).writeHeapBitsSmall` | 1.47% | `P.func15` | 8.39% |
+| 24 | `runtime.newobject` | 1.47% | `runtime.mallocgcSmallScanNoHeader` | 7.97% |
+| 25 | `osg/gogen/abap.CFit` | 1.26% | `osg/gogen/abap.Strlen` | 7.55% |
+| 26 | `internal/strconv.atof64` | 1.05% | `runtime.tryDeferToSpanScan` | 7.55% |
+| 27 | `internal/stringslite.IndexByte (inline)` | 1.05% | `osg/gogen/abap.CFit` | 6.92% |
+| 28 | `osg/gogen/abap.decimalDigits` | 1.05% | `indexbytebody` | 6.29% |
+| 29 | `strings.IndexAny` | 1.05% | `internal/strconv.ParseFloat` | 6.08% |
+| 30 | `strings.trimLeftByte (inline)` | 1.05% | `runtime.gcDrainMarkWorkerIdle (inline)` | 6.08% |
+
+No fourth fix was attempted. Plausible next experiments are compile-time
+folding of proven numeric text constants, caching/avoiding repeated string
+classification, and removing empty call-finally regions without touching
+exceptional reference write-back. Those are plans, not measured improvements.
+In the final profile the two main parsers together account for 22.54%
+inclusive CPU: even magically removing them leaves about 77% of the current
+work, around **4.5 s** on the 5.782 s median. That is an illustrative Amdahl
+calculation, not a predicted benchmark or a hard floor. Fitting and sectioning
+still matter and the large generated P body hides inlined operations.
+**About 4–5 s seems a defensible next target; approaching 3.6 s Go is plausible
+but unproven.** There is no evidence for reaching 0.338 s vanilla through
+runtime-local patches: the final gap is still ~17×, and eliminating parsers
+alone leaves ~13×. Reaching that layer would likely require specialization
+of the lowered numeric/string/object representation and much less generated
+work, beyond this three-fix scope.
+
+Validation: original compiled ABAP Unit PASS; individual lexer cases
+**44/44 PASS**, including the original combined test and teardown; focused
+unit-js/pilot tests **13 pass, 0 fail**; semantics **190 Go + 190 JS results,
+all ok, 0 FAIL**, plus the expected refusal checks, exit 0. A differential
+scratch test compares **40,074 numeric outcomes** to the starting runtime,
+including error class/message, negative zero, boundaries, whitespace, decimal,
+exponent, special values and trailing-newline inputs; Unicode/unpaired-surrogate
+and negative/zero-length fitting comparisons also pass. Size budget and
+explicit changed-file leak scan exit 0; the same two untouched inherited
+size breaches remain. The runtime ceiling increases by exactly 10 lines with
+a measured/tested reason. No failing check was removed.
+
+All heavy runs used `GOFLAGS=-buildvcs=false`, the requested Go cache and
+RAM scratch, range 50–59, `nice -n10`, and the resource gate. IO and available
+memory remained within the requested bounds at recorded launch checks;
+load excursions above 12 delayed launches. All retained timing samples and final runs recheck the
+limits after obtaining their heavy slot. Preliminary timing logs from the
+before-queue-only gate were saved as `prequeue-*` and excluded from this table.
+The final stage was also replayed immediately after the gated first two stages;
+its earlier gated samples are saved as `earlier-*` and excluded from the table. No unrelated process was signalled.
+
+Reproduction artifacts remain gitignored in `.local/lexer-profile/`:
+`run.py`/`gate.py`, baseline and three runtime/module snapshots, three logs
+per stage, `baseline.cpuprofile` (original full run),
+`lexer-baseline.cpuprofile` (marked lexer), `final.cpuprofile`, GC logs,
+`analyze.py`, top-30 summaries, Go `go.cpu`/`go-profile` and self/total
+pprof reports, differential script and validation logs. Profiles use:
+
+```sh
+node --max-old-space-size=16000 --cpu-prof --cpu-prof-dir=<scratch> \
+  --cpu-prof-name=<stage>.cpuprofile --trace-gc \
+  tools/gogen/lexer-bench.mjs --execute <scratch-module>
+# Prepend the same resource-gated heavy wrapper as above.
+go tool pprof -top -nodecount=30 <scratch-go-binary> <scratch>/go.cpu
+go tool pprof -top -cum -nodecount=30 <scratch-go-binary> <scratch>/go.cpu
+```
+
+The final original assembly/hash replay is recorded in `final-original.log`.
+Nothing was pushed; statements and structures remain unmeasured here.
