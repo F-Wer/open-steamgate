@@ -56,7 +56,8 @@
     "test/kernel-conformance.mjs",
     "test/osd-zip-layer.mjs",
     "test/osd-zip-start-warm.mjs",
-    "test/osd-up-help.mjs"
+    "test/osd-up-help.mjs",
+    "test/osd-hitlist.mjs"
   ],
   "groups": {
     "gogen": [
