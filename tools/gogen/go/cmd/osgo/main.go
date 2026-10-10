@@ -28,7 +28,6 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/http/pprof"
 	"net/url"
 	"os"
 	"path"
@@ -44,6 +43,7 @@ import (
 	"osg/gogen/compiler"
 	"osg/gogen/objstore"
 	"osg/gogen/osdbind"
+	"osg/gogen/profiling"
 	"osg/gogen/storecompiler"
 	"osg/gogen/sysid"
 )
@@ -479,6 +479,8 @@ func main() {
 	compilerStatus := flag.Bool("compiler-status", false, "print compiler sidecar status as JSON")
 	version := flag.Bool("version", false, "print release tag and commit")
 	adtFlag := flag.Bool("adt", false, "mount /sap/bc/adt through ZCL_OSD_ADT_HANDLER (also OSD_OSGO_ADT=1; default off)")
+	pprofFlag := flag.Bool("pprof", false, "enable loopback-only profiling (also OSD_PPROF=1)")
+	pprofAddr := flag.String("pprof-addr", "", "separate profiling listener (default 127.0.0.1:6060)")
 	root := flag.String("root", osgRoot, "the checkout whose webapp/ is served")
 	media := flag.String("media", "", "the SMW0 media directory (w3mi.json and the data files); default media/ beside the binary when it is there")
 	// HTTPS beside HTTP, the way a system answers on 443nn next to 80nn: the
@@ -530,16 +532,15 @@ func main() {
 		}
 	}
 	started := time.Now()
-	// OSGO_PPROF=127.0.0.1:<port>: Go's profiler on a listener of its own,
-	// never on the service's port (go tool pprof http://<addr>/debug/pprof/profile)
-	if a := osdbind.PprofAddr(os.Getenv("OSGO_PPROF"), binds[0]); a != "" {
-		pm := http.NewServeMux()
-		pm.HandleFunc("/debug/pprof/", pprof.Index)
-		pm.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		pm.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		// osd-bind-allow: a comes from osdbind.PprofAddr, a bare port stays on the bind host
-		go func() { log.Printf("pprof: %v", http.ListenAndServe(a, pm)) }()
-		log.Printf("pprof: http://%s/debug/pprof/", a)
+	profileConfig := profiling.Selected(*pprofFlag, *pprofAddr, os.Getenv)
+	profileServer, profileListener, err := profileConfig.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if profileListener != nil {
+		defer profileServer.Close()
+		go func() { log.Printf("pprof: %v", profileServer.Serve(profileListener)) }()
+		log.Printf("pprof: http://%s/debug/pprof/ (separate loopback listener)", profileListener.Addr())
 	}
 	abap.HostFacts = append(abap.HostFacts, "host\tosgo: net/http in front of cl_express_icf_shim, one dialog step per request", buildFacts)
 
@@ -691,7 +692,7 @@ func main() {
 	sort.SliceStable(routes, func(i, j int) bool { return len(routes[i].prefix) > len(routes[j].prefix) })
 
 	upgrade := channelRoutes()
-	mux := routeMatcher(routes, notFound, upgrade)
+	mux := profiling.HTTP(profileConfig.Enabled, routeMatcher(routes, notFound, upgrade))
 
 	for _, svc := range icfServices {
 		log.Printf("ICF service  on http://localhost:%d%s  (%s)", *port, svc.Path, svc.Handler)

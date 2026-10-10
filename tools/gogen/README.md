@@ -1474,7 +1474,7 @@ testdata classes, deleted after) and pinned in `semantics.mjs` on Go and JS
 ImportSet was slow (20-50 s a call) because `FIND ... IN SECTION OFFSET`
 converted the whole text to runes on every call, and ZCL_STG_SADL_DEF walks
 its XML that way once per request of ZSTG_SEGW_SRV (45 of 60 s of a pprof;
-`OSGO_PPROF=127.0.0.1:<port>` puts Go's profiler on a listener of its own).
+`OSD_PPROF=1` or `-pprof` puts Go's profiler on a separate loopback-only listener; see [profiling](go/profiling/README.md)).
 Then a prepared-statement cache that keeps the LUW (a text run twice in a
 step is prepared once the step has ended; `TestLUWStatementCache`), and CP
 without per-call rune copies (most of the GC). Same instrument on both
