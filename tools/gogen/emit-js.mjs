@@ -1,4 +1,4 @@
-import {localConstant} from "./emit-local-constants.mjs";
+import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {ipow, boolx} from "./ipow-js.mjs";
 import {emitBuiltinJs} from "./emit-builtins.mjs";
 // IR -> JavaScript, from the same IR as emit-go.mjs.
@@ -169,7 +169,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`export function new_${st.go}() {`, `  return {${st.fields.map((f) => `${ident(f.name)}: ${zero(f.type)}`).join(", ")}};`, "}");
   }
   out.push("");
-  for (const c of program.consts.values()) out.push(`const ${c.go} = ${literal(c)};`);
+  out.push(...localConstantDeclarations(program.consts, {js: true, zero, literal}));
   out.push("");
   const compiledNames = new Set(program.classes.map((c) => c.name));
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
@@ -292,12 +292,12 @@ function chainCctor(cls) {
   for (let c = cls; c; c = c.super ? BYNAME.get(c.super) : null) if (ownCctor(c)) return true;
   return false;
 }
-
 function method(cls, m) {
   const params = ["s", ...m.params.map((p) => ident(p.name))];
   const head = `  ${m.static ? "static " : ""}${typeName(m.name)}(${params.join(", ")}) {`;
   const lines = [head];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`    ${typeName(cls.name)}.$ensure(s);`);
+  if (m.localConstantInit) lines.push(`    ${m.localConstantInit}();`);
   if (!m.static) lines.push("    const me = this;");
   const ret = m.returning ? ident(m.returning.name) : null;
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);

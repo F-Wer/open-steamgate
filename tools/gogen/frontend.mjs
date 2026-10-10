@@ -682,11 +682,11 @@ function functionGroupIr(ctx0, g) {
       // arguments are evaluated, like Node's wrapper (osd-enq-host.mjs)
       if (x.updateTask) compiled.unshift({s: "note_update_task"});
       cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+        localConstantInit: ctx.localConstantInit, body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
       // a module is not a class: a path of the front end written for classes
-      // may fail on it with an error that is not a refusal; the module is
-      // then a stub that dumps with that error, never a crash of the build
+      // may fail outside a refusal; such a module becomes a dumping stub
+      if (e.message.startsWith("local constant name collision:")) throw e;
       skip(e instanceof Unsupported ? e.message : `the front end failed on a function module: ${e.message}`);
     }
   }
@@ -1710,7 +1710,7 @@ function classIr(ctx0, obj) {
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
+        localConstantInit: ctx.localConstantInit, body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
       // by the class, not the method: a producer kept in an attribute and
       // sent from a method that never names the type is this class's call
       // too (the critic on #263). The AMC classes are not callers, as Node's

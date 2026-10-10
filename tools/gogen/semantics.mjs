@@ -22,6 +22,8 @@ const EXPECT = {
   // unmeasured; ABAP documentation: generic binary rows, writable components, and failed assignment.
   ZCL_GOGEN_T_BINARY: "x:0102A0B0 miss:4/free miss:4/free/CCDD/CCDD s:1122 second:0/Q miss:4/free/CCDD/Q any:CCDDCCDD miss:4/free miss:4/free omitted:[]",
   // Unmeasured regression: literal local CONSTANTS share ordinary VALUE conversion.
+  ZCL_GOGEN_T_CONSTLOAD: "1",
+  ZCL_GOGEN_T_CONSTENTRY: "1/2/12/2/0",
   ZCL_GOGEN_T_LOCALCONST: "-9223372036854775808/9223372036854775807/-42/00012/[2024]/[12]/[xy   ]/hello/[ab   ]/21/-9223372036854775808/9223372036854775807/-42/00012/[2024]/[12]/[xy   ]/hello/[ab   ]/21",
   // Unmeasured regression: nested classic mappings; OTHERS cannot take a class exception.
   ZCL_GOGEN_T_CLASSICNEST: "0/3/7/9/class",

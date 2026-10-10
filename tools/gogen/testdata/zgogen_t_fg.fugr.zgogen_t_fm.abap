@@ -17,10 +17,12 @@ FUNCTION zgogen_t_fm.
 * The module ZCL_GOGEN_T_FM calls; on A4H with the same body and the
 * signature in source form (TABLES ct_row LIKE zgogen_t_dbw).
 
+  CONSTANTS factor TYPE f VALUE '2'.
+  CONSTANTS increment TYPE i VALUE 1.
   DATA ls TYPE zgogen_t_dbw.
   ev_s = |in:{ iv_n }/{ ev_n }/{ cv_n }/{ lines( ct_row ) }|.
-  ev_n = iv_n * 2.
-  cv_n = cv_n + 1.
+  ev_n = iv_n * factor.
+  cv_n = cv_n + increment.
   ls-id = 'F'.
   ls-val = iv_n.
   APPEND ls TO ct_row.

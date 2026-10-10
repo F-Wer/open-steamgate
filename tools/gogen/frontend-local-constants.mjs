@@ -1,8 +1,10 @@
-// Literal local CONSTANTS use exactly the ordinary VALUE conversion, but the
-// resulting expression belongs to the program, not a method activation.
+// Literal CONSTANTS retain their VALUE conversion, initialized on first entry.
+const segment = (s) => `${s.length}_${Array.from(s, (c) => c.charCodeAt(0).toString(16).padStart(4, "0")).join("")}`;
 export function hoistLocalConstants(body, ctx, h) {
   const {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported} = h;
   ctx.localConstants = new Map();
+  const owner = `${goName(ctx.className)}__LOCAL_CONSTANT__${segment(ctx.className)}_${segment(ctx.method)}`;
+  ctx.localConstantInit = undefined;
   const literalValue = (node) => {
     const val = node.findFirstExpression(Expressions.Value);
     const src = val?.getChildren().find((c) => !isTok(c));
@@ -10,8 +12,10 @@ export function hoistLocalConstants(body, ctx, h) {
   };
   const add = (name, type, init) => {
     // Keep the class prefix: layered builds and frontend caches use it.
-    const go = goName(`${ctx.className}=>LOCAL_CONSTANT=>${ctx.method}=>${name}`);
-    ctx.program.consts.set(go, {go, type, ...init});
+    const go = `${owner}_${segment(name)}`;
+    if (ctx.program.consts.has(go)) throw new Error(`local constant name collision: ${ctx.className}=>${ctx.method}=>${name} (${go})`);
+    ctx.localConstantInit = `${owner}_INIT`;
+    ctx.program.consts.set(go, {go, type, localConstantInit: ctx.localConstantInit, ...init});
     ctx.localConstants.set(name, {e: "const", go, type});
     ctx.locals.delete(name);
   };

@@ -1,6 +1,6 @@
 import {typeName, funcName} from "./symbols.mjs";
 export {typeName, funcName} from "./symbols.mjs";
-import {localConstant} from "./emit-local-constants.mjs";
+import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
@@ -342,7 +342,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
     for (const f of st.fields) out.push(`\t${ident(f.name)} ${goType(f.type)}`);
     out.push("}", "");
   }
-  for (const c of consts.values()) out.push(`var ${c.go} ${goType(c.type)} = ${constLiteral(c)}`);
+  out.push(...localConstantDeclarations(consts, {type: goType, literal: constLiteral}));
   if (consts.size > 0) out.push("");
   // interfaces used as reference types, and classes referred to but not compiled
   for (const [name, sigs] of program.interfaceMethods ?? []) {
@@ -952,11 +952,11 @@ function amcGlue(program) {
     "\treturn func(receiver any, m amc.Message) {", "\t\tswitch m.Type {", ...cases,
     "\t\tdefault:", "\t\t\tpanic(abap.NotCompiled(\"AMC delivery\", \"no receiver for a \"+m.Type+\" message in this program\"))", "\t\t}", "\t}", "}", ""];
 }
-
 function method(cls, m) {
   SYMBOLS?.(cls, m, m.static ? funcName(cls.name, m.name) : typeName(m.name), m.static ? null : typeName(cls.name));
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
+  if (m.localConstantInit) lines.push(`\t${m.localConstantInit}()`);
   if (!m.static) lines.push("\t_ = me");
   if (cls.hostReplaced) lines.push(...hostMethod(cls, m));
   // a method that calls the AMC API: its class pool is who is calling while

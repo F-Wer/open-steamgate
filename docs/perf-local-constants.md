@@ -1,29 +1,41 @@
 # Local constants evaluated once
 
-Literal method-local `CONSTANTS` now use program constants in the gogen IR.
-Their initializers run once at Go package initialization or JS module loading,
-using the same VALUE conversion expressions as local DATA. This includes
-literal fields of a local `CONSTANTS: BEGIN OF ... END OF` structure and
-constants declared inside loops. Reads refer to the program value directly;
-there is no initialization at method entry. Function-module locals use the
-same lowering path.
+Literal method-local `CONSTANTS` use program storage in the gogen IR.
+Both backends initialize that storage lazily on first entry into the owning
+method, through one guarded helper per method. The guard becomes true only
+after every initializer succeeds. A failed conversion therefore raises at
+method entry, leaves the guard false, and is retried on the next entry.
+Unused methods cannot raise from their local constants during program loading.
+Successful initialization is shared by recursive and subsequent entries.
+This also applies to literal fields of local constant structures and constants
+declared inside loops. Function-module locals use the same lowering path.
 
 No new numeric folding is introduced: float text still uses `ParseF`, int8
 text still uses `ParseI8`, and fitting/rounding keeps the existing converters.
-Class/interface constants already have package/module scope and keep their
-existing behavior. Nonliteral elementary initializers keep their previous
-path; nonliteral structure fields remain unsupported. Hoisted names retain
-the declaring class prefix for layered builds.
+Class/interface constants retain their existing behavior. Nonliteral elementary
+initializers, including references to another local or class constant, keep
+their previous per-entry path; nonliteral structure fields remain unsupported.
+Names retain the declaring class prefix for layered builds, followed by
+length-prefixed hexadecimal encodings of the full class, method and constant
+names. This distinguishes underscores, local-class `OWNER:LOCAL` names and
+interface-method `INTF~METH` names. Duplicate constant symbols and conflicts
+with generated initializer/guard symbols fail generation loudly.
 
 Constants cannot be assignment targets. JS constant structures are frozen;
 moving one into DATA copies the value so the destination remains writable.
 
-The semantics fixture covers float text (`-2147483648`, `2147483647`,
+The semantics fixtures cover float text (`-2147483648`, `2147483647`,
 `1E+2`), packed decimal rounding, both int8 bounds, i, n/d/t/c fitting,
-string, a structure, copying that structure, loop use and repeated method
-calls. Expected values are a regression oracle from the existing conversions,
-not a new SAP measurement. The emission regression checks both backends and
-was confirmed red against the original Go method-body `ParseF` assignment.
+string, x, xstring, a structure, copying that structure, loop use and repeated
+method calls. They also cover recursive entry, dependencies on a local and a
+class constant, the `A__B/C` versus `A/B__C` collision, unused overflow,
+conversion failure and retry before the method body, and function modules.
+Emitter tests execute local classes with an interface method and an ordinary
+method sharing a constant name in both Go and JS. A conversion-counting JS
+probe verifies retry and successful caching during recursive re-entry. A
+numeric RUN returns 1 with an unused overflow constant; calling that method
+raises `CX_SY_CONVERSION_OVERFLOW` in both backends. FORMs have no lowering
+path here. These are regression oracles, not new SAP measurements.
 
 ## Lexer measurement
 
@@ -32,18 +44,22 @@ The retained lexre harness assembles the original embedded payload and stops
 RUN after lexer count, dump and hash validation. The lexer time excludes
 assembly, dumping, hashing and compilation. Each timing is a fresh Go
 process; the result is the median of three. Before uses the unmodified
-frontend/emitter from `7720f6e`; after uses this change with the same runtime.
+frontend/emitter from `7720f6e`; eager hoist uses `be3d8da44`; lazy hoist
+uses this fix. All use the same runtime and harness.
 
 | Go | Three lexer samples (µs) | Median (s) |
 |---|---|---|
 | Before | 2416826, 2350102, 2277261 | 2.350102 |
-| After | 1738195, 1738357, 1869464 | 1.738357 |
+| Eager hoist | 1738195, 1738357, 1869464 | 1.738357 |
+| Lazy hoist (fix) | 1851495, 1909630, 1759769 | 1.851495 |
 
-Lexer time decreased by **26.0%**. The generated ADD method no longer
-contains either bound constant's `ParseF` initializer. The generated binaries
-use Go 1.26.0.
+The lazy fix retains a **21.2%** lexer improvement over the original
+median (the eager hoist measured 26.0%). The generated ADD method calls a
+guarded initializer instead of converting its bounds on each entry.
+The generated binaries use Go 1.26.0. These are lexer-only measurements;
+no end-to-end improvement was measured.
 
-All six retained runs return `X`, 609,647 tokens and SHA-256
+All nine retained runs return `X`, 609,647 tokens and SHA-256
 `9b118dd1e5ed640bbe07f1e8f4848b8fcaaa6a25c5ab126a12f018c46664df40`.
 All 953 input files still match lexre's manifest. Runs use
 `GOFLAGS=-buildvcs=false`, the shared Go cache, RAM scratch, `nice -n10` and
@@ -53,16 +69,15 @@ limits attribution of small timing differences.
 
 ## Validation
 
-- Full `semantics.mjs`: 384 Go/JS checks, 0 FAIL, including padding,
-  repeated calls and modification of a DATA copy of the constant structure.
-- Original frontend/emitter fixture replay: identical Go and JS output;
-  the formerly unsupported local structure uses the old equivalent DATA
-  field assignments for this comparison.
-- Emitter and frontend-cache tests cover the hoist, read-only targets and
-  invalidation when either new helper changes. The cache fixture now writes
-  valid JSON for the configuration read by pack discovery.
-- `go test ./abap ./intarith ./packedint`, changed size budget and leak scan.
+- Full `semantics.mjs`: 388 Go/JS checks, 0 FAIL, including the entry/retry and byte
+  regressions and function-module constants.
+- Emitter and frontend-cache tests: 43 passed, 0 failed. They cover lazy
+  loading, retry, successful caching, local classes, interface-method names,
+  collision refusal, read-only targets and helper cache invalidation.
+- `go test ./abap ./intarith ./packedint`, changed size budget and staged
+  leak scan all exit 0.
 
-Scratch scripts and logs are retained in `.local/constants-once/`; generated
-lexer builds and all six sample records are in RAM scratch `constants-before`
-and `constants-after`. No benchmark input or harness source is committed.
+Scratch scripts and logs are retained in `.local/constants-once/`. The new
+lexer build and three samples are in RAM scratch `constants-fix`; original
+before/after runs remain in `constants-before` and `constants-after`.
+No benchmark input or harness source is committed.
