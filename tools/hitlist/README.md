@@ -30,8 +30,8 @@ a sample, so recursion does not double-count. Percentages use **all selected
 CPU weight**, including runtime-only samples; unassigned work is reported in
 the header. Independent GC worker samples cannot be attributed to an ABAP
 line, though synchronous alloc/GC work in an ABAP stack can. The top callee
-is the runtime frame nearest that ABAP caller, ranked by CPU weight, with
-sample count retained in JSON. This keeps `ParseI`/`ReplaceStmt` visible even
+is the runtime frame nearest that ABAP caller, ranked by sample count when known (otherwise metric weight), with
+both count and weight retained in JSON. This keeps `ParseI`/`ReplaceStmt` visible even
 when their own library callees consume CPU. Sampling does not measure calls.
 
 `names.json` from `abapiti abaplint -o out` maps lowercase generated class

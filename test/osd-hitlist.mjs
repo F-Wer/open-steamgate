@@ -39,7 +39,7 @@ describe("native ABAP hit lists", () => {
   it("decodes receiver/interface methods, constructors and generated closures", () => {
     assert.equal(abapSite({name:"main.(*ZDEMO).IF_REQUEST__RUN.func1",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>IF_REQUEST~RUN:42");
     assert.equal(abapSite({name:"main.New_ZDEMO",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>CONSTRUCTOR:42");
-    assert.equal(abapSite({name:"main.(*_DEMO_CL).RUN",file:"#demo#cl.clas.abap",line:42}).key,"/DEMO/CL=>RUN:42");
+    assert.equal(abapSite({name:"main.(*N_DEMO_CL).RUN",file:"#demo#cl.clas.abap",line:42}).key,"/DEMO/CL=>RUN:42");
   });
   it("parses compressed/uncompressed, packed/unpacked protobuf and inline frames", () => {
     assert.deepEqual(parsePprof(fixture(false)), parsed());
@@ -66,17 +66,17 @@ describe("native ABAP hit lists", () => {
     assert.equal(hitlist(parsed(),{tags:["method=missing"]}).rows.length,0);
     assert.throws(()=>hitlist(parsed(),{tags:["bad"]}),/key=value/);
   });
-  it("deduplicates recursion and ranks native callees by CPU weight", () => {
+  it("deduplicates recursion and ranks native callees by sample count", () => {
     const f={name:"main.ZDEMO_RUN",file:"zdemo.clas.abap",line:42};
     const p={format:"pprof", samples:[
-      {frames:[{name:"ParseI",file:"convert.go",line:1},f,f],weight:10,samples:1,labels:{}},
+      {frames:[{name:"ParseI",file:"convert.go",line:1},f,f],weight:10,samples:5,labels:{}},
       {frames:[{name:"REPLACE",file:"strings.go",line:2},f],weight:30,samples:3,labels:{}},
     ]};
     const r=hitlist(p);
     assert.equal(r.rows[0].cumWeight,40);
     assert.equal(r.rows[0].flatWeight,40);
-    assert.equal(r.rows[0].topCallee.name,"REPLACE");
-    assert.equal(r.rows[0].topCallee.samples,3);
+    assert.equal(r.rows[0].topCallee.name,"ParseI");
+    assert.equal(r.rows[0].topCallee.samples,5);
   });
   it("maps actual abapiti names and exact counts without inventing TS lines or calls", () => {
     const r=hitlist(parsed(), {names:{zdemo:"src/file.ts.Demo.run"},counts:{"zdemo.clas.abap:42":500}});

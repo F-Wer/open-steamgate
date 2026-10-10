@@ -8,12 +8,14 @@ const normalized = s => s.replaceAll("\\", "/");
 export function abapSite(frame) {
   if (!/\.abap$/i.test(frame.file) || frame.line < 1) return null;
   const owner = basename(normalized(frame.file)).split(".")[0].replaceAll("#", "/").toUpperCase();
+  const safeOwner = owner.replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
+  const ownerSymbol = safeOwner.startsWith("_") ? `N${safeOwner}` : safeOwner;
   let name = frame.name.replace(/^main\./, "").replace(/\.(?:func|deferwrap|gowrap)\d+(?:\.\d+)*$/, "");
   const receiver = /^\(\*?([^)]*)\)\.(.+)$/.exec(name);
   let cls = owner, method;
-  if (receiver) { cls = receiver[1].toUpperCase() === owner.replaceAll("/", "_") ? owner : receiver[1].toUpperCase(); method = receiver[2]; }
-  else if (name.toUpperCase().startsWith(owner.replaceAll("/", "_") + "_")) method = name.slice(owner.length + 1);
-  else if (name === `New_${owner.replaceAll("/", "_")}`) method = "CONSTRUCTOR";
+  if (receiver) { cls = receiver[1].toUpperCase() === ownerSymbol ? owner : receiver[1].toUpperCase(); method = receiver[2]; }
+  else if (name.toUpperCase().startsWith(ownerSymbol + "_")) method = name.slice(ownerSymbol.length + 1);
+  else if (name === `New_${ownerSymbol}`) method = "CONSTRUCTOR";
   else if (name.includes("=>")) [cls, method] = name.split("=>");
   else method = name;
   return {key: `${cls}=>${method.toUpperCase().replaceAll("__", "~")}:${frame.line}`, class: cls,
@@ -95,7 +97,7 @@ export function hitlist(profile, {tags = [], names = {}, counts = {}, host, comm
   }
   const pct = weight => totalWeight ? 100 * weight / totalWeight : 0;
   const list = [...rows.values()].map(row => {
-    const topCallee = [...row.callees.values()].sort((a,b) => b.weight - a.weight || a.name.localeCompare(b.name))[0] ?? null;
+    const topCallee = [...row.callees.values()].sort((a,b) => (b.samples ?? b.weight) - (a.samples ?? a.weight) || b.weight - a.weight || a.name.localeCompare(b.name))[0] ?? null;
     const {callees, ...rest} = row;
     return {...rest, flatPercent: pct(row.flatWeight), cumPercent: pct(row.cumWeight),
       calls: exactCalls(row, counts.counts ?? counts), topCallee};
