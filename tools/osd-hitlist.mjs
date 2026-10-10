@@ -12,7 +12,8 @@ const json = file => JSON.parse(readFileSync(file, "utf8"));
 export function readProfile(file) {
   const buf = readFileSync(file);
   if (/^[\s]*[\[{]/.test(buf.subarray(0, 64).toString())) {
-    const p = JSON.parse(buf.toString());
+    let p;
+    try {p = JSON.parse(buf.toString());} catch {return parsePprof(buf);}
     if (p.schema === "osd-hitlist/v1") {
       if (p.kind !== "hitlist" || !p.metadata || !Array.isArray(p.rows)) throw new Error("input must be a hit list, not a diff");
       for (const r of p.rows) {

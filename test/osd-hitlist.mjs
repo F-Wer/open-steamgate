@@ -6,7 +6,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {parsePprof} from "../tools/hitlist/pprof.mjs";
 import {parseV8} from "../tools/hitlist/v8.mjs";
-import {diff, hitlist, selectRows} from "../tools/hitlist/hitlist.mjs";
+import {abapSite, diff, hitlist, selectRows} from "../tools/hitlist/hitlist.mjs";
 import {markdown} from "../tools/hitlist/markdown.mjs";
 import {run} from "../tools/osd-hitlist.mjs";
 
@@ -36,6 +36,11 @@ function fixture(packedFields = true) {
 const parsed = () => parsePprof(gzipSync(fixture()));
 
 describe("native ABAP hit lists", () => {
+  it("decodes receiver/interface methods, constructors and generated closures", () => {
+    assert.equal(abapSite({name:"main.(*ZDEMO).IF_REQUEST__RUN.func1",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>IF_REQUEST~RUN:42");
+    assert.equal(abapSite({name:"main.New_ZDEMO",file:"zdemo.clas.abap",line:42}).key,"ZDEMO=>CONSTRUCTOR:42");
+    assert.equal(abapSite({name:"main.(*_DEMO_CL).RUN",file:"#demo#cl.clas.abap",line:42}).key,"/DEMO/CL=>RUN:42");
+  });
   it("parses compressed/uncompressed, packed/unpacked protobuf and inline frames", () => {
     assert.deepEqual(parsePprof(fixture(false)), parsed());
     const r = hitlist(parsed());

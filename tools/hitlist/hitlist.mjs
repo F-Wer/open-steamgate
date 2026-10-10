@@ -11,8 +11,9 @@ export function abapSite(frame) {
   let name = frame.name.replace(/^main\./, "").replace(/\.(?:func|deferwrap|gowrap)\d+(?:\.\d+)*$/, "");
   const receiver = /^\(\*?([^)]*)\)\.(.+)$/.exec(name);
   let cls = owner, method;
-  if (receiver) { cls = receiver[1].toUpperCase(); method = receiver[2]; }
+  if (receiver) { cls = receiver[1].toUpperCase() === owner.replaceAll("/", "_") ? owner : receiver[1].toUpperCase(); method = receiver[2]; }
   else if (name.toUpperCase().startsWith(owner.replaceAll("/", "_") + "_")) method = name.slice(owner.length + 1);
+  else if (name === `New_${owner.replaceAll("/", "_")}`) method = "CONSTRUCTOR";
   else if (name.includes("=>")) [cls, method] = name.split("=>");
   else method = name;
   return {key: `${cls}=>${method.toUpperCase().replaceAll("__", "~")}:${frame.line}`, class: cls,
