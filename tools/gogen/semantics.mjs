@@ -35,6 +35,7 @@ const EXPECT = {
   // Unmeasured regression: recursive MESSAGE masking and nested classic mappings.
   ZCL_GOGEN_T_CALLSCOPE: {Go: "continue/outer/7/ZZ/S/007/nested/9/continue/outer3/0//5/11/continue/outer3/0/continue/",
     JS: "ERROR NOT_COMPILED in abap.MessageRaise: a host function of the Go runtime"},
+  ZCL_GOGEN_T__PILOT: "7/1/X/X/X///7/C3A4/00D8/AA/007/hello/2",
   // Unmeasured: ABAP value semantics
   ZCL_GOGEN_T_MOVCLR: "clear:3,0 append:1,9 delete:2,2 free:4,2,8 deep:6,10 component:14,16 object:18,19 loop:11,2,13",
   // Unmeasured: ABAP value semantics; a forwarded row reference must not alias the copy.
@@ -267,9 +268,9 @@ const EXPECT = {
   // CL_ABAP_ZIP=>SAVE of two files, run against SAP's own CL_ABAP_ZIP on
   // A4H ($ZOSG_TMP_0083) and open-abap-core's here: the same frame, entry
   // count, first name and CRC-32 (zlib's too); SHIFT LEFT CIRCULAR IN BYTE
-  // MODE rotates one byte. JS has no codepage host function
+  // MODE rotates one byte. JS reaches the raw DEFLATE host refusal
   ZCL_GOGEN_T_ZIP: {Go: "shift:BBAA/02030401 head:504B0304 eocd:504B0506 entries:0200 name:612E747874 crc:-1167589325",
-    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
+    JS: "ERROR NOT_COMPILED in abap.DeflateRaw: a host function of the Go runtime"},
   ZCL_GOGEN_T_BYTECATX: "exact:000000AB/0 short:ABCDEF00/0 long:CDEF1234/4 rev:04030201/0 sub:000000B2/0",
   // parity-wave2, A4H 2026-09-24 ($ZOSG_TMP_0082, ABAP Unit probe of this
   // class, in two runs whose outputs are joined here): a text into an i is
@@ -317,11 +318,9 @@ const EXPECT = {
   // position, names aside; DEFAULT names a constant of the class, bare or
   // as cls=>c. The conversions are open-abap's kernel code as Go host
   // functions: UTF-8 and 4103 (UTF-16LE) there and back, N cuts the text
-  // before it is encoded; the JS emitter has no host function for them and
-  // refuses
+  // before it is encoded; both emitters now use the same host contract
   ZCL_GOGEN_T_TRAVMISC: "move:pq/42/rst back:pq/5/rst dflt:dx/7 v/7 dx/1",
-  ZCL_GOGEN_T_TRAVCONV: {Go: "u8:61C3A4E282AC>same u16:6100E400AC20>same cut8:6162 cut16:610062006300",
-    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
+  ZCL_GOGEN_T_TRAVCONV: "u8:61C3A4E282AC>same u16:6100E400AC20>same cut8:6162 cut16:610062006300",
   ZCL_GOGEN_T_SHIFT: "1:4[__ab] 2:4[_ab_] 3:2[ab] 4:0[] 5:4[_aNb] 6:1[_] 7:4[abN_] 8:5[___ab]",
   // inheritance: a base method's call on me reaches the redefinition, SUPER->
   // the superclass's; a protected attribute is one field across levels; in
@@ -671,7 +670,7 @@ const EXPECT = {
   // A missing member is cleared, an unknown one ignored. The JS emitter
   // has neither JSON.parse nor RTTI as host functions
   ZCL_GOGEN_T_JSONDES: {Go: "osg/42/X//3:3,2,1X, bad:caught",
-    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
+    JS: "ERROR NOT_COMPILED in Native_JSON_PARSE: a host function of the Go runtime"},
   ZCL_GOGEN_T_SELLOOP: {Go: "n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2",
     JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // not an A4H value (A4H has no destination AMDP and says HDB / 758): parity
@@ -881,7 +880,7 @@ const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "
   "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CX_SXML_PARSE_ERROR", "CX_SXML_ERROR", "CL_ABAP_CODEPAGE",
   // raw DEFLATE and zip (parity-wave2, ZCL_GOGEN_T_GZIP, ZCL_GOGEN_T_ZIP)
   "CL_ABAP_GZIP", "CL_ABAP_ZIP"];
-const program = compileProgram({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...groups, ...CORE]});
+const program = compileProgram({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...(objects.includes("zcl_gogen_t__pilot") ? ["zcl_gogen_t_pilchild"] : []), ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
 objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));
@@ -916,6 +915,7 @@ const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "g
   env: {...process.env, OSD_DATASET_READ: "", OSD_DATASET_WRITE: datasetRoot, OSD_DATASET_HOME: ""}}).toString();
 writeFileSync(join(out, "t.mjs"), emitJs(program));
 copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
 const m = await import(pathToFileURL(join(out, "t.mjs")).href);
 let bad = 0;
 for (const line of goOut.trim().split("\n")) {

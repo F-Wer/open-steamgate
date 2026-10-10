@@ -34,4 +34,5 @@ execFileSync("go", ["build", "-trimpath", `-tags=${tags}`, "-ldflags=-s -w", "-o
   {cwd: join(here, "go"), stdio: "inherit", env: {...process.env, CGO_ENABLED: tags ? "1" : "0"}});
 writeFileSync(join(out, "demo.mjs"), emitJs(program));
 copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
 console.log(`built ${join(out, "o4dserve")} and ${join(out, "demo.mjs")} (${program.classes.length} classes, sin/cos ${tags ? "glibc" : "fdlibm"})`);

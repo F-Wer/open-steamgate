@@ -83,6 +83,7 @@ for (const scene of scenes) {
   mkdirSync(irDir);
   writeFileSync(join(irDir, "scene.mjs"), emitJs(program));
   copyFileSync(join(here, "js", "abap.mjs"), join(irDir, "abap.mjs"));
+  copyFileSync(join(here, "js", "codepage.mjs"), join(irDir, "codepage.mjs"));
   bundle(join(irDir, "scene.mjs"), join(out, `${scene}-ir.js`));
   size(`${scene}: JS from the IR (bundle)`, join(out, `${scene}-ir.js`));
 

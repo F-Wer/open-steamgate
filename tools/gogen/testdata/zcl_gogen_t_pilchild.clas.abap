@@ -1,0 +1,4 @@
+CLASS zcl_gogen_t_pilchild DEFINITION PUBLIC INHERITING FROM zcl_gogen_t__pilot FINAL CREATE PUBLIC.
+ENDCLASS.
+CLASS zcl_gogen_t_pilchild IMPLEMENTATION.
+ENDCLASS.

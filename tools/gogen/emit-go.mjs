@@ -1,6 +1,7 @@
 import {typeName, funcName} from "./symbols.mjs";
 export {typeName, funcName} from "./symbols.mjs";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
+import {constructorFactories} from "./emit-constructors.mjs";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
@@ -308,6 +309,7 @@ function cloneFuncs() {
 
 export function emitGo(program, pkg = "main", layers = null, unitBuild = false, symbols = null) {
   SYMBOLS = symbols;
+  const factories = Array.isArray(program) ? new Map() : constructorFactories(program);
   STABLE_ROWS = new Set();
   const collectStable = (v) => {
     if (Array.isArray(v)) { for (const x of v) collectStable(x); return; }
@@ -435,7 +437,8 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
       ...(ctorAt?.constructor ? [`\to.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")})`] : []),
       "\treturn o", "}", "");
     // CREATE OBJECT ... TYPE (name) passes no arguments
-    const make = cp.length === 0 ? `return New_${typeName(cls.name)}(s)`
+    const {canOmit, args} = factories.get(cls.name) ?? {canOmit: cp.length === 0, args: []};
+    const make = canOmit ? `return New_${typeName(cls.name)}(${["s", ...args.map((a) => importingArg(a, {cls, loop: 0}))].join(", ")})`
       : `panic(abap.NotCompiled(${JSON.stringify(`${cls.name}=>CONSTRUCTOR`)}, "CREATE OBJECT by name of a class whose constructor has parameters"))`;
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
@@ -2261,6 +2264,7 @@ function expr(e, ctx) {
     case "find_occ": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
     case "reverse": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.Reverse(${expr(e.x, ctx)})`;
     case "xstrlen": return `int32(len(${expr(e.x, ctx)}))`;
+    case "utf16unit": return `strings.TrimRight(abap.UTF16String([]uint16{uint16(${expr(e.x, ctx)})}), " ")`;
     case "uccpi": return `abap.Uccpi(${expr(e.x, ctx)})`;
     case "substr": {
       const off = e.off ? expr(e.off, ctx) : "0";
@@ -2424,7 +2428,6 @@ function fn(e, ctx) {
 
 // an initial reference: the frontend decided it from the static type
 // (frontend.mjs upcastable)
-const initialReferenceInstanceOf = (predicate) => (predicate.initial ? "true" : "false");
 
 function cond(c, ctx) {
   const fast = emitPackedComparison(c, (n) => expr(n, ctx));
@@ -2470,7 +2473,7 @@ function cond(c, ctx) {
     case "instance_of": {
       const value = expr(c.x, ctx);
       const target = goType(c.type);
-      const initial = initialReferenceInstanceOf(c);
+      const initial = c.initial ? "true" : "false";
       if (c.type.name === "OBJECT" && c.type.intf) return `func() bool { value := ${value}; if value == nil { return ${initial} }; return true }()`;
       return `func() bool { value := ${value}; if value == nil { return ${initial} }; _, ok := any(value).(${target}); return ok }()`;
     }

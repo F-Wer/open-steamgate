@@ -78,6 +78,7 @@ const goOut = {runs: runs.map((r, i) => {
 /* --------------------------------------------------------------------- JS */
 writeFileSync(join(out, "demo.mjs"), emitJs(program));
 copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
 const jsOut = runs.map((r, i) => {
   try {
     const res = execFileSync("node", ["--max-old-space-size=2000", join(here, "demo-js.mjs"), out, join(out, `run-${i}.json`)],
