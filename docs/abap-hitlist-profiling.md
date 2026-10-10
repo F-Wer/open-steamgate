@@ -117,3 +117,27 @@ are retained alongside the explicit build commit, rather than guessed to be
 Git SHAs. A4H results can be converted to the documented JSON schema and
 compared by ABAP identity or a shared site ID; this change does not contact
 or capture an SAP system.
+
+## Validation of this branch
+
+Nine converter tests pass, including packed/unpacked protobuf, inline frames,
+ABAP naming, recursion, label filters, TS names, exact counts, V8 chains and
+diffs. Profiling/bind package tests, vet and race tests pass. The generated
+OSGo echo host builds and its Go tests pass; the full native host builds and
+the real OData demonstration above passes. Full transpile and repository lint
+pass (79 existing warnings), suite registration has no drift, and changed-file
+leak scans, diff checks and the changed size budget pass.
+
+The report-host suite initially passed 19 of 20; the cache-reuse assertion
+observed a rebuild while tracked compiler tooling was being changed. Its
+focused replay with inputs frozen passes. No assertion was changed or waived.
+Additional vet of emitted echo code reports existing unreachable statements;
+additional `go test ./cmd/osgo` against the full generation stops at vet on
+`lv_len > 0 AND lv_len > 0`, copied from the unchanged pinned Zork source at
+line 168. These additional generated-code diagnostics remain visible; the
+required profiling/bind vet passes. An unrelated runtimeclock size overage is
+already on main and the changed-file budget check reports it separately.
+
+No local OSGB zabaplint binary was found. Cached zabaplint binaries were TS-HG
+Go programs and their profiles contain Go/TS locations, so the optional TS-HA
+native demonstration was not run.
