@@ -186,8 +186,23 @@ export const ToLower = (v) => v.toLowerCase();
 // for bytes): the fast path, measured on the editor's tokenizer (80 KB, 7840
 // tokens): 117-138 ms a scan with a spread per call, 27-30 ms without
 const SURROGATE = /[\uD800-\uDFFF]/;
-const flat = (v) => !SURROGATE.test(v);
-export const Strlen = (v) => (flat(v) ? v.length : [...v].length);
+// Repeated one-character sections of a large lexer input must not rescan
+// the entire input for surrogates. Strings are immutable; retain at most
+// four large inputs, including their code-point index when needed.
+const sectionMemo = new Map();
+function sectionOf(v) {
+  if (v.length < 4096) return {flat: !SURROGATE.test(v)};
+  let memo = sectionMemo.get(v);
+  if (!memo) {
+    memo = {flat: !SURROGATE.test(v)};
+    if (!memo.flat) memo.chars = [...v];
+    if (sectionMemo.size === 4) sectionMemo.delete(sectionMemo.keys().next().value);
+    sectionMemo.set(v, memo);
+  }
+  return memo;
+}
+const flat = (v) => sectionOf(v).flat;
+export const Strlen = (v) => { const m = sectionOf(v); return m.flat ? v.length : (m.chars ?? [...v]).length; };
 
 // f in a string template, as measured on A4H: seventeen significant digits,
 // positional, trailing zeros of the fraction dropped
@@ -301,7 +316,7 @@ export function SubS(v, off, len) {
     if (off + len > v.length) rangeError();
     return v.slice(off, off + len);
   }
-  const r = [...v];
+  const r = sectionOf(v).chars ?? [...v];
   if (off < 0 || off > r.length) rangeError();
   if (len < 0) return r.slice(off).join("");
   if (off + len > r.length) rangeError();
@@ -1696,4 +1711,75 @@ export function FindResults(s, p, kind, icase, all) {
     pos = m.index + (s.codePointAt(m.index) > 0xffff ? 2 : 1);
   }
   return out;
+}
+
+// Pairwise generic comparisons, following go/abap/gencmp.go. The pair,
+// rather than either operand alone, decides numeric versus text comparison.
+export function CmpData(a, b) {
+  if (a === null || b === null) throw notAssigned('comparison');
+  const ka = a.t.kind, kb = b.t.kind, av = a.get(), bv = b.get();
+  const cmp = (x, y) => x < y ? -1 : x > y ? 1 : 0;
+  const numeric = k => ['I', '8', 'P', 'F'].includes(k);
+  const text = k => ['C', 'g', 'D', 'T'].includes(k);
+  const numericText = k => ['C', 'g', 'N', 'D', 'T'].includes(k);
+  const normalized = (k, v) => v === '' && k === 'D' ? '00000000' : v === '' && k === 'T' ? '000000' : v;
+  if (ka === 'h' && kb === 'h') {
+    if (av.length !== bv.length) return cmp(av.length, bv.length);
+    for (let i = 0; i < av.length; i++) { const c = CmpData(cell(av[i], a.t.row), cell(bv[i], b.t.row)); if (c) return c; }
+    return 0;
+  }
+  if (['u', 'v'].includes(ka) && ['u', 'v'].includes(kb) && a.t.comps.length === b.t.comps.length) {
+    for (let i = 0; i < a.t.comps.length; i++) {
+      const ac = a.t.comps[i], bc = b.t.comps[i];
+      const c = CmpData(cell(av[ac.key], ac.t), cell(bv[bc.key], bc.t)); if (c) return c;
+    }
+    return 0;
+  }
+  if (ka === 'r' && kb === 'r') return RefEq(av, bv) ? 0 : 1;
+  if (numeric(ka) && numeric(kb)) {
+    return ka === 'F' || kb === 'F' ? cmp(Number(av), Number(bv)) : CmpP(String(av), String(bv));
+  }
+  const asNumber = (n, o) => {
+    let p;
+    try {
+      p = o.t.kind === 'D' ? String(DToI(normalized('D', o.get())))
+        : o.t.kind === 'T' ? String(TToI(normalized('T', o.get()))) : CToP(o.get());
+    } catch (e) {
+      if (e.cls === 'CX_SY_CONVERSION_NO_NUMBER') throw new AbapError('CONVT_NO_NUMBER', 'comparison');
+      throw e;
+    }
+    if (n.t.kind === 'I') return cmp(n.get(), PToI(p, false));
+    if (n.t.kind === '8') return cmp(n.get(), PToI8(p, false));
+    if (n.t.kind === 'P') return CmpP(n.get(), PFit(p, n.t.len, n.t.dec, false));
+    return cmp(n.get(), Number(p));
+  };
+  if (numeric(ka) && numericText(kb)) return asNumber(a, b);
+  if (numeric(kb) && numericText(ka)) return -asNumber(b, a);
+  if (ka === 'N' && ['N', 'C', 'g'].includes(kb) || kb === 'N' && ['C', 'g'].includes(ka)) return CmpP(CToP(av), CToP(bv));
+  if (text(ka) && text(kb)) return cmpKey(normalized(ka, av), normalized(kb, bv));
+  throw new AbapError('NOT_COMPILED', `comparison: a generic value of type kind ${ka} with one of type kind ${kb}`);
+}
+
+export function UnitDumpToString(s, d) {
+  if (d === null) throw notAssigned('LCL_DUMP=>TO_STRING');
+  if (['u', 'v'].includes(d.t.kind)) return UnitDumpStructure(s, d);
+  if (d.t.kind === 'h') return '[itab]';
+  if (d.t.kind === 'r') {
+    const v = d.get();
+    if (v == null) throw new AbapError('OBJECTS_OBJREF_NOT_ASSIGNED', 'LCL_DUMP=>TO_STRING');
+    return `[object, ${v.constructor.$abap.split(':').at(-1).toLowerCase().replaceAll('/', '$')}]`;
+  }
+  return FmtData(d);
+}
+export function UnitDumpStructure(s, d) {
+  return d.t.comps.map(c => `${c.name.toLowerCase()}: ${UnitDumpToString(s, cell(d.get()[c.key], c.t))}`).join(', ');
+}
+
+// The same UTF-8 Buffer contract as open-abap-core and go/abap/http_utility.go.
+export const EncodeBase64 = (s, text) => Buffer.from(text, 'utf8').toString('base64');
+export const DecodeBase64 = (s, text) => Buffer.from(text, 'base64').toString('utf8');
+
+export function WithAssertQuit(quit, run) {
+  try { return run(); }
+  catch (e) { if (e instanceof Raised && e.cls === 'KERNEL_CX_ASSERT') e.assertionQuitNo = quit === 0; throw e; }
 }

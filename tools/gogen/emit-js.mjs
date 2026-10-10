@@ -601,6 +601,9 @@ function stmtLines(st, ctx, d) {
     case "db_write_sql": case "db_write":
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.verb ?? st.op.toUpperCase()} ${st.table}: the JS backend has no database (the Go host has SQLite)`)});`];
     case "native":
+      if (["abap.UnitDumpToString", "abap.UnitDumpStructure", "abap.DecodeBase64", "abap.EncodeBase64"].includes(st.fn)) {
+        return [`${t}return ${st.fn}(${["s", ...ctx.method.params.map(p => ident(p.name))].join(", ")});`];
+      }
       if (/^Native_CONV_(IN|OUT)_CONVERT$/.test(st.fn)) {
         const input = st.fn === "Native_CONV_IN_CONVERT";
         const fn = input ? "convertIn" : "convertOut";
@@ -954,7 +957,9 @@ function callStmt(e, ctx, t) {
   for (const {b, a} of boxes) if (a.byValue) lines.push(`${t}  const ${b}_value = {v: ${composite(a.type) ? `abap.copy(${b}.v)` : `${b}.v`}};`);
   // Reference parameters retain writes when the callee raises; VALUE
   // parameters are copied out only after its normal return.
-  lines.push(`${t}  try {`, `${t}    ${callee(e, ctx)}(${["s", ...args].join(", ")});`, `${t}  } finally {`);
+  const run = `${callee(e, ctx)}(${["s", ...args].join(", ")});`;
+  const quit = e.owner === "CL_ABAP_UNIT_ASSERT" ? e.args.find(a => a.name === "QUIT" && a.supplied) : null;
+  lines.push(`${t}  try {`, `${t}    ${quit ? `abap.WithAssertQuit(${expr(quit.value, ctx)}, () => { ${run} });` : run}`, `${t}  } finally {`);
   for (const {b, a} of boxes) if (a.place && !a.byValue) lines.push(`${t}    ${place(a.place, ctx)} = ${b}.v;`);
   lines.push(`${t}  }`);
   for (const {b, a} of boxes) if (a.byValue) lines.push(`${t}  ${b}.v = ${b}_value.v;`);

@@ -12,6 +12,10 @@ export function emitCondition(c, ctx, {expr, zero, place, ident, cond}) {
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat}, ${!!c.csubject})`;
     case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
+      if (c.l.e === "unwrap_chars" || c.r.e === "unwrap_chars") {
+        const side = x => x.e === "unwrap_chars" ? expr(x.x, ctx) : `abap.cell(${expr(x, ctx)}, abap.TString)`;
+        return `abap.CmpData(${side(c.l)}, ${side(c.r)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
+      }
       if (c.type?.k === "p") return `abap.CmpP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} 0`;
       return `${expr(c.l, ctx)} ${c.op === "=" ? "===" : c.op === "<>" ? "!==" : c.op} ${expr(c.r, ctx)}`;
     // ultra/events: line_exists( ) (frontend lineExists)
