@@ -7,6 +7,9 @@ CLASS zcl_gogen_t_constentry DEFINITION PUBLIC FINAL CREATE PUBLIC.
     CLASS-METHODS a RETURNING VALUE(rv) TYPE i.
     CLASS-METHODS unused RETURNING VALUE(rv) TYPE i.
     CLASS-METHODS bad.
+    CLASS-METHODS ordered.
+    CLASS-METHODS ordered_struct.
+    CLASS-METHODS bad_struct.
     CLASS-METHODS recurse IMPORTING n TYPE i RETURNING VALUE(rv) TYPE i.
 ENDCLASS.
 CLASS zcl_gogen_t_constentry IMPLEMENTATION.
@@ -43,7 +46,42 @@ CLASS zcl_gogen_t_constentry IMPLEMENTATION.
       rv = c.
     ENDIF.
   ENDMETHOD.
+  METHOD bad_struct.
+    CONSTANTS: BEGIN OF later,
+      good TYPE f VALUE '42',
+      bad TYPE f VALUE '1E+999',
+      END OF later.
+    DATA after TYPE i VALUE 'abc'.
+  ENDMETHOD.
+  METHOD ordered.
+    DATA first TYPE i VALUE 'abc'.
+    CONSTANTS later TYPE f VALUE '1E+999'.
+  ENDMETHOD.
+  METHOD ordered_struct.
+    DATA first TYPE i VALUE 'abc'.
+    CONSTANTS: BEGIN OF later,
+      good TYPE f VALUE '42',
+      bad TYPE f VALUE '1E+999',
+      END OF later.
+  ENDMETHOD.
   METHOD run.
+    DO 2 TIMES.
+      TRY.
+          ordered( ).
+          ASSERT 1 = 0.
+        CATCH cx_sy_conversion_no_number.
+      ENDTRY.
+      TRY.
+          ordered_struct( ).
+          ASSERT 1 = 0.
+        CATCH cx_sy_conversion_no_number.
+      ENDTRY.
+      TRY.
+          bad_struct( ).
+          ASSERT 1 = 0.
+        CATCH cx_sy_conversion_overflow.
+      ENDTRY.
+    ENDDO.
     DATA failures TYPE i.
     DATA result TYPE i.
     ASSERT a__b( ) = 1.

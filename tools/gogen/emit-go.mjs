@@ -956,7 +956,6 @@ function method(cls, m) {
   SYMBOLS?.(cls, m, m.static ? funcName(cls.name, m.name) : typeName(m.name), m.static ? null : typeName(cls.name));
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
-  if (m.localConstantInit) lines.push(`\t${m.localConstantInit}()`);
   if (!m.static) lines.push("\t_ = me");
   if (cls.hostReplaced) lines.push(...hostMethod(cls, m));
   // a method that calls the AMC API: its class pool is who is calling while

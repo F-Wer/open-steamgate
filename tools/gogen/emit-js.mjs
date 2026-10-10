@@ -297,7 +297,6 @@ function method(cls, m) {
   const head = `  ${m.static ? "static " : ""}${typeName(m.name)}(${params.join(", ")}) {`;
   const lines = [head];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`    ${typeName(cls.name)}.$ensure(s);`);
-  if (m.localConstantInit) lines.push(`    ${m.localConstantInit}();`);
   if (!m.static) lines.push("    const me = this;");
   const ret = m.returning ? ident(m.returning.name) : null;
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);

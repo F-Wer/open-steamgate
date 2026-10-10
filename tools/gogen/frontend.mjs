@@ -682,7 +682,7 @@ function functionGroupIr(ctx0, g) {
       // arguments are evaluated, like Node's wrapper (osd-enq-host.mjs)
       if (x.updateTask) compiled.unshift({s: "note_update_task"});
       cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        localConstantInit: ctx.localConstantInit, body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
       // a module is not a class: a path of the front end written for classes
       // may fail outside a refusal; such a module becomes a dumping stub
@@ -1710,7 +1710,7 @@ function classIr(ctx0, obj) {
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        localConstantInit: ctx.localConstantInit, body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
+        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
       // by the class, not the method: a producer kept in an attribute and
       // sent from a method that never names the type is this class's call
       // too (the critic on #263). The AMC classes are not callers, as Node's
@@ -2063,7 +2063,7 @@ function structure(node, ctx) {
     if (/\bVALUE\b/i.test(node.concatTokens())) throw new Unsupported(`DATA BEGIN OF with VALUE: ${node.concatTokens().slice(0, 60)}`);
     return {s: "nop"};
   }
-  if (isStruct(node, Structures.Constants)) return {s: "nop"};
+  if (isStruct(node, Structures.Constants)) { ctx.inits.push(...(ctx.localConstantFields?.get(node) ?? [])); return {s: "nop"}; }
   if (isStruct(node, Structures.Try)) return tryBlock(node, ctx);
   if (isStruct(node, Structures.If)) {
     const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)}];
@@ -3615,7 +3615,7 @@ function lvalue(target, ctx) {
     return {e: "sy", field: "Subrc", type: I};
   } else if (isExpr(first, Expressions.TargetField) || isExpr(first, Expressions.TargetFieldSymbol)) {
     place = variable(first.concatTokens(), ctx);
-    if (place.e === "const") throw new Unsupported(`a write to constant ${first.concatTokens()}`);
+    if (place.e === "const" || ctx.localConstantNames?.has(upper(first.concatTokens()))) throw new Unsupported(`a write to constant ${first.concatTokens()}`);
     i = 1;
   } else if (isTok(first, "ME")) {
     if (!isTok(kids[1], "->")) throw new Unsupported(`target ${target.concatTokens()}`);
