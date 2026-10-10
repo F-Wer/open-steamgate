@@ -3970,22 +3970,20 @@ function source(node, ctx, outer, hint = outer) {
   }
   const bits = hasBitOp(node);
   if (bits) {
-    // BIT-AND / BIT-OR / BIT-XOR of two x fields of one length, byte by byte
+    // Bit expressions calculate to the longest operand, padding on the right.
     const leaves = leafTypes(node, ctx);
-    // BIT-XOR of xstrings (ultra/zvdb, A4H 2026-09-24, ZCL_GOGEN_T_XCONV:
-    // 0F0F BIT-XOR FF00 is F00F; 0F0F BIT-XOR FF, either way round, is F00F:
-    // the shorter padded with 00 on the right, the result the longer). AND
-    // and OR of xstrings, and x mixed with xstring, were not measured
-    if (leaves.every((t) => t.k === "xstring")) {
-      const ops = node.getChildren().filter((c) => isExpr(c, Expressions.ArithOperator)).map((c) => upper(c.concatTokens()));
-      if (ops.every((o) => o === "BIT-XOR")) return arith(node, ctx, XS);
-      throw new Unsupported(`${ops.find((o) => o !== "BIT-XOR")} of xstrings: not measured: ${node.concatTokens()}`);
-    }
-    if (!leaves.every((t) => t.k === "x" && t.len === leaves[0].len)) {
+    if (!leaves.every((t) => t.k === "x" || t.k === "xstring")) {
       throw new Unsupported(`bit operation on other than x fields of one length: ${node.concatTokens()}`);
     }
-    return arith(node, ctx, leaves[0]);
+    if (leaves.every((t) => t.k === "x")) {
+      return arith(node, ctx, X(Math.max(...leaves.map((t) => t.len))));
+    }
+    // Retain the existing dynamic AND/OR refusal; CRC needs only XOR.
+    const ops = node.getChildren().filter((c) => isExpr(c, Expressions.ArithOperator)).map((c) => upper(c.concatTokens()));
+    if (ops.every((o) => o === "BIT-XOR")) return arith(node, ctx, XS);
+    throw new Unsupported(`${ops.find((o) => o !== "BIT-XOR")} of xstrings: not measured: ${node.concatTokens()}`);
   }
+
   // ultra/itab: a generic operand or a generic target decides the
   // calculation type at run time (genericArith)
   const genericLeaves = leafTypes(node, ctx).some((t) => t.k === "data");

@@ -16,6 +16,10 @@ import {home} from "./home.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // CRC32 of bytes 00..n-1, n=0..9: Python zlib oracle, all word remainders.
+  ZCL_GOGEN_T_CRCPROBE: "0/-771559539/920527465/139757951/-1950775789/1364906956/820760394/-1386739207/-2002098017/-1126087934/",
+  // Documented longest-byte calculation and right zero padding, both orders.
+  ZCL_GOGEN_T_BITPROBE: "BB99FFDD/BB99FFDD/00220000/00220000/BBBBFFDD/BBBBFFDD/BB99FFDD/BB99FFDD/BB2233/BB2233/112233/112233",
   // Unmeasured: documented TABLES aliasing, positional components, nested rows,
   // and DELETE INDEX at / before / after the loop cursor (or a missing index).
   ZCL_GOGEN_T_GENLOOP: "std:0/before/1/written/nested sorted:0/before/1/written/nested hashed:0/before/1/written/nested sorted-delete:abc/0 fm1:abc/0 any1:abc/0 typed1:abc/0 fm2:abc/1 any2:abc/1 typed2:abc/1 fm3:abc/3 any3:abc/3 typed3:abc/3 fm4:ac/1 any4:ac/1 typed4:ac/1 fm5:abc/0 any5:abc/0 typed5:abc/0",
