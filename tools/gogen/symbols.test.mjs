@@ -7,6 +7,8 @@ import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {buildCommit, refreshSymbolBuild, reportSymbols, writeGo, writeSymbols} from "./symbols.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
+import {hitlist} from "../hitlist/hitlist.mjs";
+import {parsePprof} from "../hitlist/pprof.mjs";
 import {home} from "./home.mjs";
 
 const here = import.meta.dirname;
@@ -88,10 +90,11 @@ test("symbol map round-trips ABAP names and real pprof frames", async () => {
       "main.(*N_MY_NS_DEMO).CONSTRUCTOR": ["/MY_NS/DEMO=>CONSTRUCTOR", "method", "#my_ns#demo.clas.abap", 11],
       "main.N_MY_NS_DEMO_CLASS_CONSTRUCTOR": ["/MY_NS/DEMO=>CLASS_CONSTRUCTOR", "method", "#my_ns#demo.clas.abap", 13],
       "main.(*N_MY_NS_DEMO).HANDLE": ["/MY_NS/DEMO=>HANDLE", "method", "#my_ns#demo.clas.abap", 28],
-      "main.N_MY_NS_DEMO_LTCL_LOCAL_RUN": ["/MY_NS/DEMO:LTCL_LOCAL=>RUN", "local", "#my_ns#demo.clas.testclasses.abap", 6, "/MY_NS/DEMO"],
-      "main.FUGR_ZSYMBOLS_Z_SYMBOLS": ["FUGR:ZSYMBOLS=>Z_SYMBOLS", "fm", "zsymbols.fugr.z_symbols.abap", 1, "ZSYMBOLS"],
+      "main.N_MY_NS_DEMO_LTCL_LOCAL__OSD_METHOD__RUN": ["/MY_NS/DEMO:LTCL_LOCAL=>RUN", "local", "#my_ns#demo.clas.testclasses.abap", 8, "/MY_NS/DEMO"],
+      "main.FUGR_ZSYMBOLS__OSD_METHOD__Z_SYMBOLS": ["FUGR:ZSYMBOLS=>Z_SYMBOLS", "fm", "zsymbols.fugr.z_symbols.abap", 1, "ZSYMBOLS"],
       "main.(*ZCL_SYMBOL_REPORT).FORM_N_HELPER_RUN": ["ZSYMBOLS=>N_HELPER_RUN", "form", "zsymbols.prog.abap", 4, "ZSYMBOLS"],
     };
+    expected["main.N_MY_NS_DEMO_LTCL_LOCAL__OSD_METHOD__CLASS_SETUP"] = ["/MY_NS/DEMO:LTCL_LOCAL=>CLASS_SETUP", "local", "#my_ns#demo.clas.testclasses.abap", 13, "/MY_NS/DEMO"];
     for (const [key, [abap, kind, file, line, owner]] of Object.entries(expected)) {
       assert.deepEqual(map.symbols[key], {go: key.slice(key.lastIndexOf(".") + 1), abap,
         ...(owner ? {owner} : {}), kind, file, line}, key);
@@ -124,8 +127,9 @@ func main() {
  for _, run := range []func(){
   func(){sink = N_MY_NS_DEMO_N_HELPER_RUN(s)},
   func(){sink = o.ZIF_SYMBOLS__METH(s)},
-  func(){sink = N_MY_NS_DEMO_LTCL_LOCAL_RUN(s)},
-  func(){FUGR_ZSYMBOLS_Z_SYMBOLS(s, &sink)},
+  func(){sink = N_MY_NS_DEMO_LTCL_LOCAL__OSD_METHOD__RUN(s)},
+  func(){N_MY_NS_DEMO_LTCL_LOCAL__OSD_METHOD__CLASS_SETUP(s)},
+  func(){FUGR_ZSYMBOLS__OSD_METHOD__Z_SYMBOLS(s, &sink)},
   func(){report.FORM_N_HELPER_RUN(s, nil)},
  } { end := time.Now().Add(400*time.Millisecond); for time.Now().Before(end) { run() } }
  pprof.StopCPUProfile(); f.Close()
@@ -137,6 +141,10 @@ func main() {
     const names = [...raw.matchAll(/^\s*\d+:\s+0x[\da-f]+\s+(?:M=\d+\s+)?([^\s]+)/gm)].map((m) => m[1]);
     const routines = Object.keys(expected).filter((k) => !/CONSTRUCTOR|HANDLE/.test(k));
     for (const key of routines) assert.ok(names.some((n) => n === key || n.startsWith(key + ".func")), `${key}\n${raw}`);
+    const result = hitlist(parsePprof(readFileSync(join(out, "cpu.pprof"))), {symbols: map});
+    assert.equal(result.metadata.identities, "exact (symbol map)");
+    assert.ok(result.rows.some((r) => r.abap === "/MY_NS/DEMO:LTCL_LOCAL=>CLASS_SETUP"));
+    console.log(`real pprof hitlist identities: ${result.metadata.identities}`);
     const closure = names.find((n) => n.startsWith("main.(*N_MY_NS_DEMO).ZIF_SYMBOLS__METH.func"));
     assert.ok(closure, raw);
     const parent = closure.replace(/(?:\.func\d+(?:\.\d+)*)+$/, "");
