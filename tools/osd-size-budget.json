@@ -567,8 +567,8 @@
       "reason": "#39 dispatches yield sleep through a narrow Session interface so the package does not import go/abap."
     },
     "go:profiling": {
-      "lines": 94,
-      "reason": "Opt-in loopback-only pprof listener, startup-selected HTTP/report labels; standard-library-only package."
+      "lines": 133,
+      "reason": "Opt-in loopback-only pprof listener and startup-selected HTTP/report labels; standard-library-only package. PR #709 review: normalize OData predicates and dynamic path segments before allocating labels, including the downstream ADT session route; this privacy rule belongs with label construction."
     },
     "go:osdbind": {
       "lines": 113,

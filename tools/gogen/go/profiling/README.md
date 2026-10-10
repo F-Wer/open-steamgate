@@ -9,9 +9,13 @@ normalized to IPv4 loopback). Wildcards and network addresses are refused
 with a clear startup error, regardless of `OSD_BIND` or `-addr`.
 No profiler handler is mounted on the application HTTP or HTTPS listener.
 
-HTTP labels are `method` and `path` (escaped path, query omitted). Report
-labels are `report` and, when supplied by a job host, `job`. No body, query,
-user or selection-screen values become labels. OSABAP enables report labels
+HTTP labels are `method` and `path`. The path omits the query and replaces
+OData key predicates with `{key}`, ADT session IDs and numeric, GUID or quoted
+segments with `{id}`. A route template is preferred when the host supplies it.
+Other path segments remain visible; arbitrary identifiers in those segments
+are not guaranteed to be removed. Report labels are `report` and, when
+supplied by a job host, `job`. Bodies and selection-screen inputs are not read
+by this module. OSABAP enables report labels
 when `OSABAP_CPUPROFILE` is set or `OSD_PPROF=1`; it retains its existing
 file-based CPU capture. OSGo currently has no background-job execution seam;
 `Report` is ready for that host to select at job startup.

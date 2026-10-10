@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	httppprof "net/http/pprof"
+	"net/url"
+	"regexp"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -74,10 +76,47 @@ func HTTP(enabled bool, next http.Handler) http.Handler {
 		return next
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		pprof.Do(r.Context(), pprof.Labels("method", r.Method, "path", r.URL.EscapedPath()), func(ctx context.Context) {
+		pprof.Do(r.Context(), pprof.Labels("method", r.Method, "path", labelPath(r)), func(ctx context.Context) {
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	})
+}
+
+// The ABAP router is downstream of this host wrapper and does not expose
+// its matched template here. Mirror its session-id position explicitly;
+// other paths use conservative, syntactic identifier recognition.
+var keyPredicate = regexp.MustCompile(`\([^)]*\)`)
+var idSegment = regexp.MustCompile(`^(?:[0-9]+|[0-9a-fA-F]{32}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|'.*'|".*")$`)
+
+func labelPath(r *http.Request) string {
+	path := r.URL.EscapedPath()
+	// Hosts that already know a matched route may supply its template.
+	if r.Pattern != "" {
+		path = r.Pattern
+		if i := strings.IndexByte(path, ' '); i >= 0 {
+			path = path[i+1:]
+		}
+	}
+	parts := strings.Split(path, "/")
+	for i, part := range parts {
+		decoded, err := url.PathUnescape(part)
+		if err != nil {
+			decoded = part
+		}
+		if i == 7 && strings.Join(parts[:i], "/") == "/sap/bc/adt/core/http/sessions" {
+			parts[i] = "{id}"
+		} else if idSegment.MatchString(decoded) {
+			parts[i] = "{id}"
+		} else if strings.Contains(decoded, "(") {
+			// Drop malformed/unclosed predicates too, rather than exposing a key.
+			cleaned := keyPredicate.ReplaceAllString(decoded, "{key}")
+			if at := strings.IndexByte(cleaned, '('); at >= 0 {
+				cleaned = cleaned[:at] + "{key}"
+			}
+			parts[i] = strings.ReplaceAll(url.PathEscape(cleaned), "%7Bkey%7D", "{key}")
+		}
+	}
+	return strings.Join(parts, "/")
 }
 
 // Report selects the execution function once, outside report/job execution.

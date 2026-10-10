@@ -77,7 +77,7 @@ func TestLoopbackEndpoints(t *testing.T) {
 			t.Fatalf("accepted %s", addr)
 		}
 	}
-	for _, addr := range []string{"127.0.0.1:0", ":0", "0", "localhost:0"} {
+	for _, addr := range []string{"[::1]:0", "127.0.0.1:0", ":0", "0", "localhost:0"} {
 		s, ln, err := (Config{true, addr}).Start()
 		if err != nil {
 			t.Fatal(err)
@@ -171,5 +171,38 @@ func BenchmarkHTTP(b *testing.B) {
 				next.ServeHTTP(w, r)
 			}
 		})
+	}
+}
+
+func TestHTTPPathNormalization(t *testing.T) {
+	for _, tc := range []struct{ path, want string }{
+		{"/sap/bc/adt/core/http/sessions/opaque-session", "/sap/bc/adt/core/http/sessions/{id}"},
+		{"/sap/bc/adt/core/http/sessions", "/sap/bc/adt/core/http/sessions"},
+		{"/odata/Users('example')", "/odata/Users{key}"},
+		{"/odata/Users(42)", "/odata/Users{key}"},
+		{"/odata/Users(Name='example',Number=42)/Items", "/odata/Users{key}/Items"},
+		{"/odata/Users(Number=42,Other=7)", "/odata/Users{key}"},
+		{"/odata/Users%28%27example%27%29", "/odata/Users{key}"},
+		{"/odata/$batch", "/odata/$batch"},
+		{"/plain/path", "/plain/path"},
+		{"/items/42", "/items/{id}"},
+		{"/items/'example'", "/items/{id}"},
+		{"/items/" + strings.Join([]string{strings.Repeat("a", 8), "bbbb", "cccc", "dddd", strings.Repeat("e", 12)}, "-"), "/items/{id}"},
+		{"/items/12345678123412341234123456789abc", "/items/{id}"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			h := HTTP(true, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				got, _ := pprof.Label(r.Context(), "path")
+				if got != tc.want {
+					t.Fatalf("path = %q, want %q", got, tc.want)
+				}
+			}))
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", tc.path, nil))
+		})
+	}
+	r := httptest.NewRequest("GET", "/items/opaque", nil)
+	r.Pattern = "GET /items/{id}"
+	if got := labelPath(r); got != "/items/{id}" {
+		t.Fatal(got)
 	}
 }
