@@ -6,7 +6,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {parsePprof} from "../tools/hitlist/pprof.mjs";
 import {parseV8} from "../tools/hitlist/v8.mjs";
-import {abapSite, diff, hitlist, selectRows} from "../tools/hitlist/hitlist.mjs";
+import {abapSite, diff, hitlist, selectRows, symbolResolver} from "../tools/hitlist/hitlist.mjs";
 import {markdown} from "../tools/hitlist/markdown.mjs";
 import {emitGo, funcName, typeName} from "../tools/gogen/emit-go.mjs";
 import {run} from "../tools/osd-hitlist.mjs";
@@ -60,6 +60,22 @@ describe("native ABAP hit lists", () => {
     assert.equal(hitlist(profile(["third.ZDEMO_RUN"]), {symbols:collision}).rows.length, 0);
     assert.throws(() => hitlist(profile([]), {symbols:{schema:"wrong"}}), /invalid.*symbol map/);
   });
+  it("accepts event and generated kinds and keeps converted-file lines out of report sources", () => {
+    const resolve = symbolResolver({schema: "gogen-symbols/1", build: "b", symbols: {
+      "main.(*ZCL_OSABAP_R).FORM_SPIN": {go: "FORM_SPIN", abap: "ZR=>SPIN", owner: "ZR", kind: "form", file: "zr.prog.abap", line: 6},
+      "main.(*ZCL_OSABAP_R).ZIF_GG_REPORT_V1__START_OF_SELECTION": {go: "ZIF_GG_REPORT_V1__START_OF_SELECTION", abap: "ZR (START-OF-SELECTION)", owner: "ZR", kind: "event", file: "zr.prog.abap", line: 3},
+      "main.(*ZCL_OSABAP_R).ZIF_GG_LIST_PROCESSING_V1__AT_PF": {go: "ZIF_GG_LIST_PROCESSING_V1__AT_PF", abap: "ZCL_OSABAP_R=>ZIF_GG_LIST_PROCESSING_V1~AT_PF", kind: "generated"}}});
+    const form = resolve({name: "main.(*ZCL_OSABAP_R).FORM_SPIN", file: "/x/zcl_osabap_r.clas.abap", line: 143});
+    assert.equal(form.key, "ZR=>SPIN:6");
+    assert.equal(form.via, "zcl_osabap_r.clas.abap:143");
+    const same = resolve({name: "main.(*ZCL_OSABAP_R).FORM_SPIN", file: "/x/zr.prog.abap", line: 9});
+    assert.equal(same.key, "ZR=>SPIN:9");
+    assert.equal(resolve({name: "main.(*ZCL_OSABAP_R).ZIF_GG_REPORT_V1__START_OF_SELECTION", file: "", line: 0}).kind, "event");
+    const gen = resolve({name: "main.(*ZCL_OSABAP_R).ZIF_GG_LIST_PROCESSING_V1__AT_PF", file: "/x/zcl_osabap_r.clas.abap", line: 7});
+    assert.equal(gen.file, null); assert.equal(gen.line, null); assert.equal(gen.key, "ZCL_OSABAP_R=>ZIF_GG_LIST_PROCESSING_V1~AT_PF:generated");
+    assert.throws(() => symbolResolver({schema: "gogen-symbols/1", build: "b", symbols: {x: {go: "x", abap: "A=>B", kind: "generated", file: "a.abap", line: 1}}}), /invalid symbol map entry/);
+  });
+
   it("discovers maps beside captures and profiled binaries and marks lossy fallback", () => {
     const dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "hitlist-symbols-"));
     try {

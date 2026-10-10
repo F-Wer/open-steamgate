@@ -47,7 +47,11 @@ export function symbolResolver(map) {
     throw new Error("invalid gogen-symbols/1 symbol map");
   const bare = new Map();
   for (const entry of Object.values(map.symbols)) {
-    if (!entry || typeof entry.go !== "string" || typeof entry.abap !== "string" || typeof entry.file !== "string" || !Number.isSafeInteger(entry.line) || entry.line < 1 || !["method", "form", "fm", "local", "closure"].includes(entry.kind) || (entry.owner !== undefined && typeof entry.owner !== "string"))
+    // "generated" is converter scaffolding: listed so pprof names resolve, with no source position.
+    const generated = entry?.kind === "generated";
+    const positioned = typeof entry?.file === "string" && Number.isSafeInteger(entry?.line) && entry.line >= 1;
+    if (!entry || typeof entry.go !== "string" || typeof entry.abap !== "string" || !["method", "form", "fm", "local", "closure", "event", "generated"].includes(entry.kind) || (entry.owner !== undefined && typeof entry.owner !== "string")
+      || (generated ? entry.file !== undefined || entry.line !== undefined : !positioned))
       throw new Error("invalid symbol map entry");
     bare.set(entry.go, bare.has(entry.go) ? null : entry);
   }
@@ -60,9 +64,17 @@ export function symbolResolver(map) {
     const split = entry.abap.indexOf("=>");
     const cls = entry.owner || (split < 0 ? entry.abap : entry.abap.slice(0, split));
     const method = split < 0 ? entry.abap : entry.abap.slice(split + 2);
-    const line = entry.kind !== "closure" && /\.abap$/i.test(frame.file) && frame.line > 0 ? frame.line : entry.line;
+    if (entry.kind === "generated")
+      return {key: `${entry.abap}:generated`, abap: entry.abap, class: cls, method,
+        owner: entry.owner ?? null, kind: entry.kind, file: null, line: null};
+    // A frame line is only meaningful in the entry's own source file; converted reports place
+    // their //line directives in the converter's class, so fall back to the definition line there.
+    const base = f => String(f ?? "").replace(/\\/g, "/").split("/").pop().toLowerCase();
+    const sameFile = /\.abap$/i.test(frame.file) && base(frame.file) === base(entry.file);
+    const line = entry.kind !== "closure" && sameFile && frame.line > 0 ? frame.line : entry.line;
     return {key: `${entry.abap}:${line}`, abap: entry.abap, class: cls, method,
-      owner: entry.owner ?? null, kind: entry.kind, file: normalized(entry.file), line};
+      owner: entry.owner ?? null, kind: entry.kind, file: normalized(entry.file), line,
+      via: sameFile || !frame.file ? null : `${base(frame.file)}:${frame.line}`};
   };
 }
 
