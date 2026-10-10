@@ -19,8 +19,8 @@
       "reason": "Critic round 1: parse lists through the retained file descriptor, bound total bytes and entries before installing authority, support BOM/CRLF, and report failed pins without changing DATASET home."
     },
     "go:abap": {
-      "lines": 11994,
-      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. #43: per-Session update-module flag and two small explicit-statement LUW bindings; database primitives retain yield and dialog-step behavior. abapiti 017: ParseI8, string to int8 with ParseI's rules. abapiti 042: READ and DELETE TABLE by a hashed secondary key. Call-scope allocation: five lines for an inactive zero value, the value return and deferred Restore method, preserving immediate-caller masking without heap records or restore closures. #709 review round 2: request-local callback lets the actual ADT/OData dispatchers label matched templates/model names after validation; host labels accepted ICF and static routes without reading raw segments."
+      "lines": 11995,
+      "reason": "osgo 026/029 (#658, #659): UTF-16 units and class statics per Session (carve-out queued, stoker QUEUE #33). ADT batch 1 (adt-i5 cases 1-7): Session message fields (sy-msgno as NUMC 3), MESSAGE RAISING binding with scoped restoration, classic exceptions keyed by the resolved interface method, date/time and signed MOVE adapters, object-wrapper identity, STORE answer projection and conservative ADT host answers; timestamp conversion lives in go/timestamp. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). StoreHook: a host answers ZOSD_STORE for the calling step first (adt-i5's per-session SYSTEM facts), replacing a text substitution of emitter output. #39 records WorkProcess ownership and exposes only the narrow Session methods needed by the abap-free lock/yield packages; round 2: end and reopen the database transaction across yield, and mark APC step Session ownership. #43: per-Session update-module flag and two small explicit-statement LUW bindings; database primitives retain yield and dialog-step behavior. abapiti 017: ParseI8, string to int8 with ParseI's rules. abapiti 042: READ and DELETE TABLE by a hashed secondary key. Call-scope allocation: five lines for an inactive zero value, the value return and deferred Restore method, preserving immediate-caller masking without heap records or restore closures. #709 review round 2: request-local callback lets the actual ADT/OData dispatchers label matched templates/model names after validation; host labels accepted ICF and static routes without reading raw segments. IR-JS #708: ISO-8859-1 decoded byte by byte (Go iterated rune starts; C3A4 gave U+0000)."
     },
     "go:abaperr": {
       "lines": 13,
@@ -231,8 +231,8 @@
       "reason": "baseline 2026-10-01"
     },
     "tools/gogen/go/abap/codepage.go": {
-      "lines": 113,
-      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33)"
+      "lines": 114,
+      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33) IR-JS #708: ISO-8859-1 decoded byte by byte (Go iterated rune starts; C3A4 gave U+0000)."
     },
     "tools/gogen/go/abap/conv.go": {
       "lines": 1096,
