@@ -66,7 +66,7 @@ function compilerFiles() {
   const listed = spawnSync("git", ["ls-files", "-z", "--cached", "--", "tools/gogen", ":(glob)tools/*.mjs"],
     {cwd: root, encoding: "utf8"});
   if (listed.status === 0) return listed.stdout.split("\0").filter((file) => file && !/(^|\/)(?:\.out|zz_[^/]*)(\/|$)/.test(file)).sort().map((file) => join(root, file));
-  return [...walk(join(root, "tools", "gogen"), (name) => /\.(mjs|go|mod|sum|abap|xml)$/.test(name) && !name.startsWith("zz_"))];
+  return [...walk(join(root, "tools", "gogen"), (name) => /\.(mjs|ts|go|mod|sum|abap|xml)$/.test(name) && !name.startsWith("zz_"))];
 }
 
 const goEnv = () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import {writeGo, reportSymbols} from "./symbols.mjs";
+import {writeGo, reportSymbols} from "./symbols.ts";
 // Build one classic ABAP report as a small native command. The report's
 // selection screen is its command-line contract; the Go host is deliberately
 // separate from OSGo's HTTP/OData/database host.

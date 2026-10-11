@@ -23,6 +23,7 @@ on:
   pull_request:
     paths:
       - 'tools/gogen/**'
+      - 'tsconfig.gogen.json'
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
       - 'libs.lock.json'
@@ -44,6 +45,7 @@ on:
     branches: [main]
     paths:
       - 'tools/gogen/**'
+      - 'tsconfig.gogen.json'
       - 'test/fixtures/ir-pairs/**'
       - 'src/demo_data/**'
       - 'libs.lock.json'
@@ -90,6 +92,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Types (pilot, non-gating)
+        continue-on-error: true
+        run: npx tsc -p tsconfig.gogen.json
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'

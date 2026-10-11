@@ -577,6 +577,18 @@
     "tools/gogen/emit-go.test.mjs": {
       "lines": 1015,
       "reason": "#708 rebased onto #712: the local-constant emitter tests and the IR-JS constructor-default regression meet in one file; carve the IR-JS emitter tests into their own file when it next grows."
+    },
+    "tools/gogen/symbols.ts": {
+      "lines": 113,
+      "reason": "Typed gogen phase 1: renamed the JavaScript leaf with erasable declarations; preserve an explicit size ceiling for the TypeScript path."
+    },
+    "tools/gogen/emit-constructors.ts": {
+      "lines": 32,
+      "reason": "Typed gogen phase 1: renamed the JavaScript leaf with erasable declarations; preserve an explicit size ceiling for the TypeScript path."
+    },
+    "tools/gogen/frontend-find-results.ts": {
+      "lines": 84,
+      "reason": "Typed gogen phase 1: renamed the JavaScript leaf with erasable declarations; preserve an explicit size ceiling for the TypeScript path."
     }
   },
   "readmeMissing": [

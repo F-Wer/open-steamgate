@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // A scene of the ZO4D demo, compiled to Go and checked against a recording
 // taken on A4H (docs/frame-comparison.md): the recording is the oracle.
 //

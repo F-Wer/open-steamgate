@@ -5,7 +5,7 @@ import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} fro
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
-import {buildCommit, refreshSymbolBuild, reportSymbols, writeGo, writeSymbols} from "./symbols.mjs";
+import {buildCommit, refreshSymbolBuild, reportSymbols, writeGo, writeSymbols} from "./symbols.ts";
 import {libraryPath} from "../osd-lib-path.mjs";
 import {hitlist} from "../hitlist/hitlist.mjs";
 import {parsePprof} from "../hitlist/pprof.mjs";
@@ -106,7 +106,7 @@ test("symbol map round-trips ABAP names and real pprof frames", async () => {
     assert.equal(map.symbols["main.(*ZCL_SYMBOL_REPORT).ZIF_GG_REPORT_V1__START_OF_SELECTION"].line, 2);
     writeGo(join(out, "zz_generated.go"), program);
     assert.equal(readFileSync(join(out, "symbols.json"), "utf8"), json);
-    writeSymbols(out, Object.fromEntries(Object.entries(map.symbols).reverse()), "unknown");
+    writeSymbols(out, new Map(Object.entries(map.symbols).reverse()), "unknown");
     assert.equal(JSON.parse(readFileSync(join(out, "symbols.json"))).build, "unknown");
     refreshSymbolBuild(out);
     assert.equal(readFileSync(join(out, "symbols.json"), "utf8"), json);
@@ -158,10 +158,10 @@ test("layer maps use import paths and contain only emitted routines", () => {
     const program = compileProgram({folders: [join(libraryPath(home, "open-abap-core"), "src"), fixture],
       objects: ["/MY_NS/DEMO", "ZSYMBOLS"], includeTests: true});
     const classes = program.classes.filter((c) => c.name === "/MY_NS/DEMO");
-    const symbols = {};
+    const symbols = new Map();
     writeGo(join(dir, "zz_generated.go"), program, "core", {classes}, true, symbols);
-    assert.ok(symbols["osg/gogen/generated/core.(*N_MY_NS_DEMO).CONSTRUCTOR"]);
-    assert.ok(symbols["osg/gogen/generated/core.N_MY_NS_DEMO_N_HELPER_RUN"]);
-    assert.equal(Object.values(symbols).some((s) => s.kind === "fm" || s.kind === "local"), false);
+    assert.ok(symbols.get("osg/gogen/generated/core.(*N_MY_NS_DEMO).CONSTRUCTOR"));
+    assert.ok(symbols.get("osg/gogen/generated/core.N_MY_NS_DEMO_N_HELPER_RUN"));
+    assert.equal([...symbols.values()].some((s) => s.kind === "fm" || s.kind === "local"), false);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });

@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // The Go backend spike, end to end:
 //
 //   node tools/gogen/run.mjs [samples-folder]

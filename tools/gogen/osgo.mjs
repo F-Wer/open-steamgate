@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // OSGo: build the Go host of open-steamgate (go/cmd/osgo) out of OSG's own
 // ABAP, compiled as gateway.mjs compiles it (osg-build.mjs), with the ICF
 // shim in front: a browser can use it.

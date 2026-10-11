@@ -43,8 +43,8 @@ describe("the size budget", function () {
   });
 
   it("wants a budget for an oversize file and for a new package", () => {
-    const errors = check(base(), {"tools/gogen/go/x/y.go": 801, "tools/z.mjs": 1001, "go:x": 801});
-    expect(errors.join("\n")).to.match(/y\.go: 801 lines, over 800/).and.match(/z\.mjs: 1001 lines, over 1000/).and.match(/go:x: a package without a budget/);
+    const errors = check(base(), {"tools/gogen/go/x/y.go": 801, "tools/z.mjs": 1001, "tools/z.ts": 1001, "go:x": 801});
+    expect(errors.join("\n")).to.match(/y\.go: 801 lines, over 800/).and.match(/z\.mjs: 1001 lines, over 1000/).and.match(/z\.ts: 1001 lines, over 1000/).and.match(/go:x: a package without a budget/);
   });
 
   it("refuses a raise without a new reason against the base", () => {
@@ -180,6 +180,25 @@ describe("the size budget", function () {
       const r = run();
       expect(r.status).to.equal(1);
       expect(r.stderr).to.match(/no merge base/).and.match(/big\.mjs: 1103 lines/).and.match(/other\.mjs: budget raised 1100 -> 1200/);
+    });
+
+    it("measures tracked TypeScript and reports a breach of its budget", () => {
+      const b = JSON.parse(execFileSync("git", ["show", "HEAD:tools/osd-size-budget.json"], {cwd: dir, encoding: "utf8"}));
+      b.budgets["tools/typed.ts"] = {lines: 20, reason: "typed pilot fixture"};
+      writeFileSync(join(dir, "tools", "osd-size-budget.json"), JSON.stringify(b));
+      write("tools/typed.ts", 21);
+      git("add", "tools/typed.ts");
+      const r = run();
+      expect(r.status, r.stderr).to.equal(1);
+      expect(r.stderr).to.match(/tools\/typed\.ts: 21 lines, budget 20/);
+    });
+
+    it("applies the JavaScript file limit to unbudgeted TypeScript", () => {
+      write("tools/typed.ts", 1001);
+      git("add", "tools/typed.ts");
+      const r = run();
+      expect(r.status, r.stderr).to.equal(1);
+      expect(r.stderr).to.match(/tools\/typed\.ts: 1001 lines, over 1000 without a budget/);
     });
 
     it("stops a branch that touches the file over its budget", () => {

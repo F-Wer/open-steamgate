@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // A scene of ZO4D in a browser three ways, measured with one instrument:
 // the scene compiled by gogen to Go and built for GOOS=js GOARCH=wasm, the
 // same IR emitted as JS, and the transpiler's JS. Headless Chromium through
