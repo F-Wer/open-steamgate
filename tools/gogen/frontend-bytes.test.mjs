@@ -10,7 +10,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 
-function compile(statement, declarations = "DATA xs TYPE xstring. DATA p TYPE xstring. DATA m TYPE i. DATA ml TYPE i.") {
+function compile(statement, declarations = "DATA xs TYPE xstring. DATA p TYPE xstring. DATA m TYPE i. DATA ml TYPE i.", folders = []) {
   const dir = mkdtempSync(join(tmpdir(), "gogen-byte-frontend-"));
   try {
     writeFileSync(join(dir, "zcl_byte_frontend.clas.abap"), `CLASS zcl_byte_frontend DEFINITION PUBLIC FINAL CREATE PUBLIC.
@@ -19,7 +19,7 @@ ENDCLASS.
 CLASS zcl_byte_frontend IMPLEMENTATION.
 METHOD run. ${declarations} ${statement} ENDMETHOD.
 ENDCLASS.`);
-    return compileProgram({folders: [dir], objects: ["ZCL_BYTE_FRONTEND"], tolerant: true});
+    return compileProgram({folders: [dir, ...folders], objects: ["ZCL_BYTE_FRONTEND"], tolerant: true});
   } finally { rmSync(dir, {recursive: true, force: true}); }
 }
 
@@ -245,4 +245,46 @@ test("PCRE absolute anchors preserve subject boundaries and escaped literals", a
     ["\\Z", "\\Z is not in Go's RE2: \\Z"], ["\\G", "\\G is not in Go's RE2: \\G"],
     ["(?m)\\Aab", "an unsupported inline flag group: (?m)\\Aab"],
   ]) assert.throws(() => a.FindResults("ab", p, "P", false, true), (e) => e.message === "NOT_COMPILED in FIND PCRE: " + reason);
+});
+
+// The dictionary files also used by explicitly typed RESULTS targets.
+const regexDdic = new URL("../../.local/lars/open-abap-core/src/abap/regex", import.meta.url).pathname;
+
+test("inline RESULTS shares DDIC types with explicit results and copied submatch rows", () => {
+  for (const occurrence of ["ALL OCCURRENCES", "FIRST OCCURRENCE"]) {
+    const all = occurrence.startsWith("ALL");
+    const p = compile(`FIND ${occurrence} OF REGEX '(a)(b)?' IN 'xab a' RESULTS DATA(matches).
+      explicit = matches.
+      ${all ? "LOOP AT matches INTO hit." : "hit = matches."}
+      groups = hit-submatches.
+      LOOP AT groups INTO group. hit-offset = group-offset. ENDLOOP.
+      ${all ? "ENDLOOP." : ""}`,
+      `DATA explicit TYPE ${all ? "match_result_tab" : "match_result"}.
+       DATA hit TYPE match_result. DATA groups TYPE submatch_result_tab. DATA group TYPE submatch_result.`, [regexDdic]);
+    assert.deepEqual(p.partial, []);
+    const method = p.classes[0].methods[0];
+    const locals = new Map(method.locals.map((l) => [l.name, l.type]));
+    assert.deepEqual(locals.get("MATCHES"), locals.get("EXPLICIT"));
+    const st = method.body.find((st) => st.s === "find_results");
+    assert.equal(st.all, all);
+    assert.equal(st.table, all);
+    assert.equal(st.sub.go, locals.get("GROUP").go);
+    assert.match(emitGo(p), /abap.FindResults/);
+    assert.match(emitJs(p), /abap.FindResults/);
+  }
+});
+
+test("FIRST RESULTS table uses first-match iteration and still refuses sorted targets", () => {
+  const p = compile("FIND FIRST OCCURRENCE OF REGEX '(a)' IN 'aa' RESULTS matches.",
+    "DATA matches TYPE match_result_tab.", [regexDdic]);
+  assert.deepEqual(p.partial, []);
+  const st = p.classes[0].methods[0].body.find((st) => st.s === "find_results");
+  assert.equal(st.all, false);
+  assert.equal(st.table, true);
+  for (const access of ["SORTED", "HASHED"]) {
+    const bad = compile("FIND FIRST OCCURRENCE OF REGEX '(a)' IN 'aa' RESULTS matches.",
+      `DATA matches TYPE ${access} TABLE OF match_result WITH UNIQUE KEY offset.`, [regexDdic]);
+    assert.equal(bad.partial.length, 1);
+    assert.match(bad.partial[0], /RESULTS into other than a standard table/);
+  }
 });
