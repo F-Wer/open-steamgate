@@ -3608,11 +3608,11 @@ function lvalue(target, ctx) {
     if (a === undefined) throw new Unsupported(`me->${kids[2].concatTokens()}: not an attribute`);
     place = a;
     i = 3;
-  } else if (upper(first.concatTokens()) === "SY" && isExpr(first, Expressions.TargetField) && kids.length === 3 && isTok(kids[1], "-")
-      && upper(kids[2].concatTokens()) === "SUBRC" && !isVariableName("SY", ctx)) {
-    // ultra/httpc: sy-subrc written, as open-abap-core's methods with
-    // classic exceptions do (cl_http_client's send, receive, create_by_url)
-    return {e: "sy", field: "Subrc", type: I};
+  } else if (upper(first.concatTokens()) === "SY" && isExpr(first, Expressions.TargetField) && kids.length === 3 && isTok(kids[1], "-") && !isVariableName("SY", ctx)) {
+    const key = `SY-${upper(kids[2].concatTokens())}`;
+    if (SY_MESSAGES[key]) return {e: "sy", ...SY_MESSAGES[key]};
+    if (SY[key]) return {e: "sy", field: SY[key], type: I};
+    throw new Unsupported(`write to ${key}: system field outside the subset`);
   } else if (isExpr(first, Expressions.TargetField) || isExpr(first, Expressions.TargetFieldSymbol)) {
     place = variable(first.concatTokens(), ctx);
     if (place.e === "const" || ctx.localConstantNames?.has(upper(first.concatTokens()))) throw new Unsupported(`a write to constant ${first.concatTokens()}`);
@@ -6275,15 +6275,10 @@ function call(chain, ctx, statement, hint) {
       len: arg("LEN") ? convert(source(arg("LEN"), ctx, I), I) : null, type: S};
   }
   if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCPI") return {e: "uccpi", x: convert(source(direct, ctx), I), type: C(1)};
-  // ultra/itab: uccp( 'FEFF' ), the character of a code point given as four
-  // hex digits (open-abap-core: the text into x(2), that into i, uccpi( )).
-  // Its parameter is TYPE simple, outside the subset, so only a literal of
-  // four hex digits is taken (zcl_stg_segw_gen's BOM)
+  // open-abap-core UCCP moves SIMPLE into x(2), then i, retaining a UTF-16 unit.
   if (owner === "CL_ABAP_CONV_IN_CE" && name === "UCCP") {
-    // (lower case is no hex digit there: A4H gives U+0000 for '00e4')
-    const lit = /^'([0-9A-F]{4})'$/.exec(direct?.concatTokens() ?? "");
-    if (!lit) throw new Unsupported(`cl_abap_conv_in_ce=>uccp( ) of other than a literal of four hex digits: ${chain.concatTokens()}`);
-    return {e: "uccpi", x: {e: "int", value: parseInt(lit[1], 16), type: I}, type: C(1)};
+    const x = convert(convert(source(direct, ctx), X(2)), I);
+    return {e: "utf16unit", x, type: C(2)};
   }
   // an ALIASES name is the component it stands for; through an interface
   // reference, a method is otherwise the interface's own: I~M

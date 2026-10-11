@@ -990,3 +990,26 @@ test("a remaining generated local-constant collision fails loudly", async () => 
   ctx.method = "INTF~METH";
   assert.throws(() => hoistLocalConstants(node, ctx, h), /local constant name collision: OWNER:LOCAL=>INTF~METH=>C/);
 });
+test("a constructor DEFAULT outside the subset keeps the by-name refusal instead of failing the build", async () => {
+  const {emitJs} = await import("./emit-js.mjs");
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-ctor-default-"));
+  try {
+    writeFileSync(join(sourceDir, "zcl_ctor_default.clas.abap"), `
+CLASS zcl_ctor_default DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    METHODS constructor IMPORTING iv TYPE i DEFAULT 5.
+ENDCLASS.
+CLASS zcl_ctor_default IMPLEMENTATION.
+  METHOD constructor.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_CTOR_DEFAULT"]});
+    // CL_GUI_CALENDAR's CNCA_SEL_DAY in the osgo host build: a DEFAULT that
+    // names an attribute resolveStatic cannot find
+    program.classes.find((c) => c.name === "ZCL_CTOR_DEFAULT").constructor.params[0].default = "ZCL_CTOR_DEFAULT=>NO_SUCH";
+    const go = emitGo(program), js = emitJs(program);
+    assert.match(go, /ZCL_CTOR_DEFAULT=>CONSTRUCTOR.*CREATE OBJECT by name of a class whose constructor has parameters/);
+    assert.match(js, /ZCL_CTOR_DEFAULT=>CONSTRUCTOR: CREATE OBJECT by name of a class whose constructor has parameters/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});

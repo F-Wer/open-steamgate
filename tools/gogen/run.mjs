@@ -137,6 +137,7 @@ for (const c of CASES) jsResults.push(await runJs(c));
 const irProgram = compileProgram({folders: [samples], objects: [...new Set(readdirSync(samples).map((f) => f.split(".")[0]))]});
 writeFileSync(join(out, "ir-js.mjs"), emitJs(irProgram));
 copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
 const irm = await import(pathToFileURL(join(out, "ir-js.mjs")).href);
 const irResults = CASES.map((c) => {
   const fnc = irm[C][c.method];

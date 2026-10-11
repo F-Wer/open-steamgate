@@ -102,6 +102,7 @@ console.log(`Go: ${(result.nsPerFrame / 1e3).toFixed(1)} µs a frame (render_fra
 /* ------------------------------------------------- the same IR, emitted as JS */
 writeFileSync(join(out, "scene.mjs"), emitJs(program));
 copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
 const m = await import(pathToFileURL(join(out, "scene.mjs")).href);
 const jsObj = new m[sc.cls]();
 const jsS = {sy: {index: 0, tabix: 0, subrc: 0}};

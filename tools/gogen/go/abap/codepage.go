@@ -76,13 +76,14 @@ func DecodeText(encoding string, ignoreErrors bool, data string) string {
 		}
 		return data
 	case "iso-8859-1":
-		// TextDecoder uses the Windows-1252 table for this encoding label.
+		// 0x80-0x9F in ISO-8859-1: Windows-1252, as TextDecoder; SAP behaviour unmeasured -- measure on A4H before changing
+		// Preserve the mapping from #255. A string range would skip UTF-8 continuations.
 		var control = [...]rune{
 			'€', '�', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '�', 'Ž', '�',
 			'�', '‘', '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '�', 'ž', 'Ÿ',
 		}
 		runes := make([]rune, len(data))
-		for i := range data {
+		for i := 0; i < len(data); i++ {
 			b := data[i]
 			runes[i] = rune(b)
 			if b >= 0x80 && b <= 0x9f {

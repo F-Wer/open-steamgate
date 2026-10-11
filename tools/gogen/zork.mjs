@@ -41,6 +41,7 @@ const go = JSON.parse(execFileSync("prlimit", ["--as=4000000000", join(out, "zor
 
 writeFileSync(join(out, "zork.mjs"), emitJs(program));
 copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
+copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
 const m = await import(pathToFileURL(join(out, "zork.mjs")).href);
 const js = {};
 try {

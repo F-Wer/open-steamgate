@@ -212,7 +212,9 @@ daemons, incremental rebuild of Z code, ADT):
   through wasm.
 - **IR-JS is kept as an oracle**, not a product: `semantics.mjs` runs every
   pinned case on Go and on JS against A4H, and a second independent runtime
-  keeps catching mistakes. It stays green; it is not grown.
+  keeps catching mistakes. Alice's decision of 2026-10-10: IR-JS is grown
+  to run TS-HA (abaplint translated to ABAP) layer by layer. Every addition
+  mirrors `go/abap` semantics and refusals; `semantics.mjs` keeps both green.
 - **What the browser build needs**, each a step of its own:
   1. a `database/sql` driver over sql.js through `syscall/js`, registered in
      `db_wasm.go` (the seam is there);
