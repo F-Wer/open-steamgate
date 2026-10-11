@@ -4,6 +4,7 @@ Step 1+2, measured on 2026-10-10 against the same read-only TS-HA native
 report and library input as the earlier `irjs/report.md` measurement.
 The starting revision is `e7dd62ce276f489d723b3925270eb89fe63c0e58`.
 The report was **not executed**. There is no SQL or GUI implementation here.
+The latest executed layer table is in [Layer 2](#layer-2-statements-execution-2026-10-10); earlier tables record their respective stages.
 
 | Compile-only measurement | Before | After |
 |---|---:|---:|
@@ -648,3 +649,116 @@ original benchmark source copied into gitignored scratch. Logs and artifacts
 are under `.local/irjs-fix/round2-*`. Size budget (`--changed origin/main`) and
 explicit changed-file leak scan exit 0; the two untouched inherited budget
 breaches are still reported. No allowance was raised and nothing was pushed.
+## Layer 2: statements execution (2026-10-10)
+
+Started at `4309d5f96` on `feat/irjs-tsha-pilot`; all earlier commits
+remain intact. The supplied benchmark closure and Node oracle stayed
+read-only. The runner now supports `--statements`, `--structures`, and
+`--build-only`. Statements mode retains the original lexer and parser calls,
+counts, dump methods and hash checks, and stops before structures.
+
+The executed blocker was regex validation: a raw substring check rejected
+the escaped literal `\*?` in an identifier pattern as a lazy quantifier.
+Validation now strips escaped literals and bracket expressions before checking
+syntax, following Go's `outsideClasses`. Escaped punctuation such as `\#`
+is normalized for JavaScript's Unicode regex grammar without unescaping
+escaped backslashes. Genuine lazy quantifiers remain invalid; unsupported
+`(?...)` groups and anchored texts with non-LF line ends retain Go's
+explicit refusals. The existing documented POSIX leftmost-longest versus
+JavaScript leftmost-first difference remains; this workload's hashes match.
+
+All statements runs require 609,647 tokens and 92,500 statements, with:
+
+- Lexer SHA-256: `9b118dd1e5ed640bbe07f1e8f4848b8fcaaa6a25c5ab126a12f018c46664df40`.
+- Statements SHA-256: `45f74b5baafb93d256155c19321ecceeb19e20f1207eb159d8f445264c41cd22`.
+
+The initial executable IR-JS median was **50,521,366 µs**, versus
+**18,324,328 µs** Go (2.76×). A `node --cpu-prof` run marked only the
+statement-parser interval using monotonic microseconds; it returned the
+correct hashes and `statements_us = 49,001,042`. Of that interval's samples,
+`bumpTable` was 63.80% self, GC 6.57%, regex compilation 4.37%, CAST 3.31%,
+and table copying 0.69%. Inclusive samples overlap and are not summed.
+
+One measured performance fix follows Go's `versionCell/BumpTable`:
+register a table epoch when the first row binding is created; mutations
+before any binding skip version writes. Previously every temporary parser
+table entered the WeakMap. Existing bindings still become invalid on
+structural mutation or table replacement, and a later binding starts from
+the table's current epoch. Weak keys retain the existing lifetime behavior.
+No emitter change or second performance fix was attempted.
+
+Timing uses three fresh processes per host/stage, the original ABAP
+`GET RUN TIME` interval, and the requested 16 GB Node heap. Input assembly,
+lexing, dumping and hashing are outside `statements_us`. The repeated
+samples preassemble the exact supplied input outside the timed calls, as
+in the earlier lexer profiling step; the hash and count checks are retained.
+The original emitted assembly path was replayed separately: it returned
+`ok = X`, both expected counts and both hashes, with
+`statements_us = 15,195,510` (`original-js.log`). This additional sample is
+excluded from the median. The shared host is not an idle-host distribution.
+
+| Sample | IR-JS before lazy versions (µs) | IR-JS final (µs) | Go (µs) |
+|---|---:|---:|---:|
+| 1 | 52,885,106 | 14,599,791 | 18,239,137 |
+| 2 | 50,521,366 | 16,009,703 | 18,324,328 |
+| 3 | 48,194,385 | 16,232,563 | 18,543,574 |
+| Median | 50,521,366 | **16,009,703** | **18,324,328** |
+
+The final statements median is **68.3% lower**, 3.16× faster than the
+executable baseline and 0.87× Go. It is still about 7.63× the supplied
+vanilla Node reference; Go is about 8.74×. The following lexer times are
+the lexer intervals in those same three statements runs, rather than a
+new standalone lexer distribution. Node times are supplied references,
+not newly measured medians.
+
+| Layer | PASS/hash | IR-JS | Go | Vanilla Node |
+|---|---|---:|---:|---:|
+| Lexer cases | PASS: 44/44, 4,663 tokens, original combined test and teardown pass | 44/44 | 44/44 | Embedded token-stream oracle |
+| Lexer, zabapgit | PASS: 609,647 tokens, SHA-256 match, 3/3 per host | **6,292,599 µs** | **3,530,842 µs** | 338,372 µs |
+| Statements | PASS: 92,500 statements, SHA-256 match, 3/3 per host | **16,009,703 µs** | **18,324,328 µs** | 2,097,152 µs |
+| Structures | PASS: 88,312 structures, 0 issues, SHA-256 match (one IR-JS probe) | 112,361,834 µs (single sample) | Not measured | 9,885,785 µs |
+
+The unchanged full benchmark also runs on IR-JS without further fixes:
+`STAGETIME OK`, 88,312 structures and 0 issues. Its original condition
+checks all three hashes, including structures SHA-256
+`1a6cc2f2c4da2231c208a8aef6e9227a4b2c2a8ad3bb18afbdb700dacd2da469`.
+The 112,361,834 µs structures time is **one probe, not a median**; neither
+Go structures timing nor structures optimization was pursued in this step.
+
+Validation: individual lexer cases **44/44 PASS on both hosts**, including
+the original combined method and completion teardown (45 successful methods
+per host); focused unit-js/pilot tests **15 pass, 0 fail**; semantics
+**190 Go + 190 JS results, all ok, 0 FAIL**, and expected refusals, exit 0.
+No failing check was removed. The closure still contains 12 shared frontend
+refusal sites, with no skipped methods or broken objects; static sites are
+not executed failures. No shared frontend or Go implementation changed.
+
+The runtime source grows by 31 lines (the budget ceiling by 18, 1824 to
+1842, after the rebase onto #708) with a measured/tested reason for
+syntax-aware regex validation and lazy table epochs. Size budget
+`--changed origin/main` exits 0, retaining the two inherited untouched
+breaches. Final changed-file leak scan and diff checks exit 0.
+
+All heavy runs use `GOFLAGS=-buildvcs=false`,
+`GOCACHE=/mnt/ssd-510/osg/go-build`, RAM temporary directories,
+range 50–59 and `nice -n10`; resource gates check IO some avg10 < 30,
+MemAvailable > 20 GB and load < 12 before queueing and after taking a slot.
+Retained baseline/Go launches had load 4.35–7.66, IO avg10 0.00–0.03 and
+roughly 83–85 GiB available. Final launches had load 4.66–5.12, IO 0.00 and
+roughly 70–78 GiB available. The initial final-stage wrapper waited for
+busy slots and was cancelled before starting Node; only that own process
+group was signalled. The supported `OSD_HEAVY_SLOTS=3` setting then allowed
+a third workload after a read-only audit found two active heavy workloads,
+within the repository's approximate four-run machine-wide agreement.
+The samples ran sequentially, with no other heavy job started by this
+session until timing ended. No unrelated process was signalled.
+
+Artifacts remain gitignored under `.local/statements-pilot/`: generated
+ABAP overlays, original and preassembled JS/Go programs, baseline/final
+runtime snapshots, binaries, three logs per measured stage,
+`measurements.json`, the marked CPU profile and its interval analysis,
+and validation/probe logs. Reproduce compilation with
+`tools/gogen/lexer-bench.mjs --fixture <input>/zabapgit-bench --out <scratch> --statements --build-only`;
+execute each JS sample using `--execute <scratch>/program.mjs` and run
+the generated `lexbench` for Go, under the same gated heavy wrapper.
+The full benchmark probe uses `--structures`. Nothing was pushed.

@@ -452,8 +452,6 @@ export function FindStmt(s, p, regex, icase, n, pcre = false) {
     const i = (icase ? s.toUpperCase() : s).indexOf(icase ? p.toUpperCase() : p);
     return i < 0 ? [false, 0, 0, subs] : [true, i, p.length, subs];
   }
-  // non-greedy is invalid on A4H; (?:...) and lookahead are valid there and here
-  if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
   const m = abapRegExp(p, s, icase, "", "FIND REGEX").exec(s);
   if (!m) return [false, 0, 0, subs];
   for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
@@ -499,7 +497,32 @@ export function FindTable(rows, p, regex, icase, nsub, pcre = false) {
 // U+2029, so the anchors are rewritten rather than flagged; an anchored
 // pattern on a text holding one of those is NOT_COMPILED, as in Go
 // (checkLines: A4H's own rule there is not Go's and not JS's).
+// As go/abap outsideClasses: guards inspect syntax, never escaped literals
+// or character-class contents. Keep a placeholder so tokens cannot join.
+function regexSyntax(p) {
+  let out = "";
+  for (let i = 0; i < p.length; i++) {
+    if (p[i] === "\\") { i++; out += "_"; continue; }
+    if (p[i] !== "[") { out += p[i]; continue; }
+    let j = i + 1;
+    if (p[j] === "^") j++;
+    if (p[j] === "]") j++;
+    for (; j < p.length && p[j] !== "]"; j++) {
+      if (p[j] === "\\") { j++; continue; }
+      if (p[j] === "[" && ":=.".includes(p[j + 1] ?? "x")) {
+        const k = p.indexOf(p[j + 1] + "]", j + 2);
+        if (k >= 0) { j = k + 1; continue; }
+      }
+    }
+    i = j; out += "_";
+  }
+  return out;
+}
+
 function abapRegExp(p, s, icase, g, where) {
+  const syntax = regexSyntax(p);
+  if (/\*\?|\+\?|\?\?/.test(syntax)) throw new AbapError("CX_SY_INVALID_REGEX", p);
+  if (syntax.replaceAll("(?:", "").includes("(?")) throw nc(where, "a (?...) group other than (?:...) is not in Go's regexp: " + p);
   let out = "", anchored = false;
   for (let i = 0; i < p.length; i++) {
     const c = p[i];
@@ -521,6 +544,8 @@ function abapRegExp(p, s, icase, g, where) {
     i = j;
   }
   if (anchored && /[\r\u2028\u2029]/.test(s)) throw nc(where, `^ or $ in a text with a line end other than \\n is not measured: ${p}`);
+  // Go accepts escaped punctuation such as \#; JS Unicode regex rejects it.
+  out = out.replace(/\\([\s\S])/g, (escaped, c) => "!\"#%&',:;<=>@_`~".includes(c) ? c : escaped);
   try { return new RegExp(out, (icase ? "i" : "") + g + "su"); } catch { throw new AbapError("CX_SY_INVALID_REGEX", p); }
 }
 
@@ -604,7 +629,6 @@ export const SplitSubrc = (pieces, lens) => (pieces.some((p, i) => lens[i] >= 0 
 // A JS RegExp is leftmost-first where ABAP's POSIX is leftmost-longest, as
 // in FindStmt: an alternation whose shorter branch matches first differs.
 function rxAll(s, p, icase, first) {
-  if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
   const re = abapRegExp(p, s, icase, "g", "REPLACE REGEX");
   const out = [];
   let pos = 0;
@@ -897,8 +921,16 @@ export function Row(d, i) {
 }
 
 const tableVersions = new WeakMap();
-const tableVersion = (table) => tableVersions.get(table) ?? 0;
-export function bumpTable(table) { tableVersions.set(table, tableVersion(table) + 1); }
+// As Go versionCell/BumpTable: only bound tables need mutation epochs.
+const tableVersion = (table) => {
+  let version = tableVersions.get(table);
+  if (version === undefined) { version = 0; tableVersions.set(table, version); }
+  return version;
+};
+export function bumpTable(table) {
+  const version = tableVersions.get(table);
+  if (version !== undefined) tableVersions.set(table, version + 1);
+}
 export function bindRow(current, index) {
   const table = current();
   const version = tableVersion(table);
@@ -1714,7 +1746,6 @@ export function FindResults(s, p, kind, icase, all) {
     try { re = new RegExp(p, (icase ? "i" : "") + "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
   } else {
     const pat = kind === "" ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p;
-    if (/\*\?|\+\?|\?\?/.test(pat)) throw new AbapError("CX_SY_INVALID_REGEX", pat);
     re = abapRegExp(pat, s, icase, "gd", "FIND REGEX");
   }
   const out = [];

@@ -1,5 +1,5 @@
-// Measure only the lexer portion of the supplied phase-3 benchmark.
-// node tools/gogen/lexer-bench.mjs --fixture <closure> --out <scratch>
+// Measure lexer, statements, or the complete supplied phase-3 benchmark.
+// node tools/gogen/lexer-bench.mjs --fixture <closure> --out <scratch> [--statements|--structures] [--build-only]
 // The input stays read-only. Each sample runs in a fresh process.
 import {execFileSync} from 'node:child_process';
 import {cpSync,mkdirSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
@@ -25,19 +25,26 @@ if (args.includes('--execute')) {
   const out=resolve(args.includes('--out')?value('--out'):join(home,'tools/gogen/.out/lexer-bench'));
   mkdirSync(out,{recursive:true});
   let source=readFileSync(join(input,'zcl_phase3_benchmark.clas.abap'),'utf8');
-  const start=source.indexOf('GET RUN TIME FIELD start.',source.indexOf('tokens = lexed->'));
+  const structuresLayer=args.includes('--structures');
+  const statementsLayer=args.includes('--statements')||structuresLayer;
+  const start=source.indexOf('GET RUN TIME FIELD start.',source.indexOf(statementsLayer?'statements = parsed->':'tokens = lexed->'));
   const end=source.indexOf('ENDMETHOD.',start);
   const dump=/CALL METHOD [^\n]+EXPORTING [^\n]+ = lexed RECEIVING result = dump\./.exec(source)?.[0];
   const expected=/AND lexer_hash = (`[a-f0-9]{64}`)/.exec(source)?.[1];
   const count=/IF tokens = (\d+)/.exec(source)?.[1];
   if(start<0||end<start||!dump||!expected||!count) throw new Error('unrecognized phase-3 benchmark layout');
-  source=source.slice(0,start)+`${dump}
+  const statementsDump=/CALL METHOD [^\n]+ = parsed RECEIVING result = dump\./.exec(source)?.[0];
+  const statementsHash=/AND statements_hash = (`[a-f0-9]{64}`)/.exec(source)?.[1];
+  const statementsCount=/AND statements = (\d+)/.exec(source)?.[1];
+  if(statementsLayer&&(!statementsDump||!statementsHash||!statementsCount)) throw new Error('unrecognized statements oracle');
+  if(!structuresLayer) source=source.slice(0,start)+`${dump}
 cl_abap_message_digest=>calculate_hash_for_char( EXPORTING if_algorithm = \`SHA256\` if_data = dump IMPORTING ef_hashstring = lexer_hash ).
 lexer_hash = to_lower( lexer_hash ).
-IF tokens = ${count} AND lexer_hash = ${expected}.
+${statementsLayer?`${statementsDump}\ncl_abap_message_digest=>calculate_hash_for_char( EXPORTING if_algorithm = \`SHA256\` if_data = dump IMPORTING ef_hashstring = statements_hash ).\nstatements_hash = to_lower( statements_hash ).`:""}
+IF tokens = ${count} AND lexer_hash = ${expected}${statementsLayer?` AND statements = ${statementsCount} AND statements_hash = ${statementsHash}`:""}.
 ok = abap_true.
 ENDIF.
-report = |tokens { tokens } lex_us { lex_us } lexer_hash { lexer_hash }|.
+report = |tokens { tokens } lex_us { lex_us } lexer_hash { lexer_hash }${statementsLayer?" statements { statements } statements_us { statements_us } statements_hash { statements_hash }":""}|.
 `+source.slice(end);
   const overlay=join(out,'zcl_phase3_benchmark.clas.abap');
   writeFileSync(overlay,source);
@@ -64,13 +71,18 @@ import("fmt";"os";"osg/gogen/abap")
 func main(){s:=&abap.Session{};var report string;ok:=ZCL_PHASE3_BENCHMARK_RUN(s,"",&report);fmt.Println(ok,report);if ok!="X" {os.Exit(1)}}
 `);
   execFileSync('go',['build','-o',join(out,'lexbench'),'./cmd/lexbench'],{cwd:dir,stdio:'inherit'});
+  if(args.includes('--build-only')) process.exit(0);
   const samples={JS:[],Go:[]};
   for(const host of ['JS','Go']) for(let i=0;i<3;i++) {
     const argv=host==='JS'?['--max-old-space-size=16000',fileURLToPath(import.meta.url),'--execute',join(out,'program.mjs')]:[];
     const text=execFileSync(host==='JS'?'node':join(out,'lexbench'),argv,{encoding:'utf8',maxBuffer:2e6});
     const lexUs=Number(/lex_us\s+(\d+)/.exec(text)?.[1]);
-    if(!Number.isFinite(lexUs)||!/X tokens/.test(text)) throw new Error(`invalid sample: ${text}`);
-    samples[host].push({lexUs,report:text.trim()});
+    if(!Number.isFinite(lexUs)||!/X (tokens|STAGETIME OK)/.test(text)) throw new Error(`invalid sample: ${text}`);
+    const statementsUs=statementsLayer?Number(/statements_us\s+(\d+)/.exec(text)?.[1]):undefined;
+    if(statementsLayer&&!Number.isFinite(statementsUs)) throw new Error("invalid statements sample");
+    const structuresUs=structuresLayer?Number(/structures_us\s+(\d+)/.exec(text)?.[1]):undefined;
+    if(structuresLayer&&!Number.isFinite(structuresUs)) throw new Error("invalid structures sample");
+    samples[host].push({lexUs,statementsUs,structuresUs,report:text.trim()});
     console.log(host,i+1,text.trim());
   }
   writeFileSync(join(out,'results.json'),JSON.stringify(samples,null,2));
