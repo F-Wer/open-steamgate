@@ -254,3 +254,32 @@ func TestPCREQuotingAndNegatedPOSIXRefusals(t *testing.T) {
 		}
 	}
 }
+
+// Unmeasured: Round 4 absolute PCRE anchors; A4H not run.
+func TestPCREAbsoluteAnchors(t *testing.T) {
+	for _, c := range []struct{ s, p, want string }{
+		{"abab", `\Aab`, "1[0,2;]"}, {"abab", `ab\z`, "1[2,2;]"},
+		{"ab\n", `ab\z`, "0[]"}, {"ab\r\n", `ab\z`, "0[]"},
+		{"\nab", `\Aab`, "0[]"}, {`x\A`, `\\A`, "1[1,2;]"},
+		{`x\z`, `\\z`, "1[1,2;]"}, {"abab", `\Aab\z`, "0[]"},
+	} {
+		if got := fmtRes(FindResults(c.s, c.p, 'P', false, true)); got != c.want {
+			t.Errorf("%q in %q: %s want %s", c.p, c.s, got, c.want)
+		}
+	}
+	for _, c := range []struct{ p, reason string }{
+		{`[\A]`, `unsupported anchor escape in character class \A`},
+		{`[\z]`, `unsupported anchor escape in character class \z`},
+		{`\Z`, `\Z is not in Go's RE2: \Z`}, {`\G`, `\G is not in Go's RE2: \G`},
+		{`(?m)\Aab`, `an unsupported inline flag group: (?m)\Aab`},
+	} {
+		func() {
+			defer func() {
+				if e := recover(); fmt.Sprint(e) != "NOT_COMPILED in FIND PCRE: "+c.reason {
+					t.Errorf("%q: %v", c.p, e)
+				}
+			}()
+			FindResults("ab", c.p, 'P', false, true)
+		}()
+	}
+}

@@ -230,3 +230,19 @@ test("fixed-width regex replacement pads by UTF-16 units", async () => {
     assert.deepEqual(a.ReplaceStmt("😀", "[ ]", "X", true, false, false, 0, a.NoLength, 3, pcre), ["😀X", 0]);
   }
 });
+
+// Unmeasured: Round 4 absolute PCRE anchors; A4H not run.
+test("PCRE absolute anchors preserve subject boundaries and escaped literals", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const [s, p, want] of [
+    ["abab", "\\Aab", [[0, 2]]], ["abab", "ab\\z", [[2, 2]]],
+    ["ab\n", "ab\\z", []], ["ab\r\n", "ab\\z", []], ["\nab", "\\Aab", []],
+    ["x\\A", "\\\\A", [[1, 2]]], ["x\\z", "\\\\z", [[1, 2]]], ["abab", "\\Aab\\z", []],
+  ]) assert.deepEqual(a.FindResults(s, p, "P", false, true), want, p);
+  for (const [p, reason] of [
+    ["[\\A]", "unsupported anchor escape in character class \\A"],
+    ["[\\z]", "unsupported anchor escape in character class \\z"],
+    ["\\Z", "\\Z is not in Go's RE2: \\Z"], ["\\G", "\\G is not in Go's RE2: \\G"],
+    ["(?m)\\Aab", "an unsupported inline flag group: (?m)\\Aab"],
+  ]) assert.throws(() => a.FindResults("ab", p, "P", false, true), (e) => e.message === "NOT_COMPILED in FIND PCRE: " + reason);
+});

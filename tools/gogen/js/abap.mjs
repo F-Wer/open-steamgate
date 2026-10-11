@@ -1684,7 +1684,7 @@ export function ConcatLinesOf(t, sep) {
 // 1,2 3,2); the Go runtime is the exact one. PCRE's refusals are Go's.
 const PCRE_REFUSED = [[/\(\?=/, "a lookahead (?=...)"], [/\(\?!/, "a negative lookahead (?!...)"], [/\(\?<=/, "a lookbehind (?<=...)"],
   [/\(\?<!/, "a negative lookbehind (?<!...)"], [/\(\?>/, "an atomic group (?>...)"], [/\\[1-9]|\\g\{?-?\d|\\k[<{']/, "a backreference"],
-  [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
+  [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\\Z/, "\\Z"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
   [/\(\*/, "a verb (*...)"], [/\\[cexoNXRhHvV]/, "an escape RE2 reads differently or not at all"]];
 export function FindResults(s, p, kind, icase, all) {
   if (p === "") notCompiled("FIND ... RESULTS: an empty pattern is not measured");
@@ -1702,12 +1702,15 @@ export function FindResults(s, p, kind, icase, all) {
   }
   let re;
   if (kind === "P") {
-    p = extendedPCRE(p);
+    const anchors = [];
+    p = extendedPCRE(p, anchors);
     const syntax = p.replace(/\\./gs, "_").replace(/\[(?:\\.|[^\]\\])*\]/g, "_");
     if (/\(\?[A-Za-z-]/.test(syntax)) notCompiled("FIND PCRE: an unsupported inline flag group: " + p);
     const plain = p.replaceAll("\\\\", "");
     for (const [r, what] of PCRE_REFUSED) if (r.test(plain)) notCompiled(`FIND PCRE: ${what} is not in Go's RE2: ${p}`);
-    if (/[\n\r]/.test(s)) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
+    if (/[\n\r]/.test(s) && (!anchors.length || /[\^$.]/.test(syntax))) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
+    // Translate after validating user syntax; \z must reject a final newline too.
+    for (const [i, anchor] of anchors.reverse()) p = p.slice(0, i) + (anchor === "A" ? "^" : "(?![\\s\\S])") + p.slice(i + 2);
     try { re = new RegExp(p, (icase ? "i" : "") + "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
   } else {
     const pat = kind === "" ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p;
@@ -1832,7 +1835,7 @@ function pcreAll(s, p, icase, all) {
 }
 
 // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
-function extendedPCRE(p) {
+function extendedPCRE(p, anchors) {
   for (const escape of ["\\Q", "\\E"]) {
     if (p.includes(escape)) notCompiled("FIND PCRE: unsupported quoting escape " + escape);
   }
@@ -1857,6 +1860,10 @@ function extendedPCRE(p) {
     }
     if (c === "\\" && i + 1 < p.length) {
       const next = p[++i];
+      if (next === "A" || next === "z") {
+        if (inClass) notCompiled("FIND PCRE: unsupported anchor escape in character class \\" + next);
+        anchors.push([out.length, next]);
+      }
       out += /[ \t\n\r\f\v#]/.test(next) ? next : c + next;
       continue;
     }

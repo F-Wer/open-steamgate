@@ -310,6 +310,7 @@ var pcreRefused = []struct {
 	{regexp.MustCompile(`[*+?}]\+`), "a possessive quantifier"},
 	{regexp.MustCompile(`\\K`), "\\K"},
 	{regexp.MustCompile(`\\G`), "\\G"},
+	{regexp.MustCompile(`\\Z`), "\\Z"},
 	{regexp.MustCompile(`\(\?(R|\d|&|P>|\()`), "a recursion or a conditional"},
 	{regexp.MustCompile(`\(\*`), "a verb (*...)"},
 	{regexp.MustCompile(`\\[cexoNXRhHvV]`), "an escape RE2 reads differently or not at all"},
@@ -317,7 +318,7 @@ var pcreRefused = []struct {
 
 // compilePCRE is the pattern for PCRE, leftmost-first, and its "after"
 // form (see compileABAPAfter). PCRE's own ^ $ and . around line ends are
-// not measured, so a text with \n or \r is refused; a construct RE2 lacks
+// not measured, so those operators with line ends are refused; a construct RE2 lacks
 // is refused by name; a pattern RE2 cannot read is not called invalid.
 func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp) {
 	p = extendedPCRE(p)
@@ -330,7 +331,7 @@ func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp
 			panic(NotCompiled("FIND PCRE", r.what+" is not in Go's RE2: "+p))
 		}
 	}
-	if strings.ContainsAny(s, "\n\r") {
+	if strings.ContainsAny(s, "\n\r") && ((!strings.Contains(plain, `\A`) && !strings.Contains(plain, `\z`)) || strings.ContainsAny(outsideClasses(p), "^$.")) {
 		panic(NotCompiled("FIND PCRE", "a text with line ends: PCRE's ^ $ and . around them are not measured"))
 	}
 	flags := ""
@@ -401,6 +402,9 @@ func extendedPCRE(p string) string {
 		}
 		if c == '\\' && i+1 < len(p) {
 			i++
+			if inClass && (p[i] == 'A' || p[i] == 'z') {
+				panic(NotCompiled("FIND PCRE", "unsupported anchor escape in character class \\"+string(p[i])))
+			}
 			if !strings.ContainsRune(" \t\n\r\f\v#", rune(p[i])) {
 				out.WriteByte(c)
 			}
