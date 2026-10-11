@@ -22,7 +22,8 @@ test('numeric and flat-string fast paths preserve boundaries and fallbacks', () 
   assert.throws(()=>ParseF('NaN'),/NOT_COMPILED/);
   assert.equal(CFit('abc ',3),'abc');
   assert.equal(CFit('ä z',2),'ä');
-  assert.equal(CFit('a😀z',2),'a😀');
+  // UTF-16 units, as Go's Strlen/SubS (#712): a cut pair keeps its high half
+  assert.equal(CFit('a😀z',2),'a\ud83d');
   assert.equal(CFit('\ud800z',1),'\ud800');
   assert.equal(CFit('abc',0),'');
 });

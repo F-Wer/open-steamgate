@@ -569,6 +569,14 @@
     "go:osdbind": {
       "lines": 113,
       "reason": "Record existing bind package after removing its unsafe obsolete profiler address selector; profiling now owns loopback validation."
+    },
+    "tools/gogen/emit-go.test.mjs": {
+      "lines": 1015,
+      "reason": "#708 rebased onto #712: the local-constant emitter tests and the IR-JS constructor-default regression meet in one file; carve the IR-JS emitter tests into their own file when it next grows."
+    },
+    "tools/gogen/semantics.mjs": {
+      "lines": 1007,
+      "reason": "#708 rebased onto #712/#713: IR-JS pilot, Latin-1 and reference-identity expectations beside the local-constant and byte-width ones; the EXPECT table is data and moves to its own module when it next grows."
     }
   },
   "readmeMissing": [
