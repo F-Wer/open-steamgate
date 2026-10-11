@@ -1,3 +1,4 @@
+import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // ABAP -> IR, for the Go backend spike (tools/gogen/README.md).
 //
 // The front half is not ours: @abaplint/core parses, type-checks and builds
@@ -674,6 +675,7 @@ function functionGroupIr(ctx0, g) {
       }
       const body = node.findDirectStructure(Structures.Body);
       ctx.inits = [];
+      hoistLocalConstants(body, ctx, {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported});
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
       // an update-task module marks the LUW on entry, after its caller's
@@ -683,8 +685,8 @@ function functionGroupIr(ctx0, g) {
         body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
       // a module is not a class: a path of the front end written for classes
-      // may fail on it with an error that is not a refusal; the module is
-      // then a stub that dumps with that error, never a crash of the build
+      // may fail outside a refusal; such a module becomes a dumping stub
+      if (e.message.startsWith("local constant name collision:")) throw e;
       skip(e instanceof Unsupported ? e.message : `the front end failed on a function module: ${e.message}`);
     }
   }
@@ -1704,6 +1706,7 @@ function classIr(ctx0, obj) {
         }
       }
       ctx.inits = [];
+      hoistLocalConstants(body, ctx, {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported});
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
@@ -2060,7 +2063,7 @@ function structure(node, ctx) {
     if (/\bVALUE\b/i.test(node.concatTokens())) throw new Unsupported(`DATA BEGIN OF with VALUE: ${node.concatTokens().slice(0, 60)}`);
     return {s: "nop"};
   }
-  if (isStruct(node, Structures.Constants)) throw new Unsupported(`CONSTANTS BEGIN OF: ${node.concatTokens().slice(0, 60)}`);
+  if (isStruct(node, Structures.Constants)) { ctx.inits.push(...(ctx.localConstantFields?.get(node) ?? [])); return {s: "nop"}; }
   if (isStruct(node, Structures.Try)) return tryBlock(node, ctx);
   if (isStruct(node, Structures.If)) {
     const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)}];
@@ -2346,12 +2349,9 @@ function whereOf(cc, rowType, ctx, text) {
 
 function statement(node, ctx) {
   const text = node.concatTokens();
+  if (isStmt(node, Statements.Constant) && ctx.localConstants?.has(upper(node.findFirstExpression(Expressions.DefinitionName)?.concatTokens() ?? ""))) return undefined;
   if (isStmt(node, Statements.Data) || isStmt(node, Statements.Constant)) {
-    // declared from the scope; a VALUE is set once at the start of the
-    // method, as ABAP does, not where the statement stands (inside a loop
-    // it would reset the field on every pass)
-    // a VALUE clause, not a variable named value (DATA value TYPE REF TO ...,
-    // CL_SXML_STRING_READER's reader; ultra/json)
+    // DATA VALUE is initialized at method entry, including inside loops.
     if (node.findFirstExpression(Expressions.Value)) ctx.inits.push(initialValue(node, ctx));
     return undefined;
   }
@@ -3506,8 +3506,6 @@ function initialValue(node, ctx) {
   if (isExpr(src, Expressions.Constant)) v = sourceOperand(src, ctx);
   else if (upper(src.concatTokens()) === "ABAP_TRUE") v = {e: "chars", value: "X", type: C(1)};
   else if (upper(src.concatTokens()) === "ABAP_FALSE") v = {e: "chars", value: "", type: C(1)};
-  // parity-wave2: VALUE <a constant of the method> (CL_ABAP_ZIP's
-  // LCL_STREAM: crc TYPE x LENGTH 4 VALUE mffffffff), a bare name
   else if (isExpr(src, Expressions.SimpleFieldChain) && src.getChildren().length === 1) v = variable(upper(src.concatTokens()), ctx);
   else if (isExpr(src, Expressions.SimpleFieldChain) || isExpr(src, Expressions.FieldChain)) v = fieldChain(src, ctx);
   else throw new Unsupported(`VALUE ${src.concatTokens()} of ${name}`);
@@ -3551,6 +3549,7 @@ function variable(name, ctx) {
   // IMPORTING table or structure is a pointer in Go and the object itself in JS)
   if (p) return {e: "var", name: n, type: p.type, ref: p.dir !== "importing" || byRef(p), box: p.dir !== "importing"};
   if (ctx.sig.returning?.name === n) return {e: "var", name: n, type: ctx.sig.returning.type};
+  if (ctx.localConstants?.has(n)) return ctx.localConstants.get(n);
   if (ctx.locals.has(n)) return {e: "var", name: n, type: ctx.locals.get(n)};
   const attr = findAttribute(ctx, n);
   if (attr) return attr;
@@ -3563,7 +3562,7 @@ function variable(name, ctx) {
 function isVariableName(name, ctx) {
   const n = upper(name);
   if (n === "ME" || ctx.fieldSymbols?.has(n)) return true;
-  if (ctx.sig.params.some((x) => x.name === n) || ctx.sig.returning?.name === n || ctx.locals.has(n)) return true;
+  if (ctx.sig.params.some((x) => x.name === n) || ctx.sig.returning?.name === n || ctx.locals.has(n) || ctx.localConstants?.has(n)) return true;
   const impl = findScope(ctx.spaghetti.getTop(), "class_implementation", ctx.scopeName ?? ctx.className);
   const defs = findScope(ctx.spaghetti.getTop(), "class_definition", ctx.scopeName ?? ctx.className);
   return (impl?.getData().vars[n] ?? defs?.getData().vars[n]) !== undefined;
@@ -3616,6 +3615,7 @@ function lvalue(target, ctx) {
     return {e: "sy", field: "Subrc", type: I};
   } else if (isExpr(first, Expressions.TargetField) || isExpr(first, Expressions.TargetFieldSymbol)) {
     place = variable(first.concatTokens(), ctx);
+    if (place.e === "const" || ctx.localConstantNames?.has(upper(first.concatTokens()))) throw new Unsupported(`a write to constant ${first.concatTokens()}`);
     i = 1;
   } else if (isTok(first, "ME")) {
     if (!isTok(kids[1], "->")) throw new Unsupported(`target ${target.concatTokens()}`);

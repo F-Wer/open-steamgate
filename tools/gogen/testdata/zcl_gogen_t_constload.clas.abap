@@ -1,0 +1,14 @@
+CLASS zcl_gogen_t_constload DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+    CLASS-METHODS unused RETURNING VALUE(rv) TYPE f.
+ENDCLASS.
+CLASS zcl_gogen_t_constload IMPLEMENTATION.
+  METHOD run.
+    rv = `1`.
+  ENDMETHOD.
+  METHOD unused.
+    CONSTANTS bad TYPE f VALUE '1E+999'.
+    rv = bad.
+  ENDMETHOD.
+ENDCLASS.

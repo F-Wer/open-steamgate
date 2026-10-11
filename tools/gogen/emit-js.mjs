@@ -1,12 +1,9 @@
+import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {ipow, boolx} from "./ipow-js.mjs";
 import {emitBuiltinJs} from "./emit-builtins.mjs";
 // IR -> JavaScript, from the same IR as emit-go.mjs.
 //
-// The point is a measurement: how much of the Go backend's speed is the
-// language, and how much is the value model the IR allows -- plain numbers
-// instead of boxed ABAP values, synchronous calls instead of an await on
-// every one, no type test on every operator. This emitter keeps the model
-// and changes only the language.
+// Keep the Go backend's value model with JavaScript execution.
 //
 // Values: i and f are numbers, c / x / string are strings, a structure is an
 // object, a table an array; a structure or table moved out of a place is
@@ -29,6 +26,8 @@ const typeName = (s) => {
 
 /** a constant's or an attribute's VALUE as a JS literal */
 function literal(c) {
+  const hoisted = localConstant(c, {fields: STRUCTS, expr, zero, ident, struct: (t, v) => `Object.freeze({${v}})`});
+  if (hoisted !== undefined) return hoisted;
   // a structured constant: frozen, so a write through an alias fails loudly
   if (c.type.k === "struct") {
     const fields = STRUCTS.get(c.type.go)?.fields ?? [];
@@ -170,7 +169,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`export function new_${st.go}() {`, `  return {${st.fields.map((f) => `${ident(f.name)}: ${zero(f.type)}`).join(", ")}};`, "}");
   }
   out.push("");
-  for (const c of program.consts.values()) out.push(`const ${c.go} = ${literal(c)};`);
+  out.push(...localConstantDeclarations(program.consts, {js: true, zero, literal}));
   out.push("");
   const compiledNames = new Set(program.classes.map((c) => c.name));
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
@@ -293,7 +292,6 @@ function chainCctor(cls) {
   for (let c = cls; c; c = c.super ? BYNAME.get(c.super) : null) if (ownCctor(c)) return true;
   return false;
 }
-
 function method(cls, m) {
   const params = ["s", ...m.params.map((p) => ident(p.name))];
   const head = `  ${m.static ? "static " : ""}${typeName(m.name)}(${params.join(", ")}) {`;
@@ -355,7 +353,7 @@ function whereItem(w, row, ctx) {
     ctx.lrow = saved;
   }
 }
-const moved = (e, ctx) => (composite(e.type) && isPlace(e) ? `abap.copy(${expr(e, ctx)})` : expr(e, ctx));
+const moved = (e, ctx) => (composite(e.type) && (isPlace(e) || e.e === "const") ? `abap.copy(${expr(e, ctx)})` : expr(e, ctx));
 const boundRow = (table, tb, index) => ["data", "struct"].includes(table.row.k) ? `${tb}[${index}]` : `abap.bindRow(() => ${tb}, ${index})`;
 const rowRef = (table, tb, index) => table.row.k === "struct" ? `abap.cell(${tb}[${index}], ${desc(table.row)}, ${tb})` : `abap.rowCell(() => ${tb}, ${index}, ${desc(table.row)})`;
 

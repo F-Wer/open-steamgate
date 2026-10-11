@@ -109,8 +109,8 @@ export function LogF(v) {
 
 // character-like values: a c field is stored without its trailing blanks
 export function CFit(v, n) {
-  const chars = [...v];
-  return (chars.length > n ? chars.slice(0, n).join("") : v).replace(/ +$/, "");
+  // Go's Strlen/SubS count UTF-16 units, preserve cut halves; negative n keeps v.
+  return (n >= 0 && v.length > n ? v.slice(0, n) : v).replace(/ +$/, "");
 }
 export const FmtI = (v) => String(v);
 // Integer-width two's complement; fixed x is zero-padded, never sign-extended.

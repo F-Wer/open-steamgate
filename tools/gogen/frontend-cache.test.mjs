@@ -11,21 +11,24 @@ test("every input category changes the frontend key", () => {
   const home = mkdtempSync(join(tmpdir(), "gogen-cache-key-"));
   const fixture = join(home, "src");
   const files = ["src/example.clas.abap", "src/example.clas.testclasses.abap", "src/example.tabl.xml",
-    "tools/gogen/frontend.mjs", "tools/gogen/emit-go.mjs", "tools/gogen/go/abap/abap.go",
+    "tools/gogen/frontend.mjs", "tools/gogen/frontend-local-constants.mjs", "tools/gogen/emit-local-constants.mjs", "tools/gogen/emit-go.mjs", "tools/gogen/go/abap/abap.go",
     "tools/osd-amc.mjs", "test/seed.mjs", "data/rows.tabu.json", "packs/example/data/rows.tabu.json",
     "abap_transpile.json", "package-lock.json", "libs.lock.json"];
+  // Pack discovery reads this configuration as JSON before hashing it.
+  const content = (file, value) => file === "abap_transpile.json"
+    ? JSON.stringify({input_folder: ["src"], value}) : value;
   try {
     for (const file of files) {
       mkdirSync(join(home, file, ".."), {recursive: true});
-      writeFileSync(join(home, file), "first");
+      writeFileSync(join(home, file), content(file, "first"));
     }
     const options = {home, folders: [fixture], owners: ["EXAMPLE"], fixture: true, unlayered: false};
     const key = () => frontendInputs(options).key;
     const baseline = key();
     for (const file of files) {
-      writeFileSync(join(home, file), "changed");
+      writeFileSync(join(home, file), content(file, "changed"));
       assert.notEqual(key(), baseline, file);
-      writeFileSync(join(home, file), "first");
+      writeFileSync(join(home, file), content(file, "first"));
     }
     writeFileSync(join(fixture, "new.clas.abap"), "new");
     assert.notEqual(key(), baseline, "new registry object");

@@ -851,3 +851,142 @@ test("JS positional components retain writable storage and reject invalid positi
   assert.equal(Component(cell("x", {kind: "C", len: 1}), 1), null);
   assert.equal(Component(null, 1), null);
 });
+
+test("literal local constants are converted outside Go and JS method bodies", async () => {
+  const {emitJs} = await import("./emit-js.mjs");
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-local-constants-"));
+  try {
+    writeFileSync(join(sourceDir, "zcl_local_constants.clas.abap"), `
+CLASS zcl_local_constants DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE f.
+ENDCLASS.
+CLASS zcl_local_constants IMPLEMENTATION.
+  METHOD run.
+    CONSTANTS lower TYPE f VALUE '-2147483648'.
+    CONSTANTS upper TYPE f VALUE '2147483647'.
+    CONSTANTS: BEGIN OF bounds,
+      exponent TYPE f VALUE '1E+2',
+      END OF bounds.
+    DO 3 TIMES.
+      rv = lower + upper + bounds-exponent.
+    ENDDO.
+  ENDMETHOD.
+ENDCLASS.
+`);
+    const program = compileProgram({folders: [sourceDir], objects: ["ZCL_LOCAL_CONSTANTS"]});
+    assert.deepEqual(program.skipped, []);
+    const go = emitGo(program), js = emitJs(program);
+    assert.match(go, /ZCL_LOCAL_CONSTANTS__LOCAL_CONSTANT__.* float64 = float64\(-2147483648\)/);
+    assert.doesNotMatch(go.slice(go.indexOf("func ZCL_LOCAL_CONSTANTS_RUN(")), /abap\.ParseF/);
+    assert.match(js, /ZCL_LOCAL_CONSTANTS__LOCAL_CONSTANT__.* = -2147483648/);
+    assert.doesNotMatch(js.slice(js.indexOf("static RUN(")), /abap\.ParseF/);
+    assert.match(js, /Object.freeze\(\{exponent: 100/);
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
+
+test("local constants reject scalar and structure component writes", () => {
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-constant-write-"));
+  try {
+    const file = join(sourceDir, "zcl_constant_write.clas.abap");
+    const source = (decl, write) => `CLASS zcl_constant_write DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION. CLASS-METHODS run. ENDCLASS.
+CLASS zcl_constant_write IMPLEMENTATION. METHOD run.
+${decl} ${write} ENDMETHOD. ENDCLASS.`;
+    writeFileSync(file, source("CONSTANTS c TYPE f VALUE '100'.", "c = 1."));
+    assert.throws(() => compileProgram({folders: [sourceDir], objects: ["ZCL_CONSTANT_WRITE"]}), /cannot be modified.*readonly/);
+    for (const value of ["100", "1E+999"]) {
+      writeFileSync(file, source(`CONSTANTS: BEGIN OF c, f TYPE f VALUE '${value}', END OF c.`, "c-f = 1."));
+      const p = compileProgram({folders: [sourceDir], objects: ["ZCL_CONSTANT_WRITE"]});
+      assert.match(p.classes[0].methods[0].body.find((st) => st.s === "stub").reason, /write to constant/);
+    }
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); }
+});
+
+test("safe conversions fold and fallible conversions retry at entry", async () => {
+  const {emitJs} = await import("./emit-js.mjs");
+  const {libraryPath} = await import("../osd-lib-path.mjs"), {home} = await import("./home.mjs");
+  const program = compileProgram({folders: [join(here, "testdata"), join(libraryPath(home, "open-abap-core"), "src")], objects: ["ZCL_GOGEN_T_CONSTENTRY"]});
+  // Count the actual emitted conversion calls without changing conversion semantics.
+  const runtime = new URL("./js/abap.mjs", import.meta.url).href;
+  const probe = `export * from ${JSON.stringify(runtime)}; import {ParseF as original} from ${JSON.stringify(runtime)};
+export let calls = 0; export function ParseF(s) { calls++; return original(s); }`;
+  const probeUrl = `data:text/javascript;base64,${Buffer.from(probe).toString("base64")}`;
+  const code = emitJs(program, probeUrl);
+  const module = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  const counter = await import(probeUrl), cls = module.ZCL_GOGEN_T_CONSTENTRY, s = {sy: {}};
+  assert.equal(counter.calls, 0, "unused overflow must not execute on import");
+  assert.equal(cls.A__B(s), 1); assert.equal(cls.A(s), 2);
+  for (let i = 1; i <= 2; i++) {
+    assert.throws(() => cls.BAD(s), (e) => e.name === "CX_SY_CONVERSION_OVERFLOW" || e.class === "CX_SY_CONVERSION_OVERFLOW" || String(e).includes("CX_SY_CONVERSION_OVERFLOW"));
+    assert.equal(counter.calls, i, "only the fallible conversion retries on the next entry");
+  }
+  assert.equal(cls.RECURSE(s, 3), 12);
+  assert.equal(counter.calls, 2, "recursive entries use folded literals");
+  assert.equal(cls.RECURSE(s, 1), 6);
+  assert.equal(counter.calls, 2, "folded literals need no runtime conversion");
+});
+
+test("local owners and interface method segments remain distinct in both backends", async () => {
+  const {emitJs} = await import("./emit-js.mjs");
+  const sourceDir = mkdtempSync(join(tmpdir(), "gogen-local-owner-"));
+  const goDir = mkdtempSync(join(here, "go", "cmd", "gogen-local-owner-"));
+  try {
+    writeFileSync(join(sourceDir, "zif_probe.intf.abap"), `INTERFACE zif_probe PUBLIC. METHODS meth RETURNING VALUE(rv) TYPE i. ENDINTERFACE.`);
+    writeFileSync(join(sourceDir, "cl_abap_zip.clas.abap"), `CLASS cl_abap_zip DEFINITION PUBLIC FINAL CREATE PUBLIC. PUBLIC SECTION. ENDCLASS. CLASS cl_abap_zip IMPLEMENTATION. ENDCLASS.`);
+    writeFileSync(join(sourceDir, "cl_abap_zip.clas.locals_imp.abap"), `
+CLASS lcl_probe DEFINITION. PUBLIC SECTION.
+INTERFACES zif_probe. METHODS plain RETURNING VALUE(rv) TYPE i.
+ENDCLASS.
+CLASS lcl_probe IMPLEMENTATION.
+METHOD zif_probe~meth. CONSTANTS c TYPE f VALUE '1'. rv = c. ENDMETHOD.
+METHOD plain. CONSTANTS c TYPE f VALUE '2'. rv = c. ENDMETHOD.
+ENDCLASS.`);
+    writeFileSync(join(sourceDir, "zcl_constload.clas.abap"), `
+CLASS zcl_constload DEFINITION PUBLIC FINAL CREATE PUBLIC. PUBLIC SECTION.
+CLASS-METHODS run RETURNING VALUE(rv) TYPE i. CLASS-METHODS unused. ENDCLASS.
+CLASS zcl_constload IMPLEMENTATION.
+METHOD run. rv = 1. ENDMETHOD.
+METHOD unused. CONSTANTS bad TYPE f VALUE '1E+999'. ENDMETHOD. ENDCLASS.`);
+    const program = compileProgram({folders: [sourceDir], objects: ["CL_ABAP_ZIP", "ZIF_PROBE", "ZCL_CONSTLOAD"]});
+    assert.deepEqual(program.skipped, []);
+    const cls = program.classes.find((c) => c.name === "CL_ABAP_ZIP:LCL_PROBE");
+    assert.ok(cls);
+    const constants = [...program.consts.values()].filter((c) => c.go.includes("__LOCAL_CONSTANT__") && c.go.startsWith("CL_ABAP_ZIP"));
+    assert.equal(constants.length, 2); assert.equal(new Set(constants.map((c) => c.go)).size, 2);
+    const js = emitJs(program, new URL("./js/abap.mjs", import.meta.url).href);
+    const mod = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
+    assert.equal(mod.ZCL_CONSTLOAD.RUN({sy: {}}), 1);
+    assert.throws(() => mod.ZCL_CONSTLOAD.UNUSED({sy: {}}), /CX_SY_CONVERSION_OVERFLOW/);
+    const obj = new mod.CL_ABAP_ZIP_LCL_PROBE();
+    assert.equal(obj.ZIF_PROBE__METH({sy: {}}), 1);
+    assert.equal(obj.PLAIN({sy: {}}), 2);
+    writeFileSync(join(goDir, "program.go"), emitGo(program));
+    writeFileSync(join(goDir, "main.go"), `package main\nimport("fmt";"osg/gogen/abap")\nfunc main(){o:=&CL_ABAP_ZIP_LCL_PROBE{};s:=&abap.Session{};fmt.Printf("%d/%d/%d",o.ZIF_PROBE__METH(s),o.PLAIN(s),ZCL_CONSTLOAD_RUN(s));defer func(){fmt.Print("/",recover())}();ZCL_CONSTLOAD_UNUSED(s)}`);
+    const result = spawnSync("go", ["run", "."], {cwd: goDir, encoding: "utf8"});
+    assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /^1\/2\/1\/.*CX_SY_CONVERSION_OVERFLOW/);
+    writeFileSync(join(goDir, "program_test.go"), `package main
+import("sync";"testing";"osg/gogen/abap")
+func TestConcurrentFirstCalls(t *testing.T){var wg sync.WaitGroup;start:=make(chan struct{});for i:=0;i<32;i++{wg.Add(1);go func(){defer wg.Done();<-start;s:=&abap.Session{};o:=&CL_ABAP_ZIP_LCL_PROBE{};if o.ZIF_PROBE__METH(s)!=1||o.PLAIN(s)!=2 {t.Error("constant value")}}()};close(start);wg.Wait()}
+`);
+    const race = spawnSync("go", ["test", "-race", "-run", "^TestConcurrentFirstCalls$", "."], {cwd: goDir, encoding: "utf8"});
+    assert.equal(race.status, 0, race.stdout + race.stderr);
+
+  } finally { rmSync(sourceDir, {recursive: true, force: true}); rmSync(goDir, {recursive: true, force: true}); }
+});
+
+test("a remaining generated local-constant collision fails loudly", async () => {
+  const {hoistLocalConstants} = await import("./frontend-local-constants.mjs");
+  const node = {findFirstExpression: (kind) => kind === "name" ? {concatTokens: () => "C"} : {getChildren: () => [{}]}};
+  const ctx = {className: "OWNER:LOCAL", method: "INTF~METH", locals: new Map([["C", {k: "i"}]]), program: {consts: new Map()}};
+  const h = {Nodes: {}, Structures: {Constants: "struct"}, Statements: {Constant: "constant"}, Expressions: {Value: "value", Constant: "literal", DefinitionName: "name"},
+    isTok: () => false, isExpr: () => true, isStruct: () => false, isStmt: () => true, upper: (s) => s, goName: (s) => s.replace(/[^A-Z]/g, "_"),
+    initialValue: () => ({target: {type: {k: "i"}}, value: {e: "int", value: 1}})};
+  hoistLocalConstants(node, ctx, h);
+  const original = [...ctx.program.consts.keys()][0];
+  ctx.method = "INTF__METH"; ctx.locals.set("C", {k: "i"}); hoistLocalConstants(node, ctx, h);
+  assert.equal(ctx.program.consts.size, 2);
+  assert.notEqual([...ctx.program.consts.keys()][1], original);
+  ctx.method = "INTF~METH";
+  assert.throws(() => hoistLocalConstants(node, ctx, h), /local constant name collision: OWNER:LOCAL=>INTF~METH=>C/);
+});
