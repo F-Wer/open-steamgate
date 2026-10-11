@@ -9,6 +9,7 @@ import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {referencedClasses} from "./emit-go.mjs";
+import {constructorFactories} from "./emit-constructors.mjs";
 import {reconcile, killedGoTool, markBuildFailure} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
@@ -250,6 +251,12 @@ for (const row of rows) if (row.status === "READY") {
   }
 }
 
+// emitGo resolves omitted constructor arguments, and a DEFAULT may register a
+// structured constant or an anonymous type (/UI2/CL_JSON's PRETTY_MODE); do it
+// before the layers are split, or that declaration lands in no package. The
+// class's by-name factory uses those values, so they count like its body.
+const factories = constructorFactories(program);
+
 // A package can import only packages below it. Promote a class when its
 // static type or a direct call points upward; this also keeps class cycles
 // together. Test include classes live in unit, ordinary repository classes
@@ -341,6 +348,7 @@ while (promoted) {
       for (const l of m.locals ?? []) next = Math.max(next, typeLayer(l.type));
       next = Math.max(next, bodyTypeLayer(m.body));
     }
+    next = Math.max(next, bodyTypeLayer(factories.get(c.name)?.args));
     if (next > layer.get(c.name)) { layer.set(c.name, next); promoted = true; }
   }
 }
