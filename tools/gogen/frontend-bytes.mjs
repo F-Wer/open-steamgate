@@ -5,14 +5,14 @@ export function replaceStatement(node, ctx, text, h) {
   // REPLACE [FIRST OCCURRENCE OF | ALL OCCURRENCES OF] [REGEX] p IN
   // [SECTION [OFFSET o] [LENGTH l] OF] v WITH w [IGNORING CASE]; every rule
   // measured on A4H 2026-09-23, see abap.ReplaceStmt
-  if (!bytes && /\b(PCRE|RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
+  if (!bytes && /\b(RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
   const kids = node.getChildren();
   const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
   if (!section && words.includes("SECTION") && !words.includes("OCCURRENCE") && !words.includes("OCCURRENCES")) throw new Unsupported(`REPLACE SECTION form: ${text}`);
   const ft = node.findDirectExpression(Expressions.FindType);
   const kind = ft ? upper(ft.concatTokens()) : "";
-  if (kind && kind !== "REGEX" && kind !== "SUBSTRING") throw new Unsupported(`REPLACE ${kind}`);
-  const regex = kind === "REGEX";
+  if (kind && kind !== "REGEX" && kind !== "PCRE" && kind !== "SUBSTRING") throw new Unsupported(`REPLACE ${kind}`);
+  const regex = kind === "REGEX" || kind === "PCRE";
   let pat = null, off = null, len = null, wth = null, mode = "pat";
   for (let i = 0; i < kids.length; i += 1) {
     const w = words[i];
@@ -45,7 +45,7 @@ export function replaceStatement(node, ctx, text, h) {
   const p = source(pat, ctx);
   const w = source(wth, ctx);
   if (!charlike(p.type) || !charlike(w.type)) throw new Unsupported(`REPLACE operands of ${p.type.k} / ${w.type.k}`);
-  return {s: "replace", target, pattern: convert(p, S), with: convert(w, S), regex, all: words.includes("ALL"),
+  return {s: "replace", target, pattern: convert(p, S), with: convert(w, S), regex, pcre: kind === "PCRE", all: words.includes("ALL"),
     icase: /\bIGNORING\s+CASE\b/i.test(text), off: off ? convert(source(off, ctx, I), I) : null, len: len ? convert(source(len, ctx, I), I) : null,
     cLen: target.type.k === "c" ? target.type.len : -1};
 }

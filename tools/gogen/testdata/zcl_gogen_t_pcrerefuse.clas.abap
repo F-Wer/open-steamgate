@@ -1,0 +1,11 @@
+CLASS zcl_gogen_t_pcrerefuse DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_gogen_t_pcrerefuse IMPLEMENTATION.
+  METHOD run.
+    DATA off TYPE i.
+    FIND FIRST OCCURRENCE OF PCRE `a(?=b)` IN `aab` MATCH OFFSET off.
+    rv = |{ off }|.
+  ENDMETHOD.
+ENDCLASS.

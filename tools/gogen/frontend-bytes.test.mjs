@@ -116,3 +116,117 @@ test("dynamic AND/OR and non-byte bit operands retain their refusals", () => {
   const p = compile("r = a BIT-XOR b.", "DATA a TYPE i. DATA b TYPE i. DATA r TYPE i.");
   assert.ok(p.broken.includes("zcl_byte_frontend") || p.partial.some((s) => s.includes("bit operation on other than x")));
 });
+
+// The character forms share the FindType parser with the byte forms above.
+test("plain PCRE FIND and REPLACE lower in both emitters", () => {
+  for (const statement of [
+    "FIND FIRST OCCURRENCE OF PCRE p IN xs IGNORING CASE MATCH OFFSET m MATCH LENGTH ml.",
+    "FIND ALL OCCURRENCES OF PCRE p IN xs MATCH COUNT m.",
+    "REPLACE FIRST OCCURRENCE OF PCRE p IN xs WITH p.",
+    "REPLACE ALL OCCURRENCES OF PCRE p IN xs WITH p IGNORING CASE.",
+  ]) {
+    const p = compile(statement, "DATA xs TYPE string. DATA p TYPE string. DATA m TYPE i. DATA ml TYPE i.");
+    assert.deepEqual(p.partial, []);
+    assert.equal(p.classes[0].methods[0].body[0].pcre, true);
+    for (const emit of [emitGo, emitJs]) assert.match(emit(p), /abap.(FindStmt|FindAllCount|ReplaceStmt)\([^\n]*, true\)/);
+  }
+});
+
+test("PCRE keeps REGEX's section and byte form restrictions", () => {
+  for (const statement of [
+    "FIND PCRE p IN SECTION OFFSET 1 OF xs MATCH OFFSET m.",
+    "REPLACE FIRST OCCURRENCE OF PCRE p IN SECTION OFFSET 1 OF xs WITH p.",
+    "FIND PCRE p IN xs IN BYTE MODE MATCH OFFSET m.",
+    "FIND ALL OCCURRENCES OF PCRE p IN xs MATCH OFFSET m MATCH LENGTH m MATCH COUNT m.",
+    "FIND FIRST OCCURRENCE OF PCRE p IN xs MATCH COUNT m.",
+  ]) {
+    const p = compile(statement, "DATA xs TYPE string. DATA p TYPE string. DATA m TYPE i.");
+    assert.equal(p.partial.length, 1);
+    assert.equal(compile(statement.replaceAll("PCRE", "REGEX"), "DATA xs TYPE string. DATA p TYPE string. DATA m TYPE i.").partial.length, 1);
+  }
+});
+
+test("plain PCRE runtimes refuse exactly as RESULTS does", async () => {
+  const abap = await import("./js/abap.mjs");
+  for (const pattern of ["a(?=b)", "(?<=a)b", "(a)\\1", "a++", "(?>a)", "\\K", "(", "(?i)a", "(?-x:a)", "a(?-x)b"]) {
+    let expected;
+    try { abap.FindResults("aab", pattern, "P", false, true); } catch (e) { expected = e; }
+    assert.ok(expected, pattern);
+    for (const run of [
+      () => abap.FindStmt("aab", pattern, true, false, 0, true),
+      () => abap.FindAllCount("aab", pattern, true, false, true),
+      () => abap.ReplaceStmt("aab", pattern, "x", true, true, false, 0, abap.NoLength, -1, true),
+    ]) assert.throws(run, (e) => e.constructor === expected.constructor && e.message === expected.message);
+  }
+});
+
+
+test("shared FIND and REPLACE spans count UTF-16 units", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const pcre of [false, true]) {
+    assert.deepEqual(a.FindStmt("😀a", "(a)", true, false, 1, pcre), [true, 2, 1, ["a"]]);
+    assert.deepEqual(a.FindStmt("😀", "(.)", true, false, 1, pcre), [true, 0, 2, ["😀"]]);
+    assert.deepEqual(a.FindResults("😀a", "(.)", pcre ? "P" : "R", false, true), [[0, 2, 0, 2], [2, 1, 2, 1]]);
+    assert.deepEqual(a.ReplaceStmt("😀a", "(a)", "$1!", true, false, false, 0, a.NoLength, -1, pcre), ["😀a!", 0]);
+    assert.deepEqual(a.ReplaceStmt("😀a", "(.)", "$1!", true, false, false, 2, 1, -1, pcre), ["😀a!", 0]);
+    assert.deepEqual(a.ReplaceStmt("😀a", "(a)", "$1!", true, false, false, 0, a.NoLength, 3, pcre), ["😀a", 2]);
+  }
+});
+
+// Unmeasured: Round 3 patterns are refused consistently rather than translated.
+test("PCRE quoting and negated POSIX classes refuse in every adapter", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const [pattern, reason] of [
+    [String.raw`[\Q\E^] #]`, String.raw`unsupported quoting escape \Q`],
+    [String.raw`[\Q\E] #]`, String.raw`unsupported quoting escape \Q`],
+    [String.raw`\Qa b\E`, String.raw`unsupported quoting escape \Q`],
+    [String.raw`\E`, String.raw`unsupported quoting escape \E`],
+    ["[[:^alpha:] #]", "an unsupported POSIX class: ^alpha"],
+  ]) {
+    for (const run of [
+      () => a.FindResults("#", pattern, "P", false, true),
+      () => a.FindStmt("#", pattern, true, false, 0, true),
+      () => a.FindAllCount("#", pattern, true, false, true),
+      () => a.ReplaceStmt("#", pattern, "X", true, true, false, 0, a.NoLength, -1, true),
+    ]) assert.throws(run, (e) => e.message === "NOT_COMPILED in FIND PCRE: " + reason);
+  }
+});
+
+// Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
+test("PCRE extended mode preserves escaped whitespace and classes", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const [p, s, found, len] of [
+    ["a b", "ab", true, 2], [String.raw`a\ b`, "a b", true, 3], ["[ ]", " ", true, 1],
+    ["a # ignored (?i)\\K\n b", "ab", true, 2], [String.raw`a\#b`, "a#b", true, 3],
+    ["(?-x)a b", "a b", true, 3], ["(?-x)a b", "ab", false, 0],
+    ["[^] #]", "#", false, 0], ["[^] #]", "a", true, 1], ["[] #]", "]", true, 1],
+    ["[[:alpha:] #]", "#", true, 1], ["[[:alpha:] #]", " ", true, 1], ["[[:alpha:] #]", "a", true, 1],
+    ["[[:space:] #]", "\t", true, 1], ["[[:ascii:] #]", "a", true, 1], ["[[:punct:] #]", "]", true, 1],
+    ["[ #]", "#", true, 1], ["a\tb", "ab", true, 2], ["[(?i)]", "i", true, 1], [String.raw`\(\?i\)`, "(?i)", true, 4],
+  ]) {
+    assert.deepEqual(a.FindStmt(s, p, true, false, 0, true), [found, 0, len, []], p);
+    assert.equal(a.FindResults(s, p, "P", false, false).length, found ? 1 : 0, p);
+    assert.deepEqual(a.ReplaceStmt(s, p, "X", true, false, false, 0, a.NoLength, -1, true), [found ? "X" : s, found ? 0 : 4], p);
+  }
+});
+
+test("PCRE replacements refuse directives and unknown escapes before matching", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const replacement of ["\\U$0", "\\L$0", "\\E", "\\u$1", "\\l$1", "\\n", "\\q", "\\"]) {
+    for (const text of ["ab", "miss"]) assert.throws(() => a.ReplaceStmt(text, "(ab)", replacement, true, false, false, 0, a.NoLength, -1, true), /NOT_COMPILED.*REPLACE PCRE.*unsupported replacement escape/);
+  }
+  for (const [replacement, want] of [["$0/$1/$9", "ab/ab/"], [String.raw`\\\$$1`, "\\$ab"], ["$&", "ab"]]) {
+    assert.deepEqual(a.ReplaceStmt("ab", "(ab)", replacement, true, false, false, 0, a.NoLength, -1, true), [want, 0]);
+  }
+  // ${n} remains refused, as on the REGEX replacement path.
+  for (const pcre of [false, true]) assert.throws(() => a.ReplaceStmt("ab", "(ab)", "${1}", true, false, false, 0, a.NoLength, -1, pcre), /NOT_COMPILED/);
+});
+
+// Unmeasured: a c(3) emoji field occupies three UTF-16 units without padding.
+test("fixed-width regex replacement pads by UTF-16 units", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const pcre of [false, true]) {
+    assert.deepEqual(a.ReplaceStmt("😀a", "[ ]", "X", true, false, false, 0, a.NoLength, 3, pcre), ["😀a", 4]);
+    assert.deepEqual(a.ReplaceStmt("😀", "[ ]", "X", true, false, false, 0, a.NoLength, 3, pcre), ["😀X", 0]);
+  }
+});

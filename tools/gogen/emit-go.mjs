@@ -1409,7 +1409,7 @@ function stmtLines(st, ctx, d) {
     // ultra/events: FIND ALL OCCURRENCES ... MATCH COUNT n
     case "find_all": {
       const icase = st.icase.e === "flag" ? String(st.icase.value) : `(${expr(st.icase, ctx)} == "X")`;
-      return [`${t}${place(st.count, ctx)} = abap.FindAllCount(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${icase})`,
+      return [`${t}${place(st.count, ctx)} = abap.FindAllCount(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${icase}${st.pcre ? ", true" : ""})`,
         `${t}s.Sy.Subrc = 4`, `${t}if ${place(st.count, ctx)} > 0 {`, `${t}	s.Sy.Subrc = 0`, `${t}}`];
     }
     case "read_index": {
@@ -1670,7 +1670,7 @@ function stmtLines(st, ctx, d) {
       ...st.targets.map((x) => `${t}\t${place(x.target, ctx)} = ${expr(x.value, ctx)}`), `${t}}`];
     case "replace": {
       const p = place(st.target, ctx);
-      return [`${t}${p}, s.Sy.Subrc = abap.ReplaceStmt(${p}, ${expr(st.pattern, ctx)}, ${expr(st.with, ctx)}, ${st.regex}, ${st.all}, ${st.icase}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"}, ${st.cLen})`];
+      return [`${t}${p}, s.Sy.Subrc = abap.ReplaceStmt(${p}, ${expr(st.pattern, ctx)}, ${expr(st.with, ctx)}, ${st.regex}, ${st.all}, ${st.icase}, ${st.off ? expr(st.off, ctx) : "0"}, ${st.len ? expr(st.len, ctx) : "abap.NoLength"}, ${st.cLen}${st.pcre ? ", true" : ""})`];
     }
     case "stub": return [`${t}panic(abap.NotCompiled(${JSON.stringify(st.where)}, ${JSON.stringify(st.reason)}))`];
     case "seq": return stmtList(st.body, ctx, d);
@@ -2068,9 +2068,9 @@ ${t}	}`));
     case "find_bytes_all": return emitByteStatement(st, ctx, t, {expr, place});
     case "find": {
       // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
-      const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`
+      const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length}${st.pcre ? ", true" : ""})`
         : "secOff" in st ? `fok, foff, flen, fsub := abap.FindSection(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.icase}, ${st.secOff ? expr(st.secOff, ctx) : "0"}, ${st.secLen ? expr(st.secLen, ctx) : "-1"}, ${st.subs.length})`
-          : `fok, foff, flen, fsub := abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length})`;
+          : `fok, foff, flen, fsub := abap.FindStmt(${expr(st.subject, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length}${st.pcre ? ", true" : ""})`;
       const lines = [`${t}{`, `${t}\t${call}`,
         `${t}\t_, _, _ = foff, flen, fsub`, ...(st.table ? [`${t}\t_ = fline`] : []), `${t}\tif fok {`, `${t}\t\ts.Sy.Subrc = 0`];
       if (st.line) lines.push(`${t}\t\t${place(st.line, ctx)} = fline`);

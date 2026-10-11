@@ -267,6 +267,19 @@ const EXPECT = {
   // a|ab gives 1,1 3,1 there (as FindStmt; the Go runtime is the exact one)
   ZCL_GOGEN_T_FINDRES: {Go: "alt:0/2[0:1,2;0:3,2;] grp:0/0:1,1(-1,0)(1,1) nest:2[0:0,2(0,2)(0,1)(1,1);0:2,2(2,2)(2,1)(3,1);] wb:2[0:0,2;0:7,2;] sub:2[0:0,2;0:2,2;] ic:2[0:1,2;0:3,2;] uni:1[0:2,1;] opt:0/0:1,1(-1,0) opt2:2[0:0,1(-1,0);0:1,2(2,1);] miss1:4/0:7,1(-1,0) missall:4/0[] empty:0/4[0:0,0;0:1,0;0:2,0;0:3,0;] empty2:0/4[0:0,0;0:1,2;0:3,0;0:4,0;] w:2[0:0,3(0,3);0:4,3(4,3);] posix:1[0:0,4(0,1)(1,3);]",
     JS: "alt:0/2[0:1,1;0:3,1;] grp:0/0:1,1(-1,0)(1,1) nest:2[0:0,2(0,2)(0,1)(1,1);0:2,2(2,2)(2,1)(3,1);] wb:2[0:0,2;0:7,2;] sub:2[0:0,2;0:2,2;] ic:2[0:1,2;0:3,2;] uni:1[0:2,1;] opt:0/0:1,1(-1,0) opt2:2[0:0,1(-1,0);0:1,2(2,1);] miss1:4/0:7,1(-1,0) missall:4/0[] empty:0/4[0:0,0;0:1,0;0:2,0;0:3,0;] empty2:0/4[0:0,0;0:1,2;0:3,0;0:4,0;] w:2[0:0,3(0,3);0:4,3(4,3);] posix:1[0:0,4(0,1)(1,3);]"},
+  // Unmeasured: inbox 046's xxaab input; plain PCRE reuses RESULTS matching
+  // and refusals. Lazy/greedy lengths, case, counts, captures and replacement.
+  // A4H is not run for these regressions.
+  // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
+  // Unmeasured: Round 2 literal brackets, POSIX classes, and UTF-16 fixed-field padding.
+  ZCL_GOGEN_T_PCREPLAIN: "lazy:2/3/0 short:2/1 greedy:2/2 ic:2/3/aab all:2/0 countic:2/0 miss:2/3/aab/4 replace:xxaa!/0 replaceall:XXX/0 table:2/2/3/0 emoji:2/1/a scalar:0/2/😀 res:0/2 res:2/1 regex:2/1 rxres:0/2 rxres:2/1 emreplace:😀a! rxreplace:😀a! extended:2/0 escaped:3/0 class:1/0 noextended:3/0 literals:\\$ab/ab/ negclass:4 classletter:1/0 initialbracket:1/0 posix:3/0 fixedpcre:😀a/4 fixedregex:😀a/4 padded:😀X/0",
+  // Unmeasured: unsupported PCRE replacement escapes must refuse, never lose the backslash.
+  ZCL_GOGEN_T_PCREESCAPE: {Go: "ERROR NOT_COMPILED in REPLACE PCRE: unsupported replacement escape \\U at zcl_gogen_t_pcreescape.clas.abap:9", JS: "ERROR NOT_COMPILED in REPLACE PCRE: unsupported replacement escape \\U"},
+  ZCL_GOGEN_T_PCREREFUSE: {Go: "ERROR NOT_COMPILED in FIND PCRE: a lookahead (?=...) is not in Go's RE2: a(?=b) at zcl_gogen_t_pcrerefuse.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: a lookahead (?=...) is not in Go's RE2: a(?=b)"},
+  // Unmeasured: Round 3 quoting and negated POSIX classes refuse in both backends.
+  ZCL_GOGEN_T_PCREEMPTYQUOTE: {Go: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q at zcl_gogen_t_pcreemptyquote.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q"},
+  ZCL_GOGEN_T_PCREQUOTE: {Go: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q at zcl_gogen_t_pcrequote.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q"},
+  ZCL_GOGEN_T_PCRENEGPOSIX: {Go: "ERROR NOT_COMPILED in FIND PCRE: an unsupported POSIX class: ^alpha at zcl_gogen_t_pcrenegposix.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: an unsupported POSIX class: ^alpha"},
   ZCL_GOGEN_T_FINDPCRE: "alt:2[1,1;3,1;] grp:1[0,4(0,1)(1,3);] empty:4[0,0;1,2;3,0;4,0;] wb:2[0,2;7,2;] opt:1[1,1(-1,0);] lazy:3[0,1;1,1;2,1;] ic:2[1,2;3,2;]",
   ZCL_GOGEN_T_XARITH: "div:F6DC4190/-153337456 mod:00000002 mul:000003FC ff:FFFFFFFF/0 x1:256 x2:65536 x8:255 xs:256 p:11.50 f:10.25 div2:4",
   // CL_ABAP_ZIP=>SAVE of two files, run against SAP's own CL_ABAP_ZIP on

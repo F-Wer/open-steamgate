@@ -10,6 +10,7 @@ import (
 )
 
 var regexCache sync.Map
+var pcreInlineFlags = regexp.MustCompile(`\(\?[A-Za-z-]`)
 
 // FindStmt is FIND [REGEX] p IN s, as measured on A4H 2026-09-23: POSIX, so the
 // leftmost-longest match (a|ab in xab is ab); offsets and lengths in
@@ -19,8 +20,21 @@ var regexCache sync.Map
 // accepted, as it is there (both measured). Lookahead (?= (?! is valid on a
 // system too, and Go's regexp has none: that dumps as not compiled rather
 // than calling a valid pattern invalid.
-func FindStmt(s, p string, regex, icase bool, n int) (bool, int32, int32, []string) {
+func FindStmt(s, p string, regex, icase bool, n int, pcre ...bool) (bool, int32, int32, []string) {
 	subs := make([]string, n)
+	if len(pcre) > 0 && pcre[0] {
+		ms := FindResults(s, p, 'P', icase, false)
+		if len(ms) == 0 {
+			return false, 0, 0, subs
+		}
+		m := ms[0]
+		for i := 0; i < n && 2*i+3 < len(m); i++ {
+			if m[2*i+2] >= 0 {
+				subs[i] = SubS(s, m[2*i+2], m[2*i+3])
+			}
+		}
+		return true, m[0], m[1], subs
+	}
 	if !regex {
 		// an empty substring is found at the start, length 0 (A4H
 		// 2026-09-24, ZCL_GOGEN_T_FINDSEC x1 x2: 0/0/0)
@@ -160,12 +174,12 @@ func FindSection(s, p string, icase bool, off, n int32, nsub int) (bool, int32, 
 // across rows), the first row with a match wins; its line (from 1), offset,
 // length and submatches, as FindStmt gives them for that row. An empty table
 // is not found. An empty substring pattern is not measured here and dumps.
-func FindTable(rows []string, p string, regex, icase bool, nsub int) (bool, int32, int32, int32, []string) {
+func FindTable(rows []string, p string, regex, icase bool, nsub int, pcre ...bool) (bool, int32, int32, int32, []string) {
 	if !regex && p == "" {
 		panic(NotCompiled("FIND IN TABLE", "an empty pattern in a table is not measured"))
 	}
 	for i, row := range rows {
-		if ok, o, l, subs := FindStmt(row, p, regex, icase, nsub); ok {
+		if ok, o, l, subs := FindStmt(row, p, regex, icase, nsub, pcre...); ok {
 			return true, int32(i + 1), o, l, subs
 		}
 	}
@@ -306,6 +320,10 @@ var pcreRefused = []struct {
 // not measured, so a text with \n or \r is refused; a construct RE2 lacks
 // is refused by name; a pattern RE2 cannot read is not called invalid.
 func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp) {
+	p = extendedPCRE(p)
+	if pcreInlineFlags.MatchString(outsideClasses(p)) {
+		panic(NotCompiled("FIND PCRE", "an unsupported inline flag group: "+p))
+	}
 	plain := strings.NewReplacer(`\\`, "").Replace(p)
 	for _, r := range pcreRefused {
 		if r.re.MatchString(plain) {
@@ -332,4 +350,88 @@ func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp
 	regexCache.Store(key, re)
 	regexCache.Store("after-"+key, after)
 	return re, after
+}
+
+// pcreAll adapts the shared RESULTS matcher to replacement's byte spans.
+// Pattern handling and unsupported constructs remain in FindResults.
+func pcreAll(s, p string, icase, all bool) [][]int {
+	results := FindResults(s, p, 'P', icase, all)
+	out := make([][]int, 0, len(results))
+	for _, r := range results {
+		m := make([]int, len(r))
+		for i := 0; i < len(r); i += 2 {
+			if r[i] < 0 {
+				m[i], m[i+1] = -1, -1
+			} else {
+				m[i] = boundary16(s, int(r[i]))
+				m[i+1] = boundary16(s, int(r[i]+r[i+1]))
+			}
+		}
+		out = append(out, m)
+	}
+	return out
+}
+
+// Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
+func extendedPCRE(p string) string {
+	for _, escape := range []string{`\Q`, `\E`} {
+		if strings.Contains(p, escape) {
+			panic(NotCompiled("FIND PCRE", "unsupported quoting escape "+escape))
+		}
+	}
+	extended := !strings.HasPrefix(p, "(?-x)")
+	if !extended {
+		p = p[5:]
+	}
+	var out strings.Builder
+	inClass := false
+	classFirst := -1
+	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if inClass && c == '[' && i+1 < len(p) && p[i+1] == ':' {
+			if end := strings.Index(p[i+2:], ":]"); end >= 0 {
+				name := p[i+2 : i+2+end]
+				if strings.HasPrefix(name, "^") {
+					panic(NotCompiled("FIND PCRE", "an unsupported POSIX class: "+name))
+				}
+				out.WriteString(p[i : i+end+4])
+				i += end + 3
+				continue
+			}
+		}
+		if c == '\\' && i+1 < len(p) {
+			i++
+			if !strings.ContainsRune(" \t\n\r\f\v#", rune(p[i])) {
+				out.WriteByte(c)
+			}
+			out.WriteByte(p[i])
+			continue
+		}
+		if c == '[' && !inClass {
+			inClass = true
+			classFirst = i + 1
+			if classFirst < len(p) && p[classFirst] == '^' {
+				classFirst++
+			}
+		} else if c == ']' && inClass {
+			if i == classFirst {
+				out.WriteString(`\]`)
+				continue
+			}
+			inClass = false
+		}
+		if extended && !inClass {
+			if strings.ContainsRune(" \t\n\r\f\v", rune(c)) {
+				continue
+			}
+			if c == '#' {
+				for i+1 < len(p) && p[i+1] != '\r' && p[i+1] != '\n' {
+					i++
+				}
+				continue
+			}
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
 }
