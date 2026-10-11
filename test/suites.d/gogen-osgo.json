@@ -1,5 +1,6 @@
 {
   "files": [
+    "test/irjs-progress.mjs",
     "test/generation-diff.mjs",
     "test/generation-hash.mjs",
     "test/osd-abapgit-zip.mjs",
