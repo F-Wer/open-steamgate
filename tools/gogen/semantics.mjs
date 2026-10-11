@@ -13,9 +13,10 @@ import {compileProgram} from "./frontend.mjs";
 import {funcName} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
-
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // Unmeasured: inline DDIC RESULTS, FIRST into a table, copied submatches LOOP; A4H not run.
+  ZCL_GOGEN_T_FINDINLINE: "all:0/2[0:2,2(2,1)(3,1);0:5,1(5,1)(-1,0);] copy:2[0:2,2(2,1)(3,1);0:5,1(5,1)(-1,0);] first:0/1[0:1,2(1,1)(2,1);] miss:4/0[] single:0/1[0:1,1(1,1)(-1,0);] allmiss:4/0[]",
   // CRC32 of bytes 00..n-1, n=0..9: Python zlib oracle, all word remainders.
   ZCL_GOGEN_T_CRCPROBE: "0/-771559539/920527465/139757951/-1950775789/1364906956/820760394/-1386739207/-2002098017/-1126087934/",
   // Documented longest-byte calculation and right zero padding, both orders.
@@ -951,7 +952,6 @@ for (const line of goOut.trim().split("\n")) {
     console.log(`${ok ? "ok  " : "FAIL"} ${who} ${cls}: ${got}${ok ? "" : `\n     want: ${want}`}`);
   }
 }
-
 // What A4H does not activate and abaplint does not report, so the front end
 // refuses it (a statement stub): testdata-refused/ holds one statement per
 // refusal, each answered by its message at its line, and the neighbours that
