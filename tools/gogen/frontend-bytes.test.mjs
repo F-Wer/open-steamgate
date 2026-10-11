@@ -8,6 +8,7 @@ const require = createRequire(import.meta.url);
 const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {emitJs} from "./emit-js.mjs";
 
 function compile(statement, declarations = "DATA xs TYPE xstring. DATA p TYPE xstring. DATA m TYPE i. DATA ml TYPE i.") {
   const dir = mkdtempSync(join(tmpdir(), "gogen-byte-frontend-"));
@@ -88,4 +89,30 @@ test("SECTION without operands is not a section in abaplint's grammar", () => {
   // FIND parses SECTION as the subject variable and OF xs as an option,
   // not as a section selector. There is no bare SECTION production.
   assert.equal(find.findDirectExpressions(core.Expressions.Source)[1].concatTokens(), "SECTION");
+});
+
+test("byte bit operations calculate at maximum fixed width or dynamic XOR", () => {
+  for (const op of ["BIT-XOR", "BIT-AND", "BIT-OR"]) for (const operands of ["a OP b", "b OP a"]) {
+    const p = compile(`r = ${operands.replace("OP", op)}.`, "DATA a TYPE x LENGTH 3. DATA b TYPE x LENGTH 4. DATA r TYPE x LENGTH 2.");
+    assert.deepEqual(p.partial, []);
+    assert.deepEqual(p.classes[0].methods[0].body[0].value.x.type, {k: "x", len: 4});
+    assert.match(emitGo(p), /abap.BitX/);
+    assert.match(emitJs(p), /abap.BitX/);
+  }
+  for (const operands of ["a BIT-XOR b", "b BIT-XOR a"]) {
+    const p = compile(`r = ${operands}.`, "DATA a TYPE x LENGTH 3. DATA b TYPE xstring. DATA r TYPE xstring.");
+    assert.deepEqual(p.partial, []);
+    assert.match(emitGo(p), /abap.BitXS/);
+    assert.match(emitJs(p), /abap.BitXS/);
+  }
+});
+
+test("dynamic AND/OR and non-byte bit operands retain their refusals", () => {
+  for (const op of ["BIT-AND", "BIT-OR"]) {
+    const p = compile(`r = a ${op} b.`, "DATA a TYPE x LENGTH 3. DATA b TYPE xstring. DATA r TYPE xstring.");
+    assert.equal(p.partial.length, 1);
+    assert.match(p.partial[0], /of xstrings: not measured/);
+  }
+  const p = compile("r = a BIT-XOR b.", "DATA a TYPE i. DATA b TYPE i. DATA r TYPE i.");
+  assert.ok(p.broken.includes("zcl_byte_frontend") || p.partial.some((s) => s.includes("bit operation on other than x")));
 });

@@ -32,10 +32,11 @@ import (
 // IF_SXML_NODE (1 open, 2 close, 4 value), the element name (object,
 // array, str, num, bool, null), the member's key and the value's text.
 type JSONNode struct {
-	Type  int32
-	Name  string
-	Key   string
-	Value string
+	Type   int32
+	Name   string
+	Key    string
+	Value  string
+	HasKey bool
 }
 
 type jsonValue struct {
@@ -344,37 +345,29 @@ func JSONNodes(text string) (nodes []JSONNode, ok bool) {
 	if p.bad || p.i != len(p.s) {
 		return nil, false
 	}
-	var walk func(v *jsonValue, key string)
-	walk = func(v *jsonValue, key string) {
+	var walk func(v *jsonValue, key string, hasKey bool)
+	walk = func(v *jsonValue, key string, hasKey bool) {
+		name := map[byte]string{'o': "object", 'a': "array", 's': "str", 'n': "num", 'b': "bool", 'z': "null"}[v.kind]
+		nodes = append(nodes, JSONNode{Type: 1, Name: name, Key: key, HasKey: hasKey})
 		switch v.kind {
 		case 'o':
-			nodes = append(nodes, JSONNode{Type: 1, Name: "object", Key: key})
 			for _, k := range v.orderedKeys() {
-				walk(v.vals[k], k)
+				walk(v.vals[k], k, true)
 			}
-			nodes = append(nodes, JSONNode{Type: 2, Name: "object"})
 		case 'a':
-			nodes = append(nodes, JSONNode{Type: 1, Name: "array", Key: key})
 			for _, x := range v.items {
-				walk(x, "")
+				walk(x, "", false)
 			}
-			nodes = append(nodes, JSONNode{Type: 2, Name: "array"})
-		default:
-			name := map[byte]string{'s': "str", 'n': "num", 'b': "bool", 'z': "null"}[v.kind]
-			nodes = append(nodes, JSONNode{Type: 1, Name: name, Key: key})
-			if v.kind != 'z' {
-				nodes = append(nodes, JSONNode{Type: 4, Value: v.text})
-			}
-			nodes = append(nodes, JSONNode{Type: 2, Name: name})
+		case 's', 'n', 'b':
+			nodes = append(nodes, JSONNode{Type: 4, Value: v.text})
 		}
+		nodes = append(nodes, JSONNode{Type: 2, Name: name})
 	}
-	walk(v, "")
+	walk(v, "", false)
 	return nodes, true
 }
 
-// FillJSONNodes writes nodes into the table a data reference points to (a
-// TY_NODES of LCL_JSON_PARSER: TYPE, NAME, KEY, VALUE), cleared first, as
-// PARSE does through its MT_NODES.
+// FillJSONNodes replaces LCL_JSON_PARSER's node table, including optional HAS_KEY.
 func FillJSONNodes(ref Data, nodes []JSONNode) {
 	if ref.P == nil {
 		panic(notAssigned("LCL_JSON_PARSER=>PARSE: IT_NODES"))
@@ -385,6 +378,13 @@ func FillJSONNodes(ref Data, nodes []JSONNode) {
 			panic(NotCompiled("LCL_JSON_PARSER=>PARSE", "IT_NODES is not a standard table"))
 		}
 		row := Data{P: ref.T.Append(ref.P), T: ref.T.Row}
+		if c, ok := Component(row, "HAS_KEY"); ok { // Older core pins omit it.
+			hasKey := " "
+			if n.HasKey {
+				hasKey = "X"
+			}
+			MoveData(c, Data{P: &hasKey, T: TString})
+		}
 		typ := n.Type
 		for _, f := range []struct {
 			name string
