@@ -762,3 +762,50 @@ and validation/probe logs. Reproduce compilation with
 execute each JS sample using `--execute <scratch>/program.mjs` and run
 the generated `lexbench` for Go, under the same gated heavy wrapper.
 The full benchmark probe uses `--structures`. Nothing was pushed.
+
+## Measuring progress
+
+`tools/gogen/irjs-progress.mjs` reads retained logs only. Name each sample
+`<layer>-<host>-<n>.log` (lexer/statements/structures/check, js/go); a
+multi-layer report can be copied under each measured layer's name. For
+example, collect the final statements samples and the structures probe:
+
+```sh
+runs=$(mktemp -d /mnt/ram/stoker/irjs-progress.XXXXXX)
+for n in 1 2 3; do
+  for layer in lexer statements; do
+    cp .local/statements-pilot/fix1-$n.log "$runs/$layer-js-$n.log"
+    cp .local/statements-pilot/go-$n.log "$runs/$layer-go-$n.log"
+  done
+done
+cp .local/statements-pilot/structures-js.log "$runs/structures-js-1.log"
+node tools/gogen/irjs-progress.mjs --runs "$runs" \
+  --refusals .local/statements-pilot/build --input abapiti@7072517 \
+  --append docs/irjs-progress.ndjson
+rm -rf "$runs"
+node tools/osd-leak-scan.mjs . --paths docs/irjs-progress.ndjson
+node tools/osd-metrics-page.mjs /mnt/ram/stoker/metrics.ndjson \
+  --irjs docs/irjs-progress.ndjson > /mnt/ram/stoker/gauge.html
+```
+
+The gauge command uses an existing code-metrics history as its first file.
+Omit `--append` to print a row, `--refusals` to record null, or supply
+`--vanilla /mnt/ram/stoker/vanilla.json` with layer-to-microsecond references.
+Defaults are 338372 / 2097152 / 9885785; full check is not runnable yet.
+Pass requires the embedded count/hash oracle; `passed` stops at the first
+missing or failed JS layer. Ratios use each host's median, and refusals count
+literal emitted sites, excluding companion runtime libraries. JS-only means
+the normalized reason is absent from Go; frontend counts statement guards
+carrying an ABAP source location.
+
+The seed's three rows are the original three-run lexer measurement, the
+final three-run statements measurement (with its lexer intervals), and
+the single full structures probe. They were generated through the tool's
+exported `measure()` using `date: '2026-10-10T00:00:00.000Z'`: midnight
+normalizes the documented day, not a claimed launch time. Same-day rows
+retain measurement order. `osg` records the collection checkout's HEAD.
+Refusal counts describe each retained benchmark build, a smaller closure
+than the compile-only TS-HA report table above. The full probe reports
+`STAGETIME OK` without hashes, so its layers carry `source: "doc"` for the
+embedded hash checks described above; all times/counts come from the log.
+One structures run stays one run, with no Go structures or full-check sample.

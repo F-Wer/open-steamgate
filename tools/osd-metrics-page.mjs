@@ -10,15 +10,17 @@
 import {readFileSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {compare} from "./osd-metrics.mjs";
+import {irjsSection} from "./osd-irjs-progress-page.mjs";
 
-export function page(history) {
+export function page(history, irjs = []) {
   const latest = history.at(-1);
   const previous = history.length > 1 ? history.at(-2) : undefined;
   const jumps = previous ? compare(previous, latest).filter((r) => !r.new).slice(0, 12) : [];
   const data = {history: history.map((s) => ({commit: s.commit, date: s.date,
     go: Object.fromEntries(Object.entries(s.go).map(([k, v]) => [k, {sum: v.sum, max: v.max, coverage: v.coverage}])),
     js: Object.fromEntries(Object.entries(s.js).map(([k, v]) => [k, {sum: v.sum, max: v.max}]))})), latest, previous: previous ?? null, jumps};
-  return TEMPLATE.replace("__DATA__", JSON.stringify(data).replaceAll("<", "\\u003c"));
+  const html = TEMPLATE.replace("__DATA__", JSON.stringify(data).replaceAll("<", "\\u003c"));
+  return irjs.length ? html.replace('<p class="legend">', irjsSection(irjs) + '\n<p class="legend">') : html;
 }
 
 const TEMPLATE = `<title>OSD Code Gauge</title>
@@ -141,5 +143,8 @@ render("go"); render("js");
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const history = readFileSync(process.argv[2], "utf8").split("\n").filter((l) => l.trim() !== "").map((l) => JSON.parse(l));
-  process.stdout.write(page(history));
+  const args = process.argv.slice(3);
+  if (args.length && (args.length !== 2 || args[0] !== '--irjs')) throw new Error('usage: osd-metrics-page.mjs history.ndjson [--irjs file.ndjson]');
+  const irjs = args.length ? readFileSync(args[1], 'utf8').split('\n').filter(l => l.trim()).map(l => JSON.parse(l)) : [];
+  process.stdout.write(page(history, irjs));
 }
