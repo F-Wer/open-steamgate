@@ -1,0 +1,181 @@
+{
+  "_version": "1.59.0",
+  "sap.app": {
+    "id": "l3.fleet2",
+    "type": "application",
+    "title": "{{appTitle}}",
+    "i18n": "i18n/i18n.properties",
+    "dataSources": {
+      "mainService": {
+        "uri": "../../../../opu/odata/sap/ZL3C_FLEET2_SRV/",
+        "type": "OData",
+        "settings": {
+          "odataVersion": "2.0"
+        }
+      }
+    },
+    "crossNavigation": {
+      "inbounds": {
+        "zosd_fleet2-manage": {
+          "semanticObject": "zosd_fleet2",
+          "action": "manage",
+          "signature": {
+            "parameters": {},
+            "additionalParameters": "allowed"
+          }
+        }
+      }
+    }
+  },
+  "sap.ui": {
+    "technology": "UI5",
+    "deviceTypes": {
+      "desktop": true,
+      "tablet": true,
+      "phone": true
+    }
+  },
+  "sap.ui5": {
+    "dependencies": {
+      "minUI5Version": "1.120.0",
+      "libs": {
+        "sap.m": {},
+        "sap.ui.generic.app": {},
+        "sap.suite.ui.generic.template": {},
+        "sap.suite.ui.microchart": {
+          "lazy": true
+        }
+      }
+    },
+    "models": {
+      "cockpitI18n": {
+        "type": "sap.ui.model.resource.ResourceModel",
+        "settings": {
+          "bundleName": "l3.fleet2.i18n.i18n",
+          "supportedLocales": [
+            ""
+          ],
+          "fallbackLocale": ""
+        }
+      },
+      "": {
+        "dataSource": "mainService",
+        "preload": true,
+        "settings": {
+          "useBatch": false,
+          "defaultCountMode": "Inline",
+          "defaultBindingMode": "OneWay"
+        }
+      }
+    },
+    "extends": {
+      "extensions": {
+        "sap.ui.controllerExtensions": {
+          "sap.suite.ui.generic.template.ListReport.view.ListReport": {
+            "controllerName": "l3.fleet2.List",
+            "sap.ui.generic.app": {
+              "RunSet": {
+                "EntitySet": "RunSet",
+                "Actions": {
+                  "StartRun": {
+                    "id": "StartRun",
+                    "text": "{{StartRun}}",
+                    "press": "askStartRun",
+                    "requiresSelection": false,
+                    "global": true
+                  }
+                }
+              }
+            }
+          },
+          "sap.suite.ui.generic.template.ObjectPage.view.Details": {
+            "controllerName": "l3.fleet2.Cockpit",
+            "sap.ui.generic.app": {
+              "RunSet": {
+                "EntitySet": "RunSet",
+                "Header": {
+                  "Actions": {
+                    "ContinueGlass": {
+                      "id": "ContinueGlass",
+                      "text": "{{ContinueGlass}}",
+                      "press": "askContinueGlass",
+                      "applicablePath": "CanContinue"
+                    },
+                    "Resume": {
+                      "id": "Resume",
+                      "text": "{{Resume}}",
+                      "press": "askResume",
+                      "applicablePath": "CanResume"
+                    }
+                  }
+                },
+                "Sections": {
+                  "Pile": {
+                    "id": "Pile",
+                    "Actions": {
+                      "ReleasePile": {
+                        "id": "ReleasePile",
+                        "text": "{{ReleasePile}}",
+                        "press": "askReleasePile",
+                        "requiresSelection": true,
+                        "applicablePath": "CanRelease"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "sap.ui.viewExtensions": {
+          "sap.suite.ui.generic.template.ObjectPage.view.Details": {
+            "BeforeFacet|RunSet|Stage": {
+              "className": "sap.ui.core.Fragment",
+              "fragmentName": "l3.fleet2.Cockpit",
+              "type": "XML",
+              "sap.ui.generic.app": {
+                "title": "{{progress}}"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "sap.ui.generic.app": {
+    "_version": "1.3.0",
+    "settings": {
+      "flexibilityEnabled": false
+    },
+    "pages": {
+      "ListReport|Run": {
+        "entitySet": "RunSet",
+        "component": {
+          "name": "sap.suite.ui.generic.template.ListReport",
+          "list": true,
+          "settings": {
+            "dataLoadSettings": {
+              "loadDataOnAppLaunch": "always"
+            },
+            "smartVariantManagement": false,
+            "variantManagementHidden": true
+          }
+        },
+        "pages": {
+          "ObjectPage|Run": {
+            "entitySet": "RunSet",
+            "component": {
+              "name": "sap.suite.ui.generic.template.ObjectPage",
+              "settings": {
+                "editableHeaderContent": false,
+                "tableSettings": {
+                  "variantManagement": false
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
