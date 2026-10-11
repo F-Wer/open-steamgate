@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // SMW0 media through the Go host, checked by bytes: every W3MI object of the
 // o4d and zork packs is copied into a media directory (media.mjs), read back
 // by compiled ABAP (testdata-media/zcl_gogen_t_w3miload: WWWDATA_IMPORT, then

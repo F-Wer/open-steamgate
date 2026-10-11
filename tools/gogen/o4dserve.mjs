@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // Build the two stands for the ZO4D player, one per runtime, from the same
 // IR as tools/gogen/demo.mjs:
 //

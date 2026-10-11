@@ -19,7 +19,7 @@
 //     a Go package without its tests and generated zz_ files);
 //   - a .go file in go/abap without a budget has budget 0: new capabilities go
 //     in a package of their own (tools/gogen/go/<name>), go/abap keeps binding;
-//   - a Go file over fileLimits.go lines, or a tools/**/*.mjs over
+//   - a Go file over fileLimits.go lines, or a tools/**/*.{mjs,ts} over
 //     fileLimits.mjs, needs a budget of its own;
 //   - every package under tools/gogen/go has a budget (--update records a new
 //     one), a README.md of at least three lines, and does not depend on
@@ -85,12 +85,12 @@ const ownGoFiles = (dir) => readdirSync(dir).sort()
 
 const pkgName = (dir) => rel(dir).replace(/^tools\/gogen\/go\//, "");
 
-function mjsFiles(dir = join(ROOT, "tools"), out = []) {
+function scriptFiles(dir = join(ROOT, "tools"), out = []) {
   for (const n of readdirSync(dir).sort()) {
     const p = join(dir, n);
     if (n === "node_modules" || n === ".out" || n.startsWith(".")) continue;
-    if (statSync(p).isDirectory()) mjsFiles(p, out);
-    else if (n.endsWith(".mjs") && isTracked(p)) out.push(p);
+    if (statSync(p).isDirectory()) scriptFiles(p, out);
+    else if (/\.(mjs|ts)$/.test(n) && isTracked(p)) out.push(p);
   }
   return out;
 }
@@ -126,7 +126,7 @@ export function measure(budget) {
     sizes[`go:${pkgName(dir)}`] = files.reduce((n, f) => n + lines(f), 0);
     for (const f of files) sizes[rel(f)] = lines(f);
   }
-  for (const f of mjsFiles()) sizes[rel(f)] = lines(f);
+  for (const f of scriptFiles()) sizes[rel(f)] = lines(f);
   for (const f of budget.watched ?? []) if (existsSync(join(ROOT, f))) sizes[f] = lines(join(ROOT, f));
   return sizes;
 }
@@ -150,7 +150,7 @@ export function checkKeyed(budget, sizes, {deps, base} = {}) {
       errors.add(key, `${key}: a new file in go/abap (budget 0) -- a new capability goes in tools/gogen/go/<name> with a README; go/abap keeps binding glue`);
     } else if (key.endsWith(".go") && n > limitGo) {
       errors.add(key, `${key}: ${n} lines, over ${limitGo} without a budget -- ${HINT}`);
-    } else if (key.endsWith(".mjs") && n > limitMjs) {
+    } else if (/\.(mjs|ts)$/.test(key) && n > limitMjs) {
       errors.add(key, `${key}: ${n} lines, over ${limitMjs} without a budget -- ${HINT}`);
     } else if ((budget.watched ?? []).includes(key)) {
       errors.add(key, `${key}: watched, without a budget -- run --update`);

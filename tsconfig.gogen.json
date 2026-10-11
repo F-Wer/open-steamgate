@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "ES2024",
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "tools/gogen/ir.ts",
+    "tools/gogen/symbols.ts",
+    "tools/gogen/emit-constructors.ts",
+    "tools/gogen/frontend-find-results.ts"
+  ]
+}

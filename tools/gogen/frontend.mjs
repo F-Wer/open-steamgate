@@ -1,4 +1,4 @@
-import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.mjs";
+import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // ABAP -> IR, for the Go backend spike (tools/gogen/README.md).
 //

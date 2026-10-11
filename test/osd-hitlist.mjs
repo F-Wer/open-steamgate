@@ -11,7 +11,7 @@ import {markdown} from "../tools/hitlist/markdown.mjs";
 import {libraryPath} from "../tools/osd-lib-path.mjs";
 import {home} from "../tools/gogen/home.mjs";
 import {compileProgram} from "../tools/gogen/frontend.mjs";
-import {writeGo} from "../tools/gogen/symbols.mjs";
+import {writeGo} from "../tools/gogen/symbols.ts";
 import {emitGo, funcName, typeName} from "../tools/gogen/emit-go.mjs";
 import {run} from "../tools/osd-hitlist.mjs";
 

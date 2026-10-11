@@ -1,4 +1,4 @@
-import {funcName, writeGo, writeSymbols, refreshSymbolBuild} from "./symbols.mjs";
+import {funcName, writeGo, writeSymbols, refreshSymbolBuild} from "./symbols.ts";
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.
 import {spawnSync} from "node:child_process";
@@ -9,7 +9,7 @@ import {performance} from "node:perf_hooks";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
 import {referencedClasses} from "./emit-go.mjs";
-import {constructorFactories} from "./emit-constructors.mjs";
+import {constructorFactories} from "./emit-constructors.ts";
 import {reconcile, killedGoTool, markBuildFailure} from "./unit-results.mjs";
 import {home} from "./home.mjs";
 import {cacheLocation, frontendInputs, readFrontendCache, writeFrontendCache} from "./frontend-cache.mjs";
@@ -367,7 +367,7 @@ writeGeneratedGo = function (dir) {
     writeGo(join(dir, "zz_generated.go"), program, "main", null, true);
     return;
   }
-  const symbols = {};
+  const symbols = new Map();
   const coreDir = join(goDir, "generated", "core");
   const appDir = join(goDir, "generated", "app");
   mkdirSync(coreDir, {recursive: true});

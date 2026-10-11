@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // Reproducible benchmarks over frontend-generated owned-memory methods.
 // Run under osd-heavy; the positional output directory preserves generated Go.
 import {cpSync, mkdirSync, writeFileSync} from 'node:fs';
@@ -9,7 +9,7 @@ const program = compileProgram({folders: [join(import.meta.dirname, 'testdata')]
 if (program.partial.length || program.broken.length) throw new Error(JSON.stringify(program.partial));
 cpSync(join(import.meta.dirname, 'go'), out, {recursive: true});
 mkdirSync(join(out, 'ownedbench'), {recursive: true});
-writeGo(join(out, 'ownedbench/generated.go'), program, 'ownedbench', null, false, {}, 'osg/gogen/ownedbench');
+writeGo(join(out, 'ownedbench/generated.go'), program, 'ownedbench', null, false, new Map(), 'osg/gogen/ownedbench');
 writeFileSync(join(out, 'ownedbench/generated_test.go'), `package ownedbench
 import ("testing"; "fmt"; "strings"; "osg/gogen/abap")
 var result int32

@@ -1,5 +1,5 @@
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
-import {constructorFactories} from "./emit-constructors.mjs";
+import {constructorFactories} from "./emit-constructors.ts";
 import {emitCondition} from "./emit-js-condition.mjs";
 import {ipow, boolx} from "./ipow-js.mjs";
 import {emitBuiltinJs} from "./emit-builtins.mjs";

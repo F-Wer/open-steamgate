@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // Zork, the whole interpreter, compiled from packs/zork through the IR to Go
 // and to JS, and played by its own speedrun: the story file and the script
 // of the pack, the same commands on both, the logs compared line by line.

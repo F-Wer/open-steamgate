@@ -1,7 +1,7 @@
-import {typeName, funcName} from "./symbols.mjs";
-export {typeName, funcName} from "./symbols.mjs";
+import {typeName, funcName} from "./symbols.ts";
+export {typeName, funcName} from "./symbols.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
-import {constructorFactories} from "./emit-constructors.mjs";
+import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";

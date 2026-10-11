@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // CL_HTTP_CLIENT on Node and on the Go host, byte for byte (ultra/httpc).
 //
 //   node tools/gogen/httpc.mjs [--node] [--keep]

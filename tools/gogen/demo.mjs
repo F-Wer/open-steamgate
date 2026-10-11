@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // The whole ZO4D demo, compiled to Go and to JS from one IR, against the A4H
 // recordings: the handler, the demo director and every effect class of the
 // pack, nothing rewritten.

@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // ABAP semantics pinned against A4H: each class in testdata/ has a static
 // RUN returning a string, and EXPECT below is what A4H returned for the same
 // code (ABAP Unit probe, 2026-09-23), except entries marked unmeasured.

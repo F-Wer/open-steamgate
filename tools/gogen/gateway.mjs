@@ -1,4 +1,4 @@
-import {writeGo} from "./symbols.mjs";
+import {writeGo} from "./symbols.ts";
 // OSG's own gateway through the Go backend: every ABAP object of src/, gen/
 // and the libraries of abap_transpile.json compiled (a statement outside the
 // subset raises NOT_COMPILED at its ABAP line when it runs), then the start
