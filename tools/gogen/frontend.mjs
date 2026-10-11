@@ -3162,10 +3162,13 @@ function statement(node, ctx) {
     const tw = words.filter((w) => w !== "" && w !== ".").join(" ");
     if (/^FIND ALL OCCURRENCES OF IN (IGNORING CASE )?MATCH COUNT$/.test(tw) && node.findDirectExpressions(Expressions.Source).length === 2) {
       const [pat, subj] = node.findDirectExpressions(Expressions.Source);
-      const regex = !!node.findDirectExpression(Expressions.FindType);
+      const kind = upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "");
+      if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
+      const regex = kind !== "";
+      const pcre = kind === "PCRE";
       let pattern = source(pat, ctx);
       let icase = {e: "flag", value: /\bIGNORING\s+CASE\b/i.test(text), type: {k: "bool"}};
-      if (regex && pattern.type.k === "ref" && pattern.type.name === "CL_ABAP_REGEX" && ctx.program.wanted.has("CL_ABAP_REGEX") && !icase.value) {
+      if (!pcre && regex && pattern.type.k === "ref" && pattern.type.name === "CL_ABAP_REGEX" && ctx.program.wanted.has("CL_ABAP_REGEX") && !icase.value) {
         const base = pattern;
         pattern = {e: "refattr", base, name: "PATTERN", type: S};
         icase = {e: "refattr", base, name: "MV_IGNORE_CASE", type: C(1)};
@@ -3173,7 +3176,7 @@ function statement(node, ctx) {
       else pattern = convert(pattern, S);
       const count = lvalue(node.findDirectExpression(Expressions.Target), ctx);
       if (count.type.k !== "i") throw new Unsupported(`MATCH COUNT into a ${count.type.k}`);
-      return {s: "find_all", regex, pattern, icase, subject: convert(source(subj, ctx), S), count};
+      return {s: "find_all", regex, pcre, pattern, icase, subject: convert(source(subj, ctx), S), count};
     }
     // parity-wave2: FIND [FIRST OCCURRENCE OF | ALL OCCURRENCES OF]
     // [REGEX | PCRE] p IN s [IGNORING CASE] RESULTS r, r a match_result or a
@@ -3186,10 +3189,10 @@ function statement(node, ctx) {
     if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
-    if (kind && kind !== "REGEX") throw new Unsupported(`FIND ${kind}`);
+    if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
     const inTable = words.some((w, i) => w === "IN" && words[i + 1] === "TABLE");
     const section = words.includes("SECTION");
-    if (section && (kind === "REGEX" || inTable)) throw new Unsupported(`FIND form: ${text}`);
+    if (section && (kind !== "" || inTable)) throw new Unsupported(`FIND form: ${text}`);
     // the Sources in order: pattern, [section offset], [section length], subject
     const srcs = [];
     let smode = "pat";
@@ -3206,7 +3209,7 @@ function statement(node, ctx) {
     if (!pat || !subj) throw new Unsupported(`FIND operands: ${text}`);
     const patX = source(pat, ctx);
     if (!charlike(patX.type)) throw new Unsupported(`FIND of a ${patX.type.k}`);
-    const out = {s: "find", regex: kind === "REGEX", pattern: convert(patX, S),
+    const out = {s: "find", regex: kind !== "", pcre: kind === "PCRE", pattern: convert(patX, S),
       icase: /\bIGNORING\s+CASE\b/i.test(text), subs: [], off: null, len: null};
     if (inTable) {
       const tb = source(subj, ctx);

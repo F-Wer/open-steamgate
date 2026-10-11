@@ -435,20 +435,29 @@ export function RandomInt(min, max) {
 // FIND [REGEX] p IN s: [found, offset, length, submatches]. A JS RegExp is
 // leftmost-first where ABAP's POSIX is leftmost-longest: an alternation whose
 // shorter branch matches first (a|ab) differs; the Go runtime is the exact one.
-export function FindStmt(s, p, regex, icase, n) {
+export function FindStmt(s, p, regex, icase, n, pcre = false) {
   const subs = new Array(n).fill("");
+  if (pcre) {
+    const ms = FindResults(s, p, "P", icase, false);
+    if (!ms.length) return [false, 0, 0, subs];
+    const m = ms[0];
+    for (let i = 0; i < n && 2 * i + 3 < m.length; i++) {
+      if (m[2 * i + 2] >= 0) subs[i] = s.slice(m[2 * i + 2], m[2 * i + 2] + m[2 * i + 3]);
+    }
+    return [true, m[0], m[1], subs];
+  }
   if (!regex) {
     // an empty substring is found at the start (A4H 2026-09-24, ZCL_GOGEN_T_FINDSEC)
     if (p === "") return [true, 0, 0, subs];
     const i = (icase ? s.toUpperCase() : s).indexOf(icase ? p.toUpperCase() : p);
-    return i < 0 ? [false, 0, 0, subs] : [true, Strlen(s.slice(0, i)), Strlen(p), subs];
+    return i < 0 ? [false, 0, 0, subs] : [true, i, p.length, subs];
   }
   // non-greedy is invalid on A4H; (?:...) and lookahead are valid there and here
   if (/\*\?|\+\?|\?\?/.test(p)) throw new AbapError("CX_SY_INVALID_REGEX", p);
   const m = abapRegExp(p, s, icase, "", "FIND REGEX").exec(s);
   if (!m) return [false, 0, 0, subs];
   for (let i = 0; i < n; i++) subs[i] = m[i + 1] ?? "";
-  return [true, Strlen(s.slice(0, m.index)), Strlen(m[0]), subs];
+  return [true, m.index, m[0].length, subs];
 }
 
 // FIND p IN SECTION [OFFSET off] [LENGTH n] OF s, a substring: go/abap FindSection
@@ -475,10 +484,10 @@ export function FindSection(s, p, icase, off, n, nsub) {
 }
 
 // FIND [REGEX] p IN TABLE itab of strings: go/abap FindTable
-export function FindTable(rows, p, regex, icase, nsub) {
+export function FindTable(rows, p, regex, icase, nsub, pcre = false) {
   if (!regex && p === "") throw new AbapError("NOT_COMPILED", "FIND IN TABLE: an empty pattern in a table is not measured");
   for (let i = 0; i < rows.length; i++) {
-    const [ok, o, l, subs] = FindStmt(rows[i], p, regex, icase, nsub);
+    const [ok, o, l, subs] = FindStmt(rows[i], p, regex, icase, nsub, pcre);
     if (ok) return [true, i + 1, o, l, subs];
   }
   return [false, 0, 0, 0, new Array(nsub).fill("")];
@@ -648,16 +657,17 @@ function splice(s, ms, wth) {
 }
 export const NoLength = -2147483648;
 // REPLACE ... IN [SECTION ...] v WITH w; [value, sy-subrc]
-export function ReplaceStmt(v, p, wth, regex, all, icase, off, ln, cLen) {
-  if (cLen >= 0) v = PadC(v, cLen);
-  const cs = [...v];
-  const n = cs.length;
+export function ReplaceStmt(v, p, wth, regex, all, icase, off, ln, cLen, pcre = false) {
+  if (cLen >= 0 && v.length < cLen) v += " ".repeat(cLen - v.length);
+  if (pcre) checkPCREReplacement(wth);
+  const n = v.length;
   if (ln === NoLength) ln = n - off;
   else if (ln < 0) throw nc("REPLACE", "a SECTION of negative LENGTH is not measured");
   if (off < 0 || off > n || off + ln > n) rangeError();
-  const head = cs.slice(0, off).join(""), sec = cs.slice(off, off + ln).join(""), tail = cs.slice(off + ln).join("");
+  const head = v.slice(0, off), sec = v.slice(off, off + ln), tail = v.slice(off + ln);
   let ms;
-  if (regex) ms = rxAll(sec, p, icase, !all);
+  if (pcre) ms = pcreAll(sec, p, icase, all);
+  else if (regex) ms = rxAll(sec, p, icase, !all);
   else {
     if (p === "" && all) throw new AbapError("CX_SY_REPLACE_INFINITE_LOOP", "REPLACE ALL OCCURRENCES OF ''");
     ms = plainAll(sec, p, icase, !all);
@@ -665,9 +675,8 @@ export function ReplaceStmt(v, p, wth, regex, all, icase, off, ln, cLen) {
   if (ms.length === 0) return [cLen >= 0 ? v.replace(/ +$/, "") : v, 4];
   const out = head + splice(sec, ms, (m) => (regex ? rxWith(wth, m) : wth)) + tail;
   if (cLen >= 0) {
-    const oc = [...out];
-    if (oc.length > cLen) {
-      return [CFit(out, cLen), oc.slice(cLen).join("").replace(/ +$/, "") === "" ? 0 : 2];
+    if (out.length > cLen) {
+      return [CFit(out, cLen), out.slice(cLen).replace(/ +$/, "") === "" ? 0 : 2];
     }
     return [out.replace(/ +$/, ""), 0];
   }
@@ -1604,7 +1613,8 @@ export function ConcatFit(v, n) {
   const rc = r.length > n ? 4 : 0;
   return [r.slice(0, n).join("").replace(/ +$/, ""), rc];
 }
-export function FindAllCount(s, p, regex, icase) {
+export function FindAllCount(s, p, regex, icase, pcre = false) {
+  if (pcre) return FindResults(s, p, "P", icase, true).length;
   if (p === "") throw new AbapError("NOT_COMPILED", "FIND ALL OCCURRENCES: an empty pattern is not measured");
   const ms = regex ? rxAll(s, p, icase, false) : plainAll(s, p, icase, false);
   if (ms.some((m) => m[0] === "")) throw new AbapError("NOT_COMPILED", "FIND ALL OCCURRENCES: a regex that matches the empty string is not measured");
@@ -1667,25 +1677,24 @@ export function ConcatLinesOf(t, sep) {
 
 // FIND ... RESULTS (parity-wave2): go/abap FindResults, the same iteration
 // (after a match at its end, after an empty one a character on, an empty
-// match at the end found) and the same answer shape, offsets in code points.
+// match at the end found) and the same answer shape, offsets in UTF-16 code units.
 // A JS RegExp is leftmost-first: for PCRE ('P') that is the engine; for
 // REGEX ('R', POSIX leftmost-longest) an alternation whose shorter branch
 // matches first differs, as in FindStmt (a|ab in xabab: JS 1,1 3,1, A4H
 // 1,2 3,2); the Go runtime is the exact one. PCRE's refusals are Go's.
 const PCRE_REFUSED = [[/\(\?=/, "a lookahead (?=...)"], [/\(\?!/, "a negative lookahead (?!...)"], [/\(\?<=/, "a lookbehind (?<=...)"],
   [/\(\?<!/, "a negative lookbehind (?<!...)"], [/\(\?>/, "an atomic group (?>...)"], [/\\[1-9]|\\g\{?-?\d|\\k[<{']/, "a backreference"],
-  [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
+  [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\\Z/, "\\Z"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
   [/\(\*/, "a verb (*...)"], [/\\[cexoNXRhHvV]/, "an escape RE2 reads differently or not at all"]];
 export function FindResults(s, p, kind, icase, all) {
   if (p === "") notCompiled("FIND ... RESULTS: an empty pattern is not measured");
-  const cp = (i) => [...s.slice(0, i)].length;
   if (kind === "" && !icase) {
     const out = [];
-    const n = [...p].length;
+    const n = p.length;
     for (let pos = 0; pos <= s.length;) {
       const i = s.indexOf(p, pos);
       if (i < 0) break;
-      out.push([cp(i), n]);
+      out.push([i, n]);
       if (!all) break;
       pos = i + p.length;
     }
@@ -1693,9 +1702,15 @@ export function FindResults(s, p, kind, icase, all) {
   }
   let re;
   if (kind === "P") {
+    const anchors = [];
+    p = extendedPCRE(p, anchors);
+    const syntax = p.replace(/\\./gs, "_").replace(/\[(?:\\.|[^\]\\])*\]/g, "_");
+    if (/\(\?[A-Za-z-]/.test(syntax)) notCompiled("FIND PCRE: an unsupported inline flag group: " + p);
     const plain = p.replaceAll("\\\\", "");
     for (const [r, what] of PCRE_REFUSED) if (r.test(plain)) notCompiled(`FIND PCRE: ${what} is not in Go's RE2: ${p}`);
-    if (/[\n\r]/.test(s)) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
+    if (/[\n\r]/.test(s) && (!anchors.length || /[\^$.]/.test(syntax))) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
+    // Translate after validating user syntax; \z must reject a final newline too.
+    for (const [i, anchor] of anchors.reverse()) p = p.slice(0, i) + (anchor === "A" ? "^" : "(?![\\s\\S])") + p.slice(i + 2);
     try { re = new RegExp(p, (icase ? "i" : "") + "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
   } else {
     const pat = kind === "" ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p;
@@ -1710,8 +1725,7 @@ export function FindResults(s, p, kind, icase, all) {
     const r = [];
     for (const ix of m.indices) {
       if (ix === undefined) { r.push(-1, 0); continue; }
-      const o = cp(ix[0]);
-      r.push(o, cp(ix[1]) - o);
+      r.push(ix[0], ix[1] - ix[0]);
     }
     out.push(r);
     if (!all) break;
@@ -1808,4 +1822,76 @@ export const DecodeBase64 = (s, text) => Buffer.from(text, 'base64').toString('u
 export function WithAssertQuit(quit, run) {
   try { return run(); }
   catch (e) { if (e instanceof Raised && e.cls === 'KERNEL_CX_ASSERT') e.assertionQuitNo = quit === 0; throw e; }
+}
+
+// Adapt RESULTS character spans to replacement's JS match arrays.
+function pcreAll(s, p, icase, all) {
+  return FindResults(s, p, "P", icase, all).map((r) => {
+    const m = [];
+    for (let i = 0; i < r.length; i += 2) m.push(r[i] < 0 ? undefined : s.slice(r[i], r[i] + r[i + 1]));
+    m.index = r[0];
+    return m;
+  });
+}
+
+// Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
+function extendedPCRE(p, anchors) {
+  for (const escape of ["\\Q", "\\E"]) {
+    if (p.includes(escape)) notCompiled("FIND PCRE: unsupported quoting escape " + escape);
+  }
+  const extended = !p.startsWith("(?-x)");
+  if (!extended) p = p.slice(5);
+  let out = "", inClass = false, classFirst = -1;
+  for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (inClass && c === "[" && p[i + 1] === ":") {
+      const end = p.indexOf(":]", i + 2);
+      if (end >= 0) {
+        // RE2's POSIX classes are ASCII; JS needs their explicit ranges.
+        const classes = {alpha: "A-Za-z", alnum: "A-Za-z0-9", ascii: "\x00-\x7f", blank: " \t",
+          cntrl: "\x00-\x1f\x7f", digit: "0-9", graph: "!-~", lower: "a-z", print: " -~",
+          punct: "!-/:-@\\[-`{-~", space: " \t\n\r\f\v", upper: "A-Z", word: "A-Za-z0-9_", xdigit: "A-Fa-f0-9"};
+        const name = p.slice(i + 2, end);
+        if (!Object.hasOwn(classes, name)) notCompiled("FIND PCRE: an unsupported POSIX class: " + name);
+        out += classes[name];
+        i = end + 1;
+        continue;
+      }
+    }
+    if (c === "\\" && i + 1 < p.length) {
+      const next = p[++i];
+      if (next === "A" || next === "z") {
+        if (inClass) notCompiled("FIND PCRE: unsupported anchor escape in character class \\" + next);
+        anchors.push([out.length, next]);
+      }
+      out += /[ \t\n\r\f\v#]/.test(next) ? next : c + next;
+      continue;
+    }
+    if (c === "[" && !inClass) {
+      inClass = true;
+      classFirst = i + 1 + (p[i + 1] === "^" ? 1 : 0);
+    } else if (c === "]" && inClass) {
+      if (i === classFirst) { out += "\\]"; continue; }
+      inClass = false;
+    }
+    if (extended && !inClass) {
+      if (/[ \t\n\r\f\v]/.test(c)) continue;
+      if (c === "#") {
+        while (i + 1 < p.length && !/[\r\n]/.test(p[i + 1])) i++;
+        continue;
+      }
+    }
+    out += c;
+  }
+  return out;
+}
+
+function checkPCREReplacement(withText) {
+  for (let i = 0; i < withText.length; i++) {
+    if (withText[i] !== "\\") continue;
+    const next = withText[++i];
+    if (next !== "\\" && next !== "$") {
+      notCompiled("REPLACE PCRE: unsupported replacement escape " + "\\" + (next ?? ""));
+    }
+  }
 }

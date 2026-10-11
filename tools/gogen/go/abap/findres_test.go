@@ -64,3 +64,222 @@ func TestFindResults(t *testing.T) {
 		}()
 	}
 }
+
+// Unmeasured regressions: statement adapters must retain mode P's refusal.
+func TestPlainPCRERefusals(t *testing.T) {
+	for _, p := range []string{"a(?=b)", "(?<=a)b", `(a)\1`, "a++", "(?>a)", `\K`, "(", "(?i)a", "(?-x:a)", "a(?-x)b"} {
+		refusal := func(run func()) any {
+			var err any
+			func() { defer func() { err = recover() }(); run() }()
+			return err
+		}
+		want := refusal(func() { FindResults("aab", p, 'P', false, true) })
+		if want == nil {
+			t.Fatalf("%q was not refused", p)
+		}
+		for _, run := range []func(){
+			func() { FindStmt("aab", p, true, false, 0, true) },
+			func() { FindAllCount("aab", p, true, false, true) },
+			func() { ReplaceStmt("aab", p, "x", true, true, false, 0, NoLength, -1, true) },
+		} {
+			if got := refusal(run); fmt.Sprint(got) != fmt.Sprint(want) {
+				t.Errorf("%q: refusal %v, RESULTS %v", p, got, want)
+			}
+		}
+	}
+}
+
+func TestPCREReplacementSpans(t *testing.T) {
+	for _, c := range []struct {
+		s, p, with, want string
+		all              bool
+	}{
+		{"éaab", "(a+?)b", "$1!", "éaa!", false},
+		{"abbc", "b*", "X", "XaXXcX", true},
+		{"abab", `(a)(b)`, "$2$1", "baba", true},
+		{"xxaab", "z", "X", "xxaab", true},
+	} {
+		got, _ := ReplaceStmt(c.s, c.p, c.with, true, c.all, false, 0, NoLength, -1, true)
+		if got != c.want {
+			t.Errorf("%q / %q: %q, want %q", c.s, c.p, got, c.want)
+		}
+	}
+}
+
+func TestRegexUTF16Spans(t *testing.T) {
+	for _, pcre := range []bool{false, true} {
+		for _, c := range []struct {
+			s, p, sub string
+			off, n    int32
+		}{
+			{"😀a", "(a)", "a", 2, 1}, {"😀", "(.)", "😀", 0, 2},
+		} {
+			ok, off, n, subs := FindStmt(c.s, c.p, true, false, 1, pcre)
+			if !ok || off != c.off || n != c.n || subs[0] != c.sub {
+				t.Errorf("spans: %v %v %v %v", ok, off, n, subs)
+			}
+		}
+		kind := byte('R')
+		if pcre {
+			kind = 'P'
+		}
+		if got := fmtRes(FindResults("😀a", "(.)", kind, false, true)); got != "2[0,2(0,2);2,1(2,1);]" {
+			t.Fatal(got)
+		}
+		for _, c := range []struct {
+			off, ln int32
+			cLen    int
+			want    string
+			rc      int32
+		}{
+			{0, NoLength, -1, "😀a!", 0}, {2, 1, -1, "😀a!", 0}, {0, NoLength, 3, "😀a", 2},
+		} {
+			got, rc := ReplaceStmt("😀a", "(a)", "$1!", true, false, false, c.off, c.ln, c.cLen, pcre)
+			if got != c.want || rc != c.rc {
+				t.Errorf("replace: %q/%d want %q/%d", got, rc, c.want, c.rc)
+			}
+		}
+	}
+}
+
+// Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
+func TestPCREExtended(t *testing.T) {
+	for _, c := range []struct {
+		p, s  string
+		found bool
+		n     int32
+	}{
+		{"a b", "ab", true, 2}, {`a\ b`, "a b", true, 3}, {"[ ]", " ", true, 1},
+		{"a # ignored (?i)\\K\n b", "ab", true, 2}, {`a\#b`, "a#b", true, 3},
+		{"(?-x)a b", "a b", true, 3}, {"(?-x)a b", "ab", false, 0}, {"[ #]", "#", true, 1},
+		{"[^] #]", "#", false, 0}, {"[^] #]", "a", true, 1}, {"[] #]", "]", true, 1},
+		{"[[:alpha:] #]", "#", true, 1}, {"[[:alpha:] #]", " ", true, 1}, {"[[:alpha:] #]", "a", true, 1},
+		{"[[:space:] #]", "\t", true, 1}, {"[[:ascii:] #]", "a", true, 1}, {"[[:punct:] #]", "]", true, 1},
+		{"a\tb", "ab", true, 2}, {"[(?i)]", "i", true, 1}, {`\(\?i\)`, "(?i)", true, 4},
+	} {
+		ok, off, n, _ := FindStmt(c.s, c.p, true, false, 0, true)
+		if ok != c.found || off != 0 || n != c.n {
+			t.Errorf("%q: %v/%d/%d", c.p, ok, off, n)
+		}
+		want := 0
+		if c.found {
+			want = 1
+		}
+		if len(FindResults(c.s, c.p, 'P', false, false)) != want {
+			t.Errorf("RESULTS %q", c.p)
+		}
+		got, rc := ReplaceStmt(c.s, c.p, "X", true, false, false, 0, NoLength, -1, true)
+		with, subrc := c.s, int32(4)
+		if c.found {
+			with, subrc = "X", 0
+		}
+		if got != with || rc != subrc {
+			t.Errorf("REPLACE %q: %q/%d", c.p, got, rc)
+		}
+	}
+}
+
+func TestPCREReplacementEscapes(t *testing.T) {
+	for _, with := range []string{`\U$0`, `\L$0`, `\E`, `\u$1`, `\l$1`, `\n`, `\q`, `\`} {
+		for _, s := range []string{"ab", "miss"} {
+			func() {
+				defer func() {
+					e, ok := recover().(ArithmeticError)
+					if !ok || e.Class != "NOT_COMPILED" || !strings.Contains(fmt.Sprint(e), "unsupported replacement escape") {
+						t.Errorf("%q: %v", with, e)
+					}
+				}()
+				ReplaceStmt(s, "(ab)", with, true, false, false, 0, NoLength, -1, true)
+			}()
+		}
+	}
+	for _, c := range []struct{ with, want string }{{"$0/$1/$9", "ab/ab/"}, {`\\\$$1`, `\$ab`}, {"$&", "ab"}} {
+		got, rc := ReplaceStmt("ab", "(ab)", c.with, true, false, false, 0, NoLength, -1, true)
+		if got != c.want || rc != 0 {
+			t.Errorf("%q: %q/%d", c.with, got, rc)
+		}
+	}
+	// ${n} remains refused, as on the REGEX replacement path.
+	for _, pcre := range []bool{false, true} {
+		func() {
+			defer func() {
+				e, ok := recover().(ArithmeticError)
+				if !ok || e.Class != "NOT_COMPILED" {
+					t.Errorf("${1}: %v", e)
+				}
+			}()
+			ReplaceStmt("ab", "(ab)", "${1}", true, false, false, 0, NoLength, -1, pcre)
+		}()
+	}
+}
+
+// Unmeasured: fixed character fields count UTF-16 units, including padding.
+func TestRegexUTF16Padding(t *testing.T) {
+	for _, pcre := range []bool{false, true} {
+		for _, c := range []struct {
+			s, want string
+			rc      int32
+		}{{"😀a", "😀a", 4}, {"😀", "😀X", 0}} {
+			got, rc := ReplaceStmt(c.s, "[ ]", "X", true, false, false, 0, NoLength, 3, pcre)
+			if got != c.want || rc != c.rc {
+				t.Errorf("pcre=%v: %q/%d want %q/%d", pcre, got, rc, c.want, c.rc)
+			}
+		}
+	}
+}
+
+// Unmeasured: Round 3 patterns are refused consistently rather than translated.
+func TestPCREQuotingAndNegatedPOSIXRefusals(t *testing.T) {
+	for _, c := range []struct{ p, reason string }{
+		{`[\Q\E^] #]`, `unsupported quoting escape \Q`},
+		{`[\Q\E] #]`, `unsupported quoting escape \Q`},
+		{`\Qa b\E`, `unsupported quoting escape \Q`},
+		{`\E`, `unsupported quoting escape \E`},
+		{`[[:^alpha:] #]`, "an unsupported POSIX class: ^alpha"},
+	} {
+		for _, run := range []func(){
+			func() { FindResults("#", c.p, 'P', false, true) },
+			func() { FindStmt("#", c.p, true, false, 0, true) },
+			func() { FindAllCount("#", c.p, true, false, true) },
+			func() { ReplaceStmt("#", c.p, "X", true, true, false, 0, NoLength, -1, true) },
+		} {
+			func() {
+				defer func() {
+					if e := recover(); fmt.Sprint(e) != "NOT_COMPILED in FIND PCRE: "+c.reason {
+						t.Errorf("%q: %v", c.p, e)
+					}
+				}()
+				run()
+			}()
+		}
+	}
+}
+
+// Unmeasured: Round 4 absolute PCRE anchors; A4H not run.
+func TestPCREAbsoluteAnchors(t *testing.T) {
+	for _, c := range []struct{ s, p, want string }{
+		{"abab", `\Aab`, "1[0,2;]"}, {"abab", `ab\z`, "1[2,2;]"},
+		{"ab\n", `ab\z`, "0[]"}, {"ab\r\n", `ab\z`, "0[]"},
+		{"\nab", `\Aab`, "0[]"}, {`x\A`, `\\A`, "1[1,2;]"},
+		{`x\z`, `\\z`, "1[1,2;]"}, {"abab", `\Aab\z`, "0[]"},
+	} {
+		if got := fmtRes(FindResults(c.s, c.p, 'P', false, true)); got != c.want {
+			t.Errorf("%q in %q: %s want %s", c.p, c.s, got, c.want)
+		}
+	}
+	for _, c := range []struct{ p, reason string }{
+		{`[\A]`, `unsupported anchor escape in character class \A`},
+		{`[\z]`, `unsupported anchor escape in character class \z`},
+		{`\Z`, `\Z is not in Go's RE2: \Z`}, {`\G`, `\G is not in Go's RE2: \G`},
+		{`(?m)\Aab`, `an unsupported inline flag group: (?m)\Aab`},
+	} {
+		func() {
+			defer func() {
+				if e := recover(); fmt.Sprint(e) != "NOT_COMPILED in FIND PCRE: "+c.reason {
+					t.Errorf("%q: %v", c.p, e)
+				}
+			}()
+			FindResults("ab", c.p, 'P', false, true)
+		}()
+	}
+}

@@ -245,11 +245,14 @@ func splice(s string, ms [][]int, with func(m []int) string) string {
 // off=0, ln=NoLength searches the whole subject; cLen=-1 denotes a string.
 // c fields search trailing blanks, then trim/fit: subrc 2 for nonblank cuts, 0 for matches, 4 for no match.
 // Empty literals insert with FIRST, raise with ALL; regex may match empty. Bad sections raise; $n needs REGEX.
-func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen int) (string, int32) {
-	return replaceStmt(v, p, with, regex, all, icase, off, ln, cLen, true)
+func ReplaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen int, pcre ...bool) (string, int32) {
+	return replaceStmt(v, p, with, regex, all, icase, off, ln, cLen, true, pcre...)
 }
 
-func replaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen int, fast bool) (string, int32) {
+func replaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen int, fast bool, pcre ...bool) (string, int32) {
+	if len(pcre) > 0 && pcre[0] {
+		checkPCREReplacement(with)
+	}
 	// fast is a per-call test seam. Sections/c need bounds/padding; folding validates regex; halves match inside scalars.
 	if fast && len(v) <= math.MaxInt32 && cLen < 0 && off == 0 && ln == NoLength && !regex && !icase && p != "" &&
 		!hasHalf(p) && strings.Index(v, p) < 0 && !hasHalf(v) {
@@ -269,7 +272,9 @@ func replaceStmt(v, p, with string, regex, all, icase bool, off, ln int32, cLen 
 	}
 	sec := SubS(v, off, ln)
 	var ms [][]int
-	if regex {
+	if len(pcre) > 0 && pcre[0] {
+		ms = pcreAll(sec, p, icase, all)
+	} else if regex {
 		ms = rxAll(sec, p, icase, !all)
 	} else {
 		if p == "" && all {
@@ -528,7 +533,10 @@ func ConcatFit(v string, n int) (string, int32) {
 // FindAllCount is FIND ALL OCCURRENCES OF [REGEX] p IN s MATCH COUNT: the
 // matches, not overlapping, left to right (the order REPLACE ALL takes
 // them). An empty pattern or an empty match is not measured and refused.
-func FindAllCount(s, p string, regex, icase bool) int32 {
+func FindAllCount(s, p string, regex, icase bool, pcre ...bool) int32 {
+	if len(pcre) > 0 && pcre[0] {
+		return int32(len(FindResults(s, p, 'P', icase, true)))
+	}
 	if p == "" {
 		panic(NotCompiled("FIND ALL OCCURRENCES", "an empty pattern is not measured"))
 	}
@@ -633,4 +641,20 @@ func SubstringAfter(v, sub string) string {
 // only.
 func ConcatLinesOf(t []string, sep string) string {
 	return Canon(strings.Join(t, sep))
+}
+
+func checkPCREReplacement(with string) {
+	for i := 0; i < len(with); i++ {
+		if with[i] != '\\' {
+			continue
+		}
+		i++
+		if i >= len(with) || (with[i] != '\\' && with[i] != '$') {
+			escape := "\\"
+			if i < len(with) {
+				escape += string(with[i])
+			}
+			panic(NotCompiled("REPLACE PCRE", "unsupported replacement escape "+escape))
+		}
+	}
 }

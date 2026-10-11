@@ -1,0 +1,11 @@
+CLASS zcl_gogen_t_pcreanchorz DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_gogen_t_pcreanchorz IMPLEMENTATION.
+  METHOD run.
+    DATA off TYPE i.
+    FIND FIRST OCCURRENCE OF PCRE `\Z` IN `ab` MATCH OFFSET off.
+    rv = |{ off }|.
+  ENDMETHOD.
+ENDCLASS.

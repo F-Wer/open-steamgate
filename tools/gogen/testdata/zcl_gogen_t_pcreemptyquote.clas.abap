@@ -1,0 +1,11 @@
+CLASS zcl_gogen_t_pcreemptyquote DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION.
+    CLASS-METHODS run RETURNING VALUE(rv) TYPE string.
+ENDCLASS.
+CLASS zcl_gogen_t_pcreemptyquote IMPLEMENTATION.
+  METHOD run.
+    DATA off TYPE i.
+    FIND FIRST OCCURRENCE OF PCRE `[\Q\E^] #]` IN `#` MATCH OFFSET off.
+    rv = |{ off }|.
+  ENDMETHOD.
+ENDCLASS.
