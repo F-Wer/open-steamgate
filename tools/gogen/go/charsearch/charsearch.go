@@ -6,6 +6,33 @@ import (
 	"osg/gogen/abap"
 )
 
+// OnlyWithPos implements CO, including the first excluded UTF-16 character.
+// CN negates the result while retaining the same SY-FDPOS side effect.
+func OnlyWithPos(s *abap.Session, a, b string) bool {
+	return setWithPos(s, a, b, false)
+}
+
+// AnyWithPos implements CA; NA retains its position when negating the result.
+func AnyWithPos(s *abap.Session, a, b string) bool {
+	return setWithPos(s, a, b, true)
+}
+
+func setWithPos(s *abap.Session, a, b string, wantMember bool) bool {
+	mask := make(map[uint16]bool)
+	for _, unit := range abap.UTF16Units(b) {
+		mask[unit] = true
+	}
+	units := abap.UTF16Units(a)
+	for i, unit := range units {
+		if mask[unit] == wantMember {
+			s.Sy.Fdpos = int32(i)
+			return wantMember
+		}
+	}
+	s.Sy.Fdpos = int32(len(units))
+	return !wantMember
+}
+
 // FindOcc returns the character position of the requested occurrence.
 // A negative occurrence counts from the end, as FIND( OCC = -2 ) does.
 func FindOcc(v, sub string, occ int32) int32 {

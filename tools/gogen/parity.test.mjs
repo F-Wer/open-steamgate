@@ -212,3 +212,26 @@ ENDMETHOD. ENDCLASS.`;
       /NOT_COMPILED in comparison: data reference identity is not modelled in IR-JS/, body + op);
   }
 });
+
+
+test("character-set comparisons record UTF-16 offsets for CO/CN and CA/NA", () => {
+  for (const [a,b,co,cop,ca,cap] of [
+    ["","",true,0,false,0], ["abc","",false,0,false,3],
+    ["abba","ab",true,4,true,0], ["abX","ab",false,2,true,0],
+    ["XXb","ab",false,0,true,2], ["ABC","abc",false,0,false,3],
+    ["ab ","ab",false,2,true,0], ["ab ","ab ",true,3,true,0],
+    ["😀x","x",false,0,true,2], ["😀x","😀",false,2,true,0],
+    ["😀","\uD83D",false,1,true,0],
+  ]) {
+    const s = {sy: {fdpos: 999}};
+    assert.equal(A.COWithPos(s,a,b),co);
+    assert.equal(s.sy.fdpos,cop);
+    assert.equal(!A.COWithPos(s,a,b),!co);
+    assert.equal(s.sy.fdpos,cop);
+    s.sy.fdpos = 999;
+    assert.equal(A.CAWithPos(s,a,b),ca);
+    assert.equal(s.sy.fdpos,cap);
+    assert.equal(!A.CAWithPos(s,a,b),!ca);
+    assert.equal(s.sy.fdpos,cap);
+  }
+});
