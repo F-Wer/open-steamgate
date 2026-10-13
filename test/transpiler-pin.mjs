@@ -18,15 +18,18 @@ function fixture() {
   const clone = join(root, "persistent");
   mkdirSync(clone);
   const put = (file, text) => { mkdirSync(join(clone, file, ".."), {recursive: true}); writeFileSync(join(clone, file), text); };
-  for (const name of ["transpiler", "runtime", "extras", "cli"]) {
-    put(`packages/${name}/package.json`, JSON.stringify({name: `@abaplint/${name}`, version: "0.0.0"}));
+  for (const name of ["transpiler", "runtime", "cli"]) {
+    put(`packages/${name}/package.json`, JSON.stringify({name: `@abaplint/${name}`, version: "0.0.0", devDependencies: {"@abaplint/core": "0.0.0"}}));
     put(`packages/${name}/node_modules/marker`, "installed");
     put(`packages/${name}/build/index.js`, "compiled");
   }
+  put("package.json", JSON.stringify({devDependencies: {"@abaplint/core": "0.0.0"}}));
   put("packages/transpiler/build/src/index.js", "this.options?.only?.(obj) === false");
   put("packages/transpiler/build/src/types.d.ts", "only?:");
   put("packages/transpiler/build/src/validation.js", "reg.getConfig().get()) === JSON.stringify(conf.get())\nobj.setDirty()");
-  put("packages/transpiler/node_modules/@abaplint/core/package.json", '{"version":"0.0.0"}');
+  for (const at of ["", "packages/transpiler/", "packages/cli/"]) {
+    put(`${at}node_modules/@abaplint/core/package.json`, '{"version":"0.0.0"}');
+  }
   put("packages/cli/abap_transpile", "#!/bin/sh\nexit 0\n");
   chmodSync(join(clone, "packages/cli/abap_transpile"), 0o755);
   put("node_modules/marker", "installed");
@@ -34,6 +37,7 @@ function fixture() {
   git("init", "-q"); git("add", ".");
   git("-c", "user.name=test", "-c", "user.email=test@example.invalid", "commit", "-qm", "fixture");
   const ref = git("rev-parse", "HEAD");
+  writeFileSync(join(root, "package.json"), JSON.stringify({devDependencies: {"@abaplint/core": "0.0.0"}}));
   writeFileSync(join(root, "libs.lock.json"), JSON.stringify({transpiler: {repo: "test/transpiler", ref}, libraries: []}));
   return {root, clone, ref};
 }
@@ -68,6 +72,15 @@ describe("local transpiler pin", () => {
     const f = fixture();
     try {
       writeFileSync(join(f.root, "libs.lock.json"), JSON.stringify({transpiler: {repo: "test/transpiler", ref: "0".repeat(40)}, libraries: []}));
+      assert.throws(() => installPin(f.root, {...process.env, TRANSPILER: f.clone}), /build failed/);
+      assert(!existsSync(join(f.root, "node_modules")));
+    } finally { rmSync(f.root, {recursive: true, force: true}); }
+  });
+
+  it("refuses a cached build whose parser differs from OSG before linking", () => {
+    const f = fixture();
+    try {
+      writeFileSync(join(f.root, "package.json"), JSON.stringify({devDependencies: {"@abaplint/core": "1.0.0"}}));
       assert.throws(() => installPin(f.root, {...process.env, TRANSPILER: f.clone}), /build failed/);
       assert(!existsSync(join(f.root, "node_modules")));
     } finally { rmSync(f.root, {recursive: true, force: true}); }
@@ -114,8 +127,8 @@ describe("local transpiler pin", () => {
         installPin(f.root, {...process.env, TRANSPILER: clone, PATH: `${commands}:${process.env.PATH}`, PIN_TEST_LOG: log,
           GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: `url.${f.clone}.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/test/transpiler.git"});
         const calls = readFileSync(log, "utf8").trim().split("\n");
-        assert.equal(calls.length, 9);
-        assert.equal(calls.filter(line => line.endsWith("run compile")).length, 4);
+        assert.equal(calls.length, 7);
+        assert.equal(calls.filter(line => line.endsWith("run compile")).length, 3);
         assert.equal(realpathSync(join(f.root, "node_modules/@abaplint/runtime")), join(clone, "packages/runtime"));
       } finally { rmSync(f.root, {recursive: true, force: true}); }
     });

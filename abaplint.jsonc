@@ -72,7 +72,7 @@
       // abap_transpile.json takes as a library; zcl_osd_git calls them
       "url": "https://github.com/abapGit/abapGit",
       "folder": "/.local/lars/abapgit",
-      "files": "/{src/{git/{*.*,v2/*.*},utils/*.*,objects/aff_types/*.*,ui/progress/zif_abapgit_progress.*,ui/core/{zif_abapgit_html_viewer,zcl_abapgit_html_viewer_gui,zcl_abapgit_gui_event,zif_abapgit_gui_event,zif_abapgit_gui_event_handler,zif_abapgit_gui_services,zif_abapgit_gui_hotkeys,zif_abapgit_gui_hotkey_ctl,zif_abapgit_gui_renderable,zif_abapgit_html,zcl_abapgit_html,zcl_abapgit_html_parts}.*,zcx_abapgit_exception.*,zcx_abapgit_not_found.*,zcx_abapgit_type_not_supported.*,zif_abapgit_definitions.*,zif_abapgit_version.*},deps/{progname.dtel.xml,trobjtype.dtel.xml,trnspace.tabl.xml,dokil.tabl.xml}}"
+      "files": "/{src/{git/{*.*,v2/*.*},utils/*.*,objects/aff_types/*.*,ui/progress/zif_abapgit_progress.*,ui/core/{zif_abapgit_html_viewer,zcl_abapgit_html_viewer_gui,zcl_abapgit_gui_event,zif_abapgit_gui_event,zif_abapgit_gui_event_handler,zif_abapgit_gui_services,zif_abapgit_gui_hotkeys,zif_abapgit_gui_hotkey_ctl,zif_abapgit_gui_renderable,zif_abapgit_html,zcl_abapgit_html,zcl_abapgit_html_parts}.*,zcx_abapgit_exception.*,zcx_abapgit_not_found.*,zcx_abapgit_type_not_supported.*,zif_abapgit_definitions.*,zif_abapgit_version.*},deps/{trobjtype.dtel.xml,trnspace.tabl.xml,dokil.tabl.xml}}"
     },
     {
       // The SAP GUI control classes as ABAP substitutes: cl_gui_html_viewer,

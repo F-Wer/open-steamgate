@@ -691,8 +691,8 @@ const EXPECT = {
   // "osg/42/X//3:1X,2,3, bad:caught" (ANORMALIES secondary-key-duplicates).
   // A missing member is cleared, an unknown one ignored. The JS emitter
   // has neither JSON.parse nor RTTI as host functions
-  ZCL_GOGEN_T_JSONDES: {Go: "osg/42/X//3:3,2,1X, bad:caught",
-    JS: "ERROR NOT_COMPILED in Native_JSON_PARSE: a host function of the Go runtime"},
+  ZCL_GOGEN_T_JSONDES: {Go: "osg/42/X//3:1X,2,3, bad:caught",
+    JS: "ERROR NOT_COMPILED in Native_CONV_OUT_CONVERT: a host function of the Go runtime"},
   ZCL_GOGEN_T_SELLOOP: {Go: "n:2 in:1/0,2/0, after:0/2 exit:0/1/A exitmiss:0/1 none:4/0/QQQ cont:0/2/2 corr:5/A elem:A/2 exit2:0/2",
     JS: "ERROR NOT_COMPILED in DELETE ZGOGEN_T_DBW: the JS backend has no database (the Go host has SQLite)"},
   // not an A4H value (A4H has no destination AMDP and says HDB / 758): parity
