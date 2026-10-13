@@ -63,7 +63,7 @@ export type Expr = ExprMetadata & (
   | { readonly e: 'padc'; readonly x: Expr; readonly n: number; readonly type: Type }
   | { readonly e: 'str'; readonly value: string; readonly type: Type }
   | { readonly e: 'flag'; readonly value: boolean; readonly type?: Type }
-  | { readonly e: 'refattr'; readonly base: Expr; readonly name: string; readonly type: Type }
+  | { readonly e: 'refattr'; readonly kernelRtti?: boolean; readonly base: Expr; readonly name: string; readonly type: Type }
   | { readonly e: 'str_fn'; readonly fn: string; readonly args: readonly Expr[]; readonly type: Type }
   | { readonly e: 'xbytes'; readonly value: string; readonly type: Type }
   | { readonly e: 'me'; readonly type: Type }
@@ -93,6 +93,7 @@ export type Expr = ExprMetadata & (
   | { readonly e: 'table_lit'; readonly rows: readonly Expr[]; readonly type: Type }
   | { readonly e: 'sorted_move'; readonly x: Expr; readonly keys: readonly string[]; readonly unique: boolean; readonly type: Type }
   | { readonly e: 'template'; readonly parts: readonly TemplatePart[]; readonly type: Type }
+  | { readonly e: 'exc_ref' | 'exc_previous'; readonly x: Expr; readonly type: Type }
   | { readonly e: 'exc_text'; readonly x: Expr; readonly type: Type }
   | { readonly e: 'exc_class'; readonly x: Expr; readonly type: Type }
   | { readonly e: 'random'; readonly min: Expr; readonly max: Expr | null; readonly type: Type }

@@ -9,6 +9,7 @@ import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
 import {emitBuiltinGo} from "./emit-builtins.mjs";
 import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.mjs";
+import {objectRttiGo, exceptionClass, nativeMessageText} from "./emit-exception.mjs";
 import {emitByteStatement} from "./emit-bytes.mjs";
 // IR -> Go source, for the Go backend spike.
 //
@@ -379,12 +380,16 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
     // handlers registered FOR it (go/abap/events.go); once per chain, the
     // subclasses get it through the embedding
     if (cls.instanceEvents && !(cls.super && CLASSES.get(cls.super)?.instanceEvents)) out.push("\tabap.Events");
+    if (cls.name === "CX_ROOT") out.push("\tKernelException *abap.Exception");
+    if (cls.name === "CL_ABAP_OBJECTDESCR") out.push("\tKernelRtti bool");
     for (const a of inst) out.push(`\t${ident(a.name)} ${ownedType(a)}`);
     // ultra/events: an object of a class without fields would be zero-sized,
     // and Go may give two of them one address: ref <> ref and the handler
     // registry need each object to be itself
     if (out.at(-1) === `type ${typeName(cls.name)} struct {`) out.push("\t_ byte");
     out.push("}", "");
+    if (cls.name === "CX_ROOT") out.push(`func (me *CX_ROOT) ExceptionPrevious() any { return abap.ExceptionRead(me, "PREVIOUS").${ident("PREVIOUS")} }`, `func (me *CX_ROOT) SetKernelException(e *abap.Exception) { me.KernelException = e }`, `func (me *CX_ROOT) GetKernelException() *abap.Exception { return me.KernelException }`, "");
+    if (cls.name === "CL_ABAP_OBJECTDESCR") out.push("func (me *CL_ABAP_OBJECTDESCR) IsKernelRtti() bool { return me.KernelRtti }", "");
     if (cls.name === "KERNEL_CX_ASSERT") out.push(`func (me *KERNEL_CX_ASSERT) AssertionMessage() string { return me.${ident("MSG")} }`, "");
     for (const intf of implementedInterfaces(program, cls)) out.push(`func (me *${typeName(cls.name)}) ${interfaceMarker(intf)}() {}`, "");
     if (POLY.has(cls.name)) out.push(...classInterface(program, cls));
@@ -444,11 +449,12 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   out.push(...exceptionSupers(program));
+  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF"))) out.push(...objectRttiGo(program, {goType, ident}));
   out.push(...hostRaiseGlue(program, classes, layers));
   if (!layers) out.push(...dispatcher(classes));
   out.push(...staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) out.push(...nativeRtti(program));
-  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program));
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) out.push(...nativeMessageText(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) out.push(...nativeRttiData(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) out.push(...nativeJsonParse());
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_AJSON_ENCODE"))) {
@@ -473,26 +479,6 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
   // emission must not change its spelling for the next consumer.
   exportedFields = false;
   return generated;
-}
-
-/**
- * CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE, which open-abap writes as kernel
- * code: an exception object that is no IF_T100_MESSAGE and has no text id
- * has the fallback text (A4H gives the same for such a class, 2026-09-23);
- * a T100 message or an OTR text id is not read here and dumps.
- */
-function nativeMessageText(program) {
-  const head = `func Native_GET_TEXT_FOR_MESSAGE(s *abap.Session, text ${goType({k: "ref", name: "IF_MESSAGE", intf: true})}) string {`;
-  const root = CLASSES.get("CX_ROOT");
-  // IF_T100_MESSAGE has no methods, so every Go value fits its interface:
-  // the classes that implement it are told by name
-  const t100 = [...CLASSES.values()].filter((c) => [c, ...ancestorsOf(c)].some((x) => (x.interfaces ?? []).includes("IF_T100_MESSAGE"))).map((c) => c.name);
-  return [head, "\tif text == nil {", `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "an initial reference"))`, "\t}",
-    ...(t100.length ? [`\tswitch abap.ClassOf(text) {`, `\tcase ${t100.map((x) => JSON.stringify(x)).join(", ")}:`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "T100 message texts are not read in the Go host"))`, "\t}"] : []),
-    ...(root && POLY.has("CX_ROOT") && root.attributes.some((a) => a.name === "TEXTID" && !a.unsupported)
-      ? [`\tif x, ok := any(text).(I_CX_ROOT); !ok || x.As_CX_ROOT().${ident("TEXTID")} != "" {`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "OTR texts are not read in the Go host"))`, "\t}"]
-      : [`\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "CX_ROOT is not compiled"))`]),
-    `\treturn "An exception was raised."`, "}", ""];
 }
 
 /*
@@ -541,9 +527,7 @@ function catchInto(c, t, ctx) {
   // a local, or an attribute of the class (a report's global data)
   const v = c.intoPlace ? place(c.intoPlace, ctx) : ident(c.into);
   if (c.intoKind === "ref") return [`${t}\t\t\t\t${v} = abap.Cast[${goType(c.intoType)}](xRX.Obj)`];
-  if (!c.own.length) return [`${t}\t\t\t\t${v} = &abap.Exception{Class: xE.Class, Op: xE.Op}`];
-  return [`${t}\t\t\t\tif xROK {`, `${t}\t\t\t\t\t${v} = &abap.Exception{Class: xRX.Class, Obj: xRX.Obj}`, `${t}\t\t\t\t} else {`,
-    `${t}\t\t\t\t\t${v} = &abap.Exception{Class: xE.Class, Op: xE.Op}`, `${t}\t\t\t\t}`];
+  return [`${t}\t\t\t\t${v} = abap.CaughtException(xR)`];
 }
 
 function exceptionSupers(program) {
@@ -851,7 +835,7 @@ function intfAccessors(program, intf) {
 }
 
 function attrAccessors(cls, inst) {
-  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &me.${ident(a.name)} }`);
+  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &${exceptionClass(cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(a.name)})` : "me"}.${ident(a.name)} }`);
   return out.length ? [...out, ""] : [];
 }
 
@@ -961,6 +945,8 @@ function method(cls, m) {
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
   if (!m.static) lines.push("\t_ = me");
+  if (m.name === "IF_MESSAGE~GET_TEXT" && exceptionClass(cls, CLASSES)) lines.push("\tif me.KernelException != nil { return me.KernelException.Text() }");
+  if (m.name === "IF_MESSAGE~GET_LONGTEXT" && exceptionClass(cls, CLASSES)) lines.push(`\tif me.KernelException != nil { panic(abap.NotCompiled("exception method GET_LONGTEXT", "kernel long texts are not implemented")) }`);
   if (cls.hostReplaced) lines.push(...hostMethod(cls, m));
   // a method that calls the AMC API: its class pool is who is calling while
   // it runs, for the SAMC authorities (go/amc Enter/Caller)
@@ -1114,7 +1100,7 @@ function addressable(x) {
 function place(p, ctx) {
   switch (p.e) {
     case "var": return p.ref && !ctx.valueOutputs?.has(p.name) ? `(*${ident(p.name)})` : ident(p.name);
-    case "attr": return `me.${ident(p.name)}`;
+    case "attr": return exceptionClass(ctx.cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(p.name)}).${ident(p.name)}` : `me.${ident(p.name)}`;
     case "static": {
       // The frontend resolves inherited attributes to the declaring class.
       const owner = p.owner;
@@ -1129,8 +1115,8 @@ function place(p, ctx) {
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : p.type.k === "struct" ? `(*${ident(p.name)})` : `(*abap.CheckedRowPtr(${ident(p.name)}))`;
-    case "refattr": if (p.base.type.intf) return `(*${expr(p.base, ctx)}.${accessorName(p.name)}())`;
-      return POLY.has(p.base.type.name) && !p.base.type.intf ? `${expr(p.base, ctx)}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${expr(p.base, ctx)}.${ident(p.name)}`;
+    case "refattr": { const b = p.kernelRtti ? `abap.ObjectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : (p.base.type.intf || exceptionClass(CLASSES.get(p.base.type.name), CLASSES)) ? `abap.ExceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx); if (p.base.type.intf) return `(*${b}.${accessorName(p.name)}())`;
+      return POLY.has(p.base.type.name) && !p.base.type.intf ? `${b}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${b}.${ident(p.name)}`; }
     case "row": {
       const b = place(p.base, ctx);
       return rowValue(p.base.type, `${b}[abap.Idx(len(${b}), ${expr(p.index, ctx)})]`);
@@ -2281,8 +2267,10 @@ function expr(e, ctx) {
     case "lines": return `int32(len(${expr(e.table, ctx)}))`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
     case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
+    case "exc_ref": return `abap.Cast[${goType(e.type)}](abap.ExceptionRef(s, ${expr(e.x, ctx)}))`;
+    case "exc_previous": return `abap.ExceptionPrevious(${expr(e.x, ctx)})`;
     case "exc_text": return `${expr(e.x, ctx)}.TextOf(s)`;
-    case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.Class)`;
+    case "exc_class": return `abap.ExceptionClass(${expr(e.x, ctx)})`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "find_occ": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;
@@ -2302,7 +2290,7 @@ function expr(e, ctx) {
       const args = ["s", ...e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx)
         : a.wrap ? `&${expr(a.wrap, ctx)}` : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
       let call;
-      if (e.receiver) call = `${expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
+      if (e.receiver) call = `${exceptionClass(CLASSES.get(e.receiver.type.name), CLASSES) ? `abap.ExceptionRead(${expr(e.receiver, ctx)}, "")` : expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
       else if (e.owner) call = `${funcName(e.owner, e.method)}(${args.join(", ")})`;
       else if (e.static) call = `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;
       else if (e.sup) call = `me.${typeName(e.sup)}.${typeName(e.method)}(${args.join(", ")})`;

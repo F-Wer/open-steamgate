@@ -1,3 +1,4 @@
+import {objectRttiJs, exceptionClass} from "./emit-exception.mjs";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {constructorFactories} from "./emit-constructors.ts";
 import {emitCondition} from "./emit-js-condition.mjs";
@@ -141,7 +142,7 @@ function bind(p, ctx) {
       case "var": case "attr": case "static": case "const": return place(q, ctx);
       case "field": return `${path(q.base)}.${ident(q.name)}`;
       case "fs": return cap(ident(q.name));
-      case "refattr": return `${cap(expr(q.base, ctx))}.${ident(q.name)}`;
+      case "refattr": return `${cap(q.kernelRtti ? `abap.objectRttiRead(${expr(q.base, ctx)}, ${JSON.stringify(q.name)})` : (q.base.type.intf || exceptionClass(BYNAME.get(q.base.type.name), BYNAME)) ? `abap.exceptionRead(${expr(q.base, ctx)}, ${JSON.stringify(q.name)})` : expr(q.base, ctx))}.${ident(q.name)}`;
       case "row": {
         const b = cap(path(q.base));
         return `${b}[${cap(`abap.Idx(${b}.length, ${expr(q.index, ctx)})`)}]`;
@@ -301,6 +302,8 @@ function method(cls, m) {
   const params = ["s", ...m.params.map((p) => ident(p.name))];
   const head = `  ${m.static ? "static " : ""}${typeName(m.name)}(${params.join(", ")}) {`;
   const lines = [head];
+  if (m.name === "IF_MESSAGE~GET_TEXT" && exceptionClass(cls, BYNAME)) lines.push("    if (this.$kernelException) return this.$kernelException.message;");
+  if (m.name === "IF_MESSAGE~GET_LONGTEXT" && exceptionClass(cls, BYNAME)) lines.push('    if (this.$kernelException) throw new abap.AbapError("NOT_COMPILED", "exception method GET_LONGTEXT: kernel long texts are not implemented");');
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`    ${typeName(cls.name)}.$ensure(s);`);
   if (!m.static) lines.push("    const me = this;");
   const ret = m.returning ? ident(m.returning.name) : null;
@@ -323,7 +326,7 @@ const tab = (n) => "  ".repeat(n);
 function place(p, ctx) {
   switch (p.e) {
     case "var": return p.box ? `${ident(p.name)}.v` : ident(p.name);
-    case "attr": return `me.${ident(p.name)}`;
+    case "attr": return exceptionClass(ctx.cls, BYNAME) ? `abap.exceptionRead(me, ${JSON.stringify(p.name)}).${ident(p.name)}` : `me.${ident(p.name)}`;
     case "sy": return `s.sy.${p.field.toLowerCase()}`;
     case "const": return p.go;
     case "static": {
@@ -334,7 +337,7 @@ function place(p, ctx) {
     case "field": return `${["var", "attr", "static", "field", "fs", "row", "row_key", "refattr", "const"].includes(p.base.e) ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `${expr(p.base, ctx)}.get().${ident(p.name)}`;
     case "fs": return p.type.k === "struct" || p.type.k === "data" ? ident(p.name) : `${ident(p.name)}.get()`;
-    case "refattr": return `${expr(p.base, ctx)}.${ident(p.name)}`;
+    case "refattr": return `${p.kernelRtti ? `abap.objectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : (p.base.type.intf || exceptionClass(BYNAME.get(p.base.type.name), BYNAME)) ? `abap.exceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx)}.${ident(p.name)}`;
     case "row_key": {
       const b = place(p.base, ctx);
       const keys = p.keys.map((k) => `${k.line ? "r" : `r.${ident(k.name)}`} === ${expr(k.value, ctx)}`).join(" && ");
@@ -616,11 +619,17 @@ function stmtLines(st, ctx, d) {
           `${t}  ${place(st.args[4].value, ctx)} = Buffer.from(hx, "hex").toString("base64"); }`];
       }
       // see nativeMessageText in emit-go.mjs
+      if (st.fn === "Native_DESCRIBE_BY_OBJECT_REF") return objectRttiJs(t, ident(ctx.method.params[0].name), ident);
+      if (st.fn === "classname.Internal") {
+        const [x, out] = st.args.map(a => a.value);
+        return [`${t}if (${expr(x, ctx)} == null) throw new abap.AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "GET_CLASS_NAME");`, `${t}{ const name = ${expr(x, ctx)}.constructor.$abap; if (!name) throw new abap.AbapError("NOT_COMPILED", "GET_CLASS_NAME: the class of the object is not registered"); ${place(out, ctx)} = name.includes(":") ? "CLAS-" + name.replace(":", "-") : name; }`];
+      }
       if (st.fn === "Native_GET_TEXT_FOR_MESSAGE") {
         // the names as the Go side derives them, so a renamed parameter or
         // attribute fails here as it fails there
         const x = ident(ctx.method.params[0].name);
-        return [`${t}if (${x} === null || ${x}.constructor.$is.has("IF_T100_MESSAGE") || !${x}.constructor.$is.has("CX_ROOT") || ${x}.${ident("TEXTID")} !== "") throw new abap.AbapError("NOT_COMPILED", "CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE: T100 and OTR texts are not read here");`,
+        return [`${t}if (${x}?.$kernelException) return ${x}.$kernelException.message;`,
+          `${t}if (${x} === null || ${x}.constructor.$is.has("IF_T100_MESSAGE") || !${x}.constructor.$is.has("CX_ROOT") || abap.exceptionRead(${x}, "TEXTID").${ident("TEXTID")} !== "") throw new abap.AbapError("NOT_COMPILED", "CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE: T100 and OTR texts are not read here");`,
           `${t}return "An exception was raised.";`];
       }
       return [`${t}throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${st.fn}: a host function of the Go runtime`)});`];
@@ -969,7 +978,7 @@ function callStmt(e, ctx, t) {
 }
 
 const callee = (e, ctx) => {
-  if (e.receiver) return `${expr(e.receiver, ctx)}.${typeName(e.method)}`;
+  if (e.receiver) return `${exceptionClass(BYNAME.get(e.receiver.type.name), BYNAME) ? `abap.exceptionRead(${expr(e.receiver, ctx)})` : expr(e.receiver, ctx)}.${typeName(e.method)}`;
   if (e.owner) return `${typeName(e.owner)}.${typeName(e.method)}`;
   if (e.static) return `${typeName(ctx.cls.name)}.${typeName(e.method)}`;
   // SUPER->m( ): the superclass's implementation
@@ -1046,8 +1055,10 @@ function expr(e, ctx) {
     case "lines": return `${expr(e.table, ctx)}.length`;
     case "strlen": return `abap.Strlen(${expr(e.x, ctx)})`;
     case "uccp": return `abap.Uccp(${expr(e.x, ctx)})`;
+    case "exc_ref": return `abap.exceptionRef(s, ${expr(e.x, ctx)})`;
+    case "exc_previous": return `abap.exceptionPrevious(${expr(e.x, ctx)})`;
     case "exc_text": return `abap.excText(s, ${expr(e.x, ctx)})`;
-    case "exc_class": return `("\\\\CLASS=" + ${expr(e.x, ctx)}.cls)`;
+    case "exc_class": return `abap.exceptionClass(${expr(e.x, ctx)})`;
     case "random": return `abap.RandomInt(${expr(e.min, ctx)}, ${expr(e.max, ctx)})`;
     case "find": return `abap.Find(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${e.off ? expr(e.off, ctx) : "0"})`;
     case "find_occ": return `abap.FindOcc(${expr(e.val, ctx)}, ${expr(e.sub, ctx)}, ${expr(e.occ, ctx)})`;

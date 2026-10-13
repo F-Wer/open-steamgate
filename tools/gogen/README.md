@@ -487,6 +487,22 @@ receives the object itself; `INTO` one that also takes runtime exceptions
 (`CATCH cx_root INTO`) stays an exception value whose one method is
 `get_text( )`, the object's own when it was raised.
 
+Inbox 048 adds implicit widening of EXC to `REF TO cx_root` / `REF TO object`
+and read-only `EXC->previous` (EXC again, initial at the end). Widening keeps
+an existing compiled object or creates the runtime error's actual compiled CX
+class once. Class name, object RTTI, text, bound/instance checks, casts of the
+widened reference and table references retain its identity. RAISE TYPE uses
+the compiled constructor to store PREVIOUS. Other implicit targets, EXC
+methods/attributes/writes and direct EXC casts retain named refusals. Missing
+kernel classes refuse by name. See `testdata/exception-previous-notes.md`;
+expanded SAP behavior is **unmeasured; measure on A4H**. The message helper
+returns carried kernel GET_TEXT before reading metadata; interface field reads
+and generic bindings share the metadata guard. The linked notes enumerate the
+CX field, helper and RTTI audit and the two-host refusal probes. RTTI member
+enumeration is guarded at runtime only on widened kernel exception descriptors;
+ordinary class descriptor reads retain their existing behavior. Negative Unit
+methods are staged only by the focused harness, keeping generic fixtures green.
+
 Measured on A4H and pinned (ZCL_GOGEN_T_RAISE): hierarchy, first fitting
 `CATCH`, `CLEANUP` inner then outer then the handler, no `CLEANUP` for an
 exception raised inside a `CATCH` of the same `TRY`, a runtime exception

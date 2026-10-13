@@ -9,11 +9,13 @@ import (
 
 // Raised is RAISE EXCEPTION of a class-based exception: the object itself
 // and the name of its class. It travels as a Go panic like the runtime's
-// own exceptions (ArithmeticError), which it does not replace: those carry
-// no object and are taken by the CATCHes that name their class.
+// own exceptions (ArithmeticError). A rethrow keeps the caught carrier even
+// before its compiled object is materialised.
 type Raised struct {
 	Obj   any
 	Class string
+	// Caught keeps the lazy materialisation shared across CATCH and rethrow.
+	Caught *Exception
 	// AssertionQuitNo records the QUIT value of the call that raised this
 	// assertion, so a test runner can decide what its teardown does next.
 	AssertionQuitNo bool
@@ -33,6 +35,9 @@ func WithAssertQuit(quit int32, f func()) {
 }
 
 func (r *Raised) Error() string {
+	if r.Caught != nil && r.Caught.Obj == nil {
+		return r.Caught.Text()
+	}
 	if r.Class == "KERNEL_CX_ASSERT" {
 		if x, ok := r.Obj.(interface{ AssertionMessage() string }); ok {
 			return x.AssertionMessage()
@@ -93,10 +98,7 @@ func Raise(obj any, class string) *Raised {
 		panic(ArithmeticError{Class: "OBJECTS_OBJREF_NOT_ASSIGNED", Op: "RAISE EXCEPTION of an initial reference"})
 	}
 	if e, ok := obj.(*Exception); ok {
-		if e.Obj == nil {
-			panic(ArithmeticError{Class: e.Class, Op: e.Op})
-		}
-		return &Raised{Obj: e.Obj, Class: e.Class}
+		return &Raised{Obj: e.Obj, Class: e.Class, Caught: e}
 	}
 	if class == "" {
 		class = ClassOf(obj)
@@ -113,6 +115,9 @@ func AsRaised(r any) (*Raised, bool) {
 		r = w.V
 	}
 	x, ok := r.(*Raised)
+	if ok && x.Caught != nil {
+		x.Obj = x.Caught.Obj
+	}
 	return x, ok
 }
 
@@ -146,6 +151,9 @@ type Texter interface {
 // takes runtime exceptions: a raised object's own get_text, else the class
 // and the operation.
 func (e *Exception) TextOf(s *Session) string {
+	if e == nil {
+		notBound("GET_TEXT")
+	}
 	if e.Obj != nil {
 		if t, ok := e.Obj.(Texter); ok {
 			return t.IF_MESSAGE__GET_TEXT(s)
