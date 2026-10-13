@@ -344,3 +344,103 @@ test("PCRE hex escapes refuse invalid scalars and retain other escape refusals",
   }
   for (const escape of "ceoNXRhHvV") assert.throws(() => a.FindResults("a", "\\" + escape, "P", false, true), /NOT_COMPILED/);
 });
+
+test("PCRE on line-ended text admits newline-independent syntax", async () => {
+  const a = await import("./js/abap.mjs");
+  const cds = "\ndefine root view entity zi_lockentity as select from zfoo {\n  key field1\n}";
+  for (const [s, p, replacement, want, spans, rc] of [
+    ["WHEN &1.\n", "&1", "'a'", "WHEN 'a'.\n", [[5, 2]], 0],
+    [cds, "\u00a0", " ", cds, [], 4],
+    ["a\n\ra", String.raw`[^a]+`, "X", "aXa", [[1, 2]], 0],
+    ["a \n\r\tb", String.raw`\s+`, "X", "aXb", [[1, 4]], 0],
+    ["a.b\n", String.raw`\.`, "X", "aXb\n", [[1, 1]], 0],
+    ["^$\n", String.raw`\^\$`, "X", "X\n", [[0, 2]], 0],
+    ["x\r\n12", String.raw`\b\d+\b`, "X", "x\r\nX", [[3, 2]], 0],
+    ["\nx", String.raw`\w+`, "X", "\nX", [[1, 1]], 0],
+    ["\n.^$", "[.^$]+", "X", "\nX", [[1, 3]], 0],
+  ]) {
+    assert.deepEqual(a.FindResults(s, p, "P", false, true), spans, p);
+    assert.deepEqual(a.ReplaceStmt(s, p, replacement, true, true, false, 0, a.NoLength, -1, true), [want, rc], p);
+  }
+  for (const p of ["^x", "x$", "a.b", String.raw`\\.`, String.raw`\A^x`, String.raw`x$\z`]) {
+    for (const run of [() => a.FindResults("x\na.b", p, "P", false, true),
+      () => a.ReplaceStmt("x\na.b", p, "X", true, true, false, 0, a.NoLength, -1, true)]) {
+      assert.throws(run, e => e.message === "NOT_COMPILED in FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured", p);
+    }
+  }
+});
+
+ test("PCRE non-UCP generic sets and ASCII boundaries under iu", async () => {
+ const a = await import("./js/abap.mjs");
+ for (const [p,s,icase,want] of [
+    ["\\s+", "\n ", false, "X "],
+    ["\\s+", "\n\u000b", false, "X"],
+    ["\\S+", "\n ", false, "\nX"],
+    ["[^\\s]+", "\n ", false, "\nX"],
+    ["[\\s\\d]+", "\n\u000b12 ", false, "X "],
+    ["[\\S\\d]+", "\n 12", false, "\nX"],
+    ["[^\\S\\d]+", "\n 12", false, "X 12"],
+    ["\\w+", "ſKK", true, "ſKX"],
+    ["[\\w]+", "ſKK", true, "ſKX"],
+    ["[^\\w]+", "ſKK", true, "XK"],
+    ["[\\wſ]+", "ſKK", true, "XKX"],
+    ["\\W+", "ſKK", true, "XK"],
+    ["\\d+", "١1", true, "١X"],
+    ["\\D+", "١1", true, "X1"],
+    ["\\bK\\b", " K ", true, " X "],
+    ["\\b", "ſKK", true, "ſXKXK"],
+    ["\\B", "ſKK", true, "XſKKX"],
+    ["\\\\s", "\\s", false, "X"],
+    ["[\\\\s]+", "\\s", false, "X"],
+    ["\\s # \\w\n +", "\n\u000b", false, "X"],
+  ]) {
+ assert.deepEqual(a.ReplaceStmt(s,p,"X",true,true,icase,0,a.NoLength,-1,true),[want,0],p);
+ }
+ for (const p of [String.raw`[a-\s]`,String.raw`[\w-z]`]) assert.throws(()=>a.FindResults("a",p,"P",false,true), /generic type as a character range endpoint/);
+ });
+
+test("PCRE space types exclude Unicode whitespace in both cases", async () => {
+  const a = await import("./js/abap.mjs");
+  assert.deepEqual(a.FindResults("ſKa", String.raw`\p{L}`, "P", true, true), [[0, 1], [1, 1], [2, 1]]);
+  const extra = "\u00a0\ufeff\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000";
+  for (const icase of [false, true]) {
+    for (const p of [String.raw`\s+`, String.raw`[\s]+`, String.raw`[^\S]+`])
+      assert.deepEqual(a.ReplaceStmt("\t\n\v\f\r " + extra, p, "X", true, true, icase, 0, a.NoLength, -1, true), ["X" + extra, 0]);
+    for (const p of [String.raw`\S+`, String.raw`[^\s]+`, String.raw`[\S]+`])
+      assert.deepEqual(a.ReplaceStmt("\t\n\v\f\r " + extra, p, "X", true, true, icase, 0, a.NoLength, -1, true), ["\t\n\v\f\r X", 0]);
+  }
+  assert.deepEqual(a.FindResults("\b\b", String.raw`[\b]+`, "P", true, true), [[0, 2]]);
+  assert.deepEqual(a.FindResults(String.raw`\Q`, String.raw`\\Q`, "P", false, true), [[0, 2]]);
+});
+
+test("PCRE class tokenizer matches the shared real PCRE2 oracle", async () => {
+  const a = await import("./js/abap.mjs");
+  const {readFile} = await import("node:fs/promises");
+  const oracle = JSON.parse(await readFile(new URL("./pcre-class-oracle.json", import.meta.url), "utf8"));
+  for (const {pattern, icase, matches, spans, supported} of oracle.rows) {
+    if (supported === false) {
+      assert.throws(() => a.FindResults("aa", pattern, "P", icase, true), /NOT_COMPILED/, pattern);
+      continue;
+    }
+    if (matches === null) {
+      assert.throws(() => a.FindResults("-", pattern, "P", icase, true), /generic type as a character range endpoint/, pattern);
+      continue;
+    }
+    for (const [i, s] of oracle.inputs.entries()) {
+      assert.deepEqual(a.FindResults(s, pattern, "P", icase, true), spans[i], `${pattern} ${JSON.stringify(s)} icase=${icase}`);
+      assert.deepEqual(a.ReplaceStmt(s, pattern, "X", true, true, icase, 0, a.NoLength, -1, true), matches[i] ? [spans[i].reduceRight((text,r) => text.slice(0,r[0])+"X"+text.slice(r[0]+r[1]),s),0] : [s,4], pattern);
+    }
+  }
+  assert.deepEqual(a.FindResults("ab", String.raw`[\s^a]`, "P", false, true), [[0,1]]);
+  assert.deepEqual(a.FindResults("a", String.raw`[\s^]`, "P", false, true), []);
+});
+
+test("PCRE class tokenizer refuses unmodeled items by name", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const [p, reason] of [
+    [String.raw`[\B]`, /unsupported character class escape \\B/],
+    [String.raw`[\p{L}\s]`, /unsupported character class escape \\p/],
+    [String.raw`[[.a.]\s]`, /collating or equivalence item/],
+    [String.raw`[[:space:]-a]`, /POSIX class as a character range endpoint/],
+  ]) assert.throws(() => a.FindResults("a", p, "P", false, true), reason, p);
+});

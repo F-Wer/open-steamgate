@@ -1,3 +1,4 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // Build the two stands for the ZO4D player, one per runtime, from the same
 // IR as tools/gogen/demo.mjs:
@@ -9,7 +10,7 @@ import {writeGo} from "./symbols.ts";
 // Both answer the demo channel with the compiled ABAP and pass every other
 // request to an OSG server, so the page and its media are that server's.
 import {execFileSync} from "node:child_process";
-import {copyFileSync, mkdirSync, readdirSync, writeFileSync} from "node:fs";
+import {mkdirSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -33,6 +34,5 @@ const tags = process.argv.includes("--libm") ? "libm" : "";
 execFileSync("go", ["build", "-trimpath", `-tags=${tags}`, "-ldflags=-s -w", "-o", join(out, "o4dserve"), "./cmd/o4dserve"],
   {cwd: join(here, "go"), stdio: "inherit", env: {...process.env, CGO_ENABLED: tags ? "1" : "0"}});
 writeFileSync(join(out, "demo.mjs"), emitJs(program));
-copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
-copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
+copyJsRuntime(out);
 console.log(`built ${join(out, "o4dserve")} and ${join(out, "demo.mjs")} (${program.classes.length} classes, sin/cos ${tags ? "glibc" : "fdlibm"})`);

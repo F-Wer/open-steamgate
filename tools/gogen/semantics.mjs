@@ -1,3 +1,4 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // ABAP semantics pinned against A4H: each class in testdata/ has a static
 // RUN returning a string, and EXPECT below is what A4H returned for the same
@@ -6,7 +7,7 @@ import {writeGo} from "./symbols.ts";
 //
 //   node tools/gogen/semantics.mjs
 import {execFileSync} from "node:child_process";
-import {copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -276,6 +277,7 @@ const EXPECT = {
   // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
   // Unmeasured: Round 2 literal brackets, POSIX classes, and UTF-16 fixed-field padding.
   // Hex escape and UTF-16 spans: unmeasured; measure on A4H.
+  ZCL_GOGEN_T_PCRENEWLINE: "macro:0 nbsp:4 class:0/1/2 space:0/1/4 dot:0/1/1",
   ZCL_GOGEN_T_PCREHEX: "nbsp:0/1/1 class:0/1/1 ascii:0/1/1 short:0/1/1 nul:0/1/1 bmp:0/1/1 astral:0/3/2 literal:0/1/4 count:0/2 results:0/3/2 first:0/Xa😀 all:0/XaY",
   ZCL_GOGEN_T_PCREPLAIN: "lazy:2/3/0 short:2/1 greedy:2/2 ic:2/3/aab all:2/0 countic:2/0 miss:2/3/aab/4 replace:xxaa!/0 replaceall:XXX/0 table:2/2/3/0 emoji:2/1/a scalar:0/2/😀 res:0/2 res:2/1 regex:2/1 rxres:0/2 rxres:2/1 emreplace:😀a! rxreplace:😀a! extended:2/0 escaped:3/0 class:1/0 noextended:3/0 literals:\\$ab/ab/ negclass:4 classletter:1/0 initialbracket:1/0 posix:3/0 fixedpcre:😀a/4 fixedregex:😀a/4 padded:😀X/0",
   // Unmeasured: unsupported PCRE replacement escapes must refuse, never lose the backslash.
@@ -940,8 +942,7 @@ mkdirSync(datasetRoot, {recursive: true});
 const goOut = execFileSync("go", ["run", "./cmd/semantics"], {cwd: join(here, "go"),
   env: {...process.env, OSD_DATASET_READ: "", OSD_DATASET_WRITE: datasetRoot, OSD_DATASET_HOME: ""}}).toString();
 writeFileSync(join(out, "t.mjs"), emitJs(program));
-copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
-copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
+copyJsRuntime(out);
 const m = await import(pathToFileURL(join(out, "t.mjs")).href);
 let bad = 0;
 for (const line of goOut.trim().split("\n")) {

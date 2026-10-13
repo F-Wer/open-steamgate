@@ -1,3 +1,4 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // The Go backend spike, end to end:
 //
@@ -18,7 +19,6 @@ import {fileURLToPath, pathToFileURL} from "node:url";
 import {readClass} from "./frontend.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {compileProgram} from "./frontend.mjs";
-import {copyFileSync} from "node:fs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const samples = process.argv[2] ?? join(here, "samples");
@@ -136,8 +136,7 @@ for (const c of CASES) jsResults.push(await runJs(c));
 /* ------------------------------------------------ the same IR, emitted as JS */
 const irProgram = compileProgram({folders: [samples], objects: [...new Set(readdirSync(samples).map((f) => f.split(".")[0]))]});
 writeFileSync(join(out, "ir-js.mjs"), emitJs(irProgram));
-copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
-copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
+copyJsRuntime(out);
 const irm = await import(pathToFileURL(join(out, "ir-js.mjs")).href);
 const irResults = CASES.map((c) => {
   const fnc = irm[C][c.method];

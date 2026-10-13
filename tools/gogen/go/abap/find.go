@@ -3,6 +3,7 @@ package abap
 import (
 	"osg/gogen/byteops"
 	"osg/gogen/bytesection"
+	"osg/gogen/pcregeneric"
 	"regexp"
 	"strconv"
 	"strings"
@@ -319,15 +320,15 @@ var pcreRefused = []struct {
 }
 
 // compilePCRE is the pattern for PCRE, leftmost-first, and its "after"
-// form (see compileABAPAfter). PCRE's own ^ $ and . around line ends are
-// not measured, so those operators with line ends are refused; a construct RE2 lacks
-// is refused by name; a pattern RE2 cannot read is not called invalid.
+// form (see compileABAPAfter). Only unescaped ^ $ . outside classes have
+// unmeasured line-end semantics. Literals, classes (including [^a]) and \s
+// use the normalized generic types; other unsupported constructs stay refused.
 func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp) {
 	p = extendedPCRE(p)
-	if pcreInlineFlags.MatchString(outsideClasses(p)) {
+	if pcreInlineFlags.MatchString(pcregeneric.Syntax(p, false, func(reason string) { panic(NotCompiled("FIND PCRE", reason)) })) {
 		panic(NotCompiled("FIND PCRE", "an unsupported inline flag group: "+p))
 	}
-	plain := strings.NewReplacer(`\\`, "").Replace(p)
+	plain := pcregeneric.Syntax(p, true, func(reason string) { panic(NotCompiled("FIND PCRE", reason)) })
 	// A scalar escape followed by + is repetition, not a possessive quantifier.
 	plain = pcreHexScalar.ReplaceAllString(plain, "_")
 	for _, r := range pcreRefused {
@@ -335,13 +336,14 @@ func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp
 			panic(NotCompiled("FIND PCRE", r.what+" is not in Go's RE2: "+p))
 		}
 	}
-	if strings.ContainsAny(s, "\n\r") && ((!strings.Contains(plain, `\A`) && !strings.Contains(plain, `\z`)) || strings.ContainsAny(outsideClasses(p), "^$.")) {
+	if strings.ContainsAny(s, "\n\r") && strings.ContainsAny(pcregeneric.Syntax(p, false, func(reason string) { panic(NotCompiled("FIND PCRE", reason)) }), "^$.") {
 		panic(NotCompiled("FIND PCRE", "a text with line ends: PCRE's ^ $ and . around them are not measured"))
 	}
 	flags := ""
 	if icase {
 		flags = "(?i)"
 	}
+	p = pcregeneric.Normalize(p, icase, func(reason string) { panic(NotCompiled("FIND PCRE", reason)) })
 	key := "pcre" + flags + "\x00" + p
 	if r, ok := regexCache.Load(key); ok {
 		a, _ := regexCache.Load("after-" + key)
@@ -423,41 +425,34 @@ func pcreHex(p string, x int) (string, int) {
 
 // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
 func extendedPCRE(p string) string {
-	for _, escape := range []string{`\Q`, `\E`} {
-		if strings.Contains(p, escape) {
-			panic(NotCompiled("FIND PCRE", "unsupported quoting escape "+escape))
-		}
-	}
 	extended := !strings.HasPrefix(p, "(?-x)")
 	if !extended {
 		p = p[5:]
 	}
 	var out strings.Builder
-	inClass := false
-	classFirst := -1
 	for i := 0; i < len(p); i++ {
+		if name := pcregeneric.Name(p, i); name != "" {
+			out.WriteString(pcregeneric.Capture(name))
+			i += len(name) - 1
+			continue
+		}
 		c := p[i]
-		if inClass && c == '[' && i+1 < len(p) && p[i+1] == ':' {
-			if end := strings.Index(p[i+2:], ":]"); end >= 0 {
-				name := p[i+2 : i+2+end]
-				if strings.HasPrefix(name, "^") {
-					panic(NotCompiled("FIND PCRE", "an unsupported POSIX class: "+name))
-				}
-				out.WriteString(p[i : i+end+4])
-				i += end + 3
-				continue
-			}
+		if c == '[' {
+			class, end := pcregeneric.Class(p, i, func(reason string) { panic(NotCompiled("FIND PCRE", reason)) })
+			out.WriteString(class)
+			i = end
+			continue
 		}
 		if c == '\\' && i+1 < len(p) {
 			i++
+			if p[i] == 'Q' || p[i] == 'E' {
+				panic(NotCompiled("FIND PCRE", "unsupported quoting escape \\"+string(p[i])))
+			}
 			if p[i] == 'x' {
 				hex, end := pcreHex(p, i)
 				out.WriteString(hex)
 				i = end
 				continue
-			}
-			if inClass && (p[i] == 'A' || p[i] == 'z') {
-				panic(NotCompiled("FIND PCRE", "unsupported anchor escape in character class \\"+string(p[i])))
 			}
 			if !strings.ContainsRune(" \t\n\r\f\v#", rune(p[i])) {
 				out.WriteByte(c)
@@ -465,20 +460,7 @@ func extendedPCRE(p string) string {
 			out.WriteByte(p[i])
 			continue
 		}
-		if c == '[' && !inClass {
-			inClass = true
-			classFirst = i + 1
-			if classFirst < len(p) && p[classFirst] == '^' {
-				classFirst++
-			}
-		} else if c == ']' && inClass {
-			if i == classFirst {
-				out.WriteString(`\]`)
-				continue
-			}
-			inClass = false
-		}
-		if extended && !inClass {
+		if extended {
 			if strings.ContainsRune(" \t\n\r\f\v", rune(c)) {
 				continue
 			}

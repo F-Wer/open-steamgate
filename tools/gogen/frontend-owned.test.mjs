@@ -1,6 +1,7 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync, writeFileSync, rmSync, cpSync, mkdirSync, copyFileSync, readFileSync} from "node:fs";
+import {mkdtempSync, writeFileSync, rmSync, cpSync, mkdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {execFileSync} from "node:child_process";
 import {compileProgram} from "./frontend.mjs";
@@ -272,7 +273,7 @@ func TestBytes(t *testing.T) { if got:=ZCL_GOGEN_T_SINGLEBYTES_RUN(&abap.Session
 `);
     execFileSync("go", ["test", "./ownedcheck"], {cwd: dir, env: process.env});
     writeFileSync(join(dir, "generated.mjs"), emitJs(program));
-    copyFileSync(join(import.meta.dirname, "js/abap.mjs"), join(dir, "abap.mjs"));
+    copyJsRuntime(dir);
     const js = await import(join(dir, "generated.mjs"));
     assert.equal(js.ZCL_GOGEN_T_SINGLEBYTES.RUN({sy: {index:0, subrc:0}}), want);
     assert.equal(js.ZCL_GOGEN_T_SINGLEBYTES.EMPTY_SOURCE({sy: {subrc:0}}), "00/0");
@@ -304,7 +305,7 @@ func TestChecksum(t *testing.T) {
 `);
     execFileSync("go", ["test", "./check"], {cwd: dir, env: process.env});
     writeFileSync(join(dir, "generated.mjs"), emitJs(p));
-    copyFileSync(join(import.meta.dirname, "js/abap.mjs"), join(dir, "abap.mjs"));
+    copyJsRuntime(dir);
     const js = await import(join(dir, "generated.mjs"));
     const me = new js.ZCL_OWNED();
     for (const [seed, n, want] of cases) assert.equal(me.CHECKSUM({sy: {}}, seed, n), want);

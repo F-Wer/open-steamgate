@@ -1,3 +1,4 @@
+import {PCRE_REFUSED, extendedPCRE, normalizePCREGenerics, pcreSyntax} from "./pcre.mjs";
 // The runtime of JS emitted from the gogen IR (tools/gogen/emit-js.mjs): the
 // same semantics as go/abap, line for line, with plain JS values. i and f
 // are numbers, c / x / string are strings, a structure is an object and a
@@ -1730,10 +1731,6 @@ export function ConcatLinesOf(t, sep) {
 // REGEX ('R', POSIX leftmost-longest) an alternation whose shorter branch
 // matches first differs, as in FindStmt (a|ab in xabab: JS 1,1 3,1, A4H
 // 1,2 3,2); the Go runtime is the exact one. PCRE's refusals are Go's.
-const PCRE_REFUSED = [[/\(\?=/, "a lookahead (?=...)"], [/\(\?!/, "a negative lookahead (?!...)"], [/\(\?<=/, "a lookbehind (?<=...)"],
-  [/\(\?<!/, "a negative lookbehind (?<!...)"], [/\(\?>/, "an atomic group (?>...)"], [/\\[1-9]|\\g\{?-?\d|\\k[<{']/, "a backreference"],
-  [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\\Z/, "\\Z"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
-  [/\(\*/, "a verb (*...)"], [/\\[ceoNXRhHvV]/, "an escape RE2 reads differently or not at all"]];
 export function FindResults(s, p, kind, icase, all) {
   if (p === "") notCompiled("FIND ... RESULTS: an empty pattern is not measured");
   if (kind === "" && !icase) {
@@ -1752,17 +1749,17 @@ export function FindResults(s, p, kind, icase, all) {
   if (kind === "P") {
     const anchors = [];
     p = extendedPCRE(p, anchors);
-    const syntax = p.replace(/\\./gs, "_").replace(/\[(?:\\.|[^\]\\])*\]/g, "_");
+    const syntax = pcreSyntax(p);
     if (/\(\?[A-Za-z-]/.test(syntax)) notCompiled("FIND PCRE: an unsupported inline flag group: " + p);
     // Hide rewritten scalar braces from the possessive-quantifier refusal.
-    const plain = p.replaceAll("\\\\", "").replace(/\\x\{[0-9a-f]+\}/g, "_");
+    const plain = pcreSyntax(p, true);
     for (const [r, what] of PCRE_REFUSED) if (r.test(plain)) notCompiled(`FIND PCRE: ${what} is not in Go's RE2: ${p}`);
     if (/\\u/.test(plain)) notCompiled("FIND PCRE: RE2 does not read this pattern (error parsing regexp: invalid escape sequence: `\\u`); whether PCRE does is not measured");
-    if (/[\n\r]/.test(s) && (!anchors.length || /[\^$.]/.test(syntax))) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
-    // Translate after validating user syntax; \z must reject a final newline too.
+    if (/[\n\r]/.test(s) && /[\^$.]/.test(syntax)) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
+    // Translate validated absolute anchors (\z rejects a final newline).
     for (const [i, anchor] of anchors.reverse()) p = p.slice(0, i) + (anchor === "A" ? "^" : "(?![\\s\\S])") + p.slice(i + 2);
-    p = p.replace(/\\\\|\\x\{[0-9a-f]+\}/g, e => e.startsWith("\\x") ? "\\u" + e.slice(2) : e);
-    try { re = new RegExp(p, (icase ? "i" : "") + "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
+    p = normalizePCREGenerics(p, icase, notCompiled);
+    try { re = new RegExp(p, "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
   } else {
     const pat = kind === "" ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p;
     re = abapRegExp(pat, s, icase, "gd", "FIND REGEX");
@@ -1886,83 +1883,6 @@ function pcreAll(s, p, icase, all) {
 
 // Hex escapes are Unicode scalars; short forms and bare refusals are unmeasured; measure on A4H.
 // Scan before extended-mode stripping, retaining escaped backslashes and classes.
-function pcreHex(p, x) {
-  let end = x + 1, value = 0;
-  const braced = p[end] === "{";
-  if (braced) end++;
-  const start = end;
-  while (end < p.length && /[0-9a-f]/i.test(p[end]) && (braced || end - start < 2)) {
-    if (value <= 0x10ffff) value = value * 16 + parseInt(p[end], 16);
-    end++;
-  }
-  if (braced) {
-    if (end === start || p[end] !== "}") notCompiled("FIND PCRE: a malformed braced hex escape");
-    end++;
-  }
-  if (!braced && end === start) notCompiled("FIND PCRE: \\x without hex digits");
-  if (value > 0x10ffff) notCompiled("FIND PCRE: a hex escape above U+10FFFF");
-  if (value >= 0xd800 && value <= 0xdfff) notCompiled("FIND PCRE: a surrogate hex escape (U+D800-U+DFFF)");
-  return ["\\x{" + value.toString(16) + "}", end - 1]; // Validate before JS translation.
-}
-
-// Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
-function extendedPCRE(p, anchors) {
-  for (const escape of ["\\Q", "\\E"]) {
-    if (p.includes(escape)) notCompiled("FIND PCRE: unsupported quoting escape " + escape);
-  }
-  const extended = !p.startsWith("(?-x)");
-  if (!extended) p = p.slice(5);
-  let out = "", inClass = false, classFirst = -1;
-  for (let i = 0; i < p.length; i++) {
-    const c = p[i];
-    if (inClass && c === "[" && p[i + 1] === ":") {
-      const end = p.indexOf(":]", i + 2);
-      if (end >= 0) {
-        // RE2's POSIX classes are ASCII; JS needs their explicit ranges.
-        const classes = {alpha: "A-Za-z", alnum: "A-Za-z0-9", ascii: "\x00-\x7f", blank: " \t",
-          cntrl: "\x00-\x1f\x7f", digit: "0-9", graph: "!-~", lower: "a-z", print: " -~",
-          punct: "!-/:-@\\[-`{-~", space: " \t\n\r\f\v", upper: "A-Z", word: "A-Za-z0-9_", xdigit: "A-Fa-f0-9"};
-        const name = p.slice(i + 2, end);
-        if (!Object.hasOwn(classes, name)) notCompiled("FIND PCRE: an unsupported POSIX class: " + name);
-        out += classes[name];
-        i = end + 1;
-        continue;
-      }
-    }
-    if (c === "\\" && i + 1 < p.length) {
-      const next = p[++i];
-      if (next === "x") {
-        const [hex, end] = pcreHex(p, i);
-        out += hex;
-        i = end;
-        continue;
-      }
-      if (next === "A" || next === "z") {
-        if (inClass) notCompiled("FIND PCRE: unsupported anchor escape in character class \\" + next);
-        anchors.push([out.length, next]);
-      }
-      out += /[ \t\n\r\f\v#]/.test(next) ? next : c + next;
-      continue;
-    }
-    if (c === "[" && !inClass) {
-      inClass = true;
-      classFirst = i + 1 + (p[i + 1] === "^" ? 1 : 0);
-    } else if (c === "]" && inClass) {
-      if (i === classFirst) { out += "\\]"; continue; }
-      inClass = false;
-    }
-    if (extended && !inClass) {
-      if (/[ \t\n\r\f\v]/.test(c)) continue;
-      if (c === "#") {
-        while (i + 1 < p.length && !/[\r\n]/.test(p[i + 1])) i++;
-        continue;
-      }
-    }
-    out += c;
-  }
-  return out;
-}
-
 function checkPCREReplacement(withText) {
   for (let i = 0; i < withText.length; i++) {
     if (withText[i] !== "\\") continue;
@@ -2007,3 +1927,9 @@ export function objectRttiRead(obj, member) {
   if (obj.$kernelRtti) throw new AbapError("NOT_COMPILED", `object RTTI member ${member}: enumeration is not implemented`);
   return obj;
 }
+
+// PCRE2 non-UCP generic types; SAP's UCP setting unmeasured; measure on A4H.
+// JS iu folds ſ/K into ASCII word ranges and boundaries. Guard the ranges
+// explicitly; generated lookarounds are internal, after user syntax refusals.
+// Parse ordered items before extracting generic types or applying case folding.
+// Scalar emission protects every literal class metacharacter from relocation.
