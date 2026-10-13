@@ -3983,3 +3983,15 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Expected behaviour: unmeasured; ABAP documentation. Generic field symbols bind to the original row storage; positional components are 1-based, and an out-of-range selection returns sy-subrc 4 with an unassigned target. Non-structures follow the existing by-name failure path.
 - Related seam: generic binary values moved into a string now use the existing hexadecimal conversion, as SCMS does when joining its parts.
 - Regression: `tools/gogen/testdata/zcl_gogen_t_binary.clas.abap` and `ZGOGEN_T_BINARY`: elementary binary rows, structured binary rows, writes through both bindings, positional variable selection, and failed assignment after a successful binding, on Go and IR-JS.
+
+### ANOMALY-2026-10-13-caught-exception-reference-previous
+
+- Status: fixed in OSG gogen (Go and IR-JS).
+- Reproducer: tools/gogen/testdata/zcl_gogen_t_excprev.clas.abap (inbox 048).
+- Expected SAP behavior: supplied chain `CX_SY_CONVERSION_NO_NUMBER <- CX_SY_ZERODIVIDE`; expanded identity, RTTI, text and chain probe **unmeasured; measure on A4H**.
+- Previous local behavior: CATCH of kernel errors changes INTO to EXC; conversion EXC to REF TO cx_root/object and PREVIOUS reads refuse.
+- Fix: widening preserves a compiled exception object, or creates the actual compiled kernel CX object once. EXC PREVIOUS reads wrap the stored predecessor and return initial at the end. The compiled CX_ROOT constructor stores PREVIOUS from RAISE TYPE. Kernel text remains the host class/operation text (localized SAP messages unmeasured; measure on A4H).
+- Limits: implicit EXC widening has only the two named targets; unsupported EXC methods, attributes, writes and direct casts remain refused. A missing kernel class refuses by name. Object RTTI carries kind and names; descriptor member enumeration refuses by name at runtime only for widened kernel exceptions. Ordinary class descriptor reads retain main behavior; member-type lookup remains refused by name.
+- Critic round 2: GET_TEXT_FOR_MESSAGE bypassed the metadata guard and returned the generic fallback for widened kernel errors. Both native helpers now return carried kernel text first; interface fields and generic bindings also guard the runtime object. Named refusals replace message-helper ASSERT-todo metadata lookups. The complete field/helper/RTTI audit and two-host tests are listed in tools/gogen/testdata/exception-previous-notes.md.
+- Critic round 1: materialized kernel attribute reads refuse by name (SAP TEXTID/KERNEL_ERRID values unmeasured; measure on A4H). Initial EXC GET_TEXT/class-name/PREVIOUS reads dump OBJECTS_OBJREF_NOT_ASSIGNED, matching initial CX references; compiled constructor-populated attributes remain readable.
+- Tests: generic testdata ABAP Unit contains only successful methods, including ordinary class descriptor INTERFACES. Registered test/osgo-exc-previous.mjs stages negative methods locally and checks both hosts for metadata refusals and initial dereferences; semantics.mjs and frontend-exception.test.mjs cover output and refusal boundaries.

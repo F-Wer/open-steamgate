@@ -15,6 +15,8 @@ import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // unmeasured; measure on A4H: exception widening, identity and mixed PREVIOUS chains.
+  ZCL_GOGEN_T_EXCPREV: 'bound/instance/text/identity/end/rtti/CX_SY_CONVERSION_NO_NUMBER <- CX_SY_ZERODIVIDE/prev/same/ZCX_GOGEN_T_PREVIOUS <- CX_SY_CONVERSION_NO_NUMBER <- CX_SY_ZERODIVIDE/class text/return/class/classprev/classcast/empty',
   // Unmeasured: inline DDIC RESULTS, FIRST into a table, copied submatches LOOP; A4H not run.
   ZCL_GOGEN_T_FINDINLINE: "all:0/2[0:2,2(2,1)(3,1);0:5,1(5,1)(-1,0);] copy:2[0:2,2(2,1)(3,1);0:5,1(5,1)(-1,0);] first:0/1[0:1,2(1,1)(2,1);] miss:4/0[] single:0/1[0:1,1(1,1)(-1,0);] allmiss:4/0[]",
   // CRC32 of bytes 00..n-1, n=0..9: Python zlib oracle, all word remainders.
@@ -897,7 +899,7 @@ const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fu
 // the roots of the exception classes, and get_text( )'s helper, compiled
 // out of open-abap-core as the gateway compiles them
 // and RTTI (ultra/json: describe_by_data, ZCL_GOGEN_T_RTTI)
-const CORE = ["CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
+const CORE = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_ERROR", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_ERROR", "KERNEL_INTERNAL_NAME", "CX_ROOT", "CX_STATIC_CHECK", "CX_DYNAMIC_CHECK", "CX_NO_CHECK", "CL_MESSAGE_HELPER", "CL_ABAP_CONV_OUT_CE", "CL_ABAP_CONV_IN_CE", "CL_ABAP_REGEX", "CL_HTTP_UTILITY",
   "ZCL_AJSON", "ZIF_AJSON", "ZIF_AJSON_TYPES", "ZCX_AJSON_ERROR", "CL_ABAP_MESSAGE_DIGEST", "CX_ABAP_MESSAGE_DIGEST",
   "CL_ABAP_TYPEDESCR", "CL_ABAP_DATADESCR", "CL_ABAP_ELEMDESCR", "CL_ABAP_COMPLEXDESCR", "CL_ABAP_STRUCTDESCR", "CL_ABAP_TABLEDESCR", "CL_ABAP_REFDESCR", "CL_ABAP_OBJECTDESCR", "CL_ABAP_CLASSDESCR", "CL_ABAP_INTFDESCR",
   // and open-abap-core's JSON reader (ZCL_GOGEN_T_JSONDES)

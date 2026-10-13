@@ -277,6 +277,9 @@ func AsError(r any) (ArithmeticError, bool) {
 	if w, ok := r.(*Rethrown); ok {
 		r = w.V
 	}
+	if x, ok := r.(*Raised); ok && x.Caught != nil && x.Caught.Obj == nil {
+		return ArithmeticError{Class: x.Caught.Class, Op: x.Caught.Op}, true
+	}
 	e, ok := r.(ArithmeticError)
 	return e, ok
 }

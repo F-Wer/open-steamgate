@@ -1,11 +1,6 @@
 [
   {
     "kind": "statement stub",
-    "entry": "ZCL_OSD_ADT_CLASSRUN=>RUN (zcl_osd_adt_classrun.clas.abap:105): conversion exc -> ref",
-    "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the gogen owner compiles the conversion."
-  },
-  {
-    "kind": "statement stub",
     "entry": "ZCL_OSD_ADT_XREF=>EDGES (zcl_osd_adt_xref.clas.abap:40): SELECT form: SELECT DISTINCT include FROM wbcrossgt INTO TABLE lt_rows UP TO 5000 ROWS WHERE otype = 'TY' AND name = iv_name AND include <> iv_name ORDER BY include.",
     "reason": "Pre-existing gogen statement stub on the ADT build baseline; retain until the SELECT form is compiled."
   },

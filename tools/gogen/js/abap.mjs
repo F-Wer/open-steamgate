@@ -794,7 +794,7 @@ export function isA(cls, ancestor) {
   return false;
 }
 export function RefEq(a, b) {
-  const object = (v) => v instanceof Raised ? v.obj : v ?? null;
+  const object = (v) => v instanceof Raised || v instanceof AbapError && v.obj ? v.obj : v ?? null;
   return object(a) === object(b);
 }
 export function raise(obj, cls) {
@@ -822,6 +822,7 @@ export function catchable(e) { return classBased(e); }
 // get_text( ) of a value a CATCH INTO received that also takes runtime
 // exceptions: a raised object's own get_text, else the class and the operation
 export function excText(s, x) {
+  exceptionRead(x);
   if (x instanceof Raised) {
     if (typeof x.obj.IF_MESSAGE__GET_TEXT !== "function") throw new AbapError("NOT_COMPILED", `${x.cls}=>GET_TEXT: get_text( ) of the class is not compiled`);
     return x.obj.IF_MESSAGE__GET_TEXT(s);
@@ -1970,4 +1971,39 @@ function checkPCREReplacement(withText) {
       notCompiled("REPLACE PCRE: unsupported replacement escape " + "\\" + (next ?? ""));
     }
   }
+}
+
+// Widen to the actual compiled CX class, preserving identity and kernel text.
+export function exceptionRef(s, e) {
+  if (e == null) return null;
+  if (e.obj) return e.obj;
+  const c = classes.get(e.cls);
+  if (!c) throw new AbapError("NOT_COMPILED", `exception widening: REF TO ${e.cls}: the kernel class is not compiled`);
+  const obj = c.make(s);
+  if (!obj.constructor.$is.has("CX_ROOT")) throw new AbapError("NOT_COMPILED", `exception widening: ${e.cls}: CX_ROOT is not compiled`);
+  obj.$kernelException = e;
+  e.obj = obj;
+  return obj;
+}
+export function exceptionPrevious(e) {
+  if (e == null) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", "PREVIOUS");
+  if (!e.obj) return null;
+  if (!e.obj.constructor.$is.has("CX_ROOT")) throw new AbapError("NOT_COMPILED", `${e.cls}->PREVIOUS: CX_ROOT is not compiled`);
+  const obj = exceptionRead(e.obj, "PREVIOUS").previous;
+  return obj == null ? null : new Raised(obj, obj.constructor.$abap);
+}
+
+// Kernel attribute values are unmeasured; measure on A4H. PREVIOUS is populated.
+export function exceptionRead(obj, member = "") {
+  if (obj == null) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", member || "method call");
+  if (obj.$kernelException && member && member !== "PREVIOUS")
+    throw new AbapError("NOT_COMPILED", `exception attribute ${member}: kernel metadata is unmeasured; measure on A4H`);
+  return obj;
+}
+export function exceptionClass(e) { return "\\CLASS=" + exceptionRead(e).cls; }
+
+export function objectRttiRead(obj, member) {
+  if (obj == null) throw new AbapError("OBJECTS_OBJREF_NOT_ASSIGNED", member);
+  if (obj.$kernelRtti) throw new AbapError("NOT_COMPILED", `object RTTI member ${member}: enumeration is not implemented`);
+  return obj;
 }

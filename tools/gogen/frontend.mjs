@@ -732,6 +732,7 @@ const NATIVE = new Map([
   // crypto.randomUUID() on Node (go/abap/uuid.go); CREATE_UUID_* are ABAP around it
   ["CL_SYSTEM_UUID=>RANDOM", {fn: "abap.UUIDRandom", args: []}],
   ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
+  ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_OBJECT_REF", "Native_DESCRIBE_BY_OBJECT_REF"],
   // ultra/json: the descriptor of a value (emit-go nativeRttiData), and the
   // JSON.parse half of open-abap-core's JSON reader (go/abap/jsonparse.go);
   // both are @KERNEL code on Node, and the JS emitter has neither
@@ -1653,6 +1654,9 @@ function classIr(ctx0, obj) {
     };
     if (sig === undefined) { skip("no signature"); continue; }
     if (sig.unsupported) { skip(sig.unsupported); continue; }
+    if (className === "CL_MESSAGE_HELPER" && ["GET_TEXT_PARAMS", "REPLACE_TEXT_PARAMS", "GET_OTR_TEXT_RAW"].includes(name)) {
+      skip("message metadata lookup is not implemented"); continue;
+    }
     // a kernel service the host implements: the ABAP body (the transpiler's
     // @KERNEL code) is replaced by a call into the host
     if (NATIVE_ME.has(`${className}=>${name}`)) {
@@ -1673,6 +1677,7 @@ function classIr(ctx0, obj) {
     }
     if (NATIVE.has(`${className}=>${name}`)) {
       const native = NATIVE.get(`${className}=>${name}`);
+      if (native === "Native_DESCRIBE_BY_OBJECT_REF") program.missing.add("CL_ABAP_CLASSDESCR");
       // {fn, args}: the host function takes the places and values named
       // (attributes and parameters, "&" for a place it writes) instead of
       // the parameters in their order
@@ -3616,10 +3621,17 @@ function lvalue(target, ctx) {
 
 /** ref->attr: an instance attribute of the class a reference points to */
 function refAttribute(base, attrNode, ctx, write = false) {
+  if (base.type.k === "exc") {
+    const name = upper(attrNode.concatTokens());
+    if (write || name !== "PREVIOUS") throw new Unsupported(`exception attribute ${name}${write ? " write" : ""}`);
+    ctx.program.missing.add("CX_ROOT");
+    return {e: "exc_previous", x: base, type: EXC};
+  }
   if (base.type.k === "ref" && base.type.intf && base.type.name !== "OBJECT") return intfRefAttribute(base, upper(attrNode.concatTokens()), ctx, write);
   if (base.type.k === "ref" && !base.type.intf && attrNode.concatTokens().includes("~")) return classRefIntfAttribute(base, upper(attrNode.concatTokens()), ctx, write);
   if (base.type.k !== "ref" || base.type.intf) throw new Unsupported(`-> on a ${base.type.k === "ref" ? "interface reference" : base.type.k}`);
   const name = upper(attrNode.concatTokens());
+  const kernelRtti = ["ATTRIBUTES", "METHODS", "INTERFACES", "TYPES", "EVENTS"].includes(name) && isSubclass(ctx.reg, base.type.name, "CL_ABAP_OBJECTDESCR");
   // a class the program does not compile is an empty struct in Go: its
   // attribute is refused here, in this method, not left to fail the build
   if (!ctx.program.wanted.has(base.type.name)) throw notInProgram(ctx, base.type.name, `${base.type.name}->${name}: the class is not compiled in this program`);
@@ -3632,7 +3644,7 @@ function refAttribute(base, attrNode, ctx, write = false) {
     }
     throw new Unsupported(`${base.type.name}->${name}: not an instance attribute`);
   }
-  return {e: "refattr", base, name, type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
+  return {e: "refattr", base, name, ...(kernelRtti ? {kernelRtti: true} : {}), type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
 }
 
 function dataRefField(base, attrNode, ctx) {
@@ -4202,7 +4214,7 @@ function fieldChain(n, ctx) {
       const f = fieldOf(ctx, place.type, kids[i + 1].concatTokens(), n.concatTokens());
       place = {e: "field", base: place, name: f.name, type: f.type};
       i += 1;
-    } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && place.type.k === "ref") {
+    } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && ["ref", "exc"].includes(place.type.k)) {
       place = refAttribute(place, kids[i + 1], ctx);
       i += 1;
     } else if (isTok(kids[i], "->") && isExpr(kids[i + 1], Expressions.AttributeName) && place.type.k === "dref") {
@@ -6144,6 +6156,7 @@ function call(chain, ctx, statement, hint) {
     throw new Unsupported(`call chain ${chain.concatTokens()}`);
   }
   const name = upper(mc.findDirectExpression(Expressions.MethodName).concatTokens());
+  if (receiver && isSubclass(ctx.reg, receiver.type.name, "CL_ABAP_OBJECTDESCR") && ["GET_ATTRIBUTE_TYPE", "GET_METHOD_PARAMETER_TYPE", "GET_INTERFACE_TYPE", "GET_SUPER_CLASS_TYPE"].includes(name)) throw new Unsupported(`object RTTI method ${name}: member descriptions are not implemented`);
   const param = mc.findDirectExpression(Expressions.MethodCallParam);
   const direct = param?.findDirectExpression(Expressions.Source);
   const named = param?.findDirectExpression(Expressions.ParameterListS);
@@ -6544,6 +6557,12 @@ export function convert(expr, to) {
     return {e: "unwrap", x: expr, type: to};
   }
   const from = expr.type;
+  if (from.k === "exc" && to.k === "ref") {
+    if (!["CX_ROOT", "OBJECT"].includes(to.name)) throw new Unsupported(`exception widening to REF TO ${to.name}`);
+    // The closure compiles the kernel classes; no surrogate object loses its type.
+    for (const name of ["CX_ROOT", ...RUNTIME_CX]) if (REG?.getObject("CLAS", name)) PROGRAM?.missing.add(name);
+    return {e: "exc_ref", x: expr, type: to};
+  }
   if (sameType(from, to)) return expr;
   const ok = (kind) => ({e: "conv", kind, from, to, x: expr, type: to});
   if (numeric(from) && numeric(to)) return ok("num");
