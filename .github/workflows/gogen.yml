@@ -84,7 +84,9 @@ concurrency:
 jobs:
   gogen:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 20 minutes cut the job mid-suite on main (2026-10-11, 10-13) and on
+    # #721 twice: a cancelled run is not a green one, so give it room
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
