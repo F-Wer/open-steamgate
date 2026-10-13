@@ -1,3 +1,4 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // A scene of ZO4D in a browser three ways, measured with one instrument:
 // the scene compiled by gogen to Go and built for GOOS=js GOARCH=wasm, the
@@ -82,8 +83,7 @@ for (const scene of scenes) {
   const irDir = join(out, `${scene}-ir-src`);
   mkdirSync(irDir);
   writeFileSync(join(irDir, "scene.mjs"), emitJs(program));
-  copyFileSync(join(here, "js", "abap.mjs"), join(irDir, "abap.mjs"));
-  copyFileSync(join(here, "js", "codepage.mjs"), join(irDir, "codepage.mjs"));
+  copyJsRuntime(irDir);
   bundle(join(irDir, "scene.mjs"), join(out, `${scene}-ir.js`));
   size(`${scene}: JS from the IR (bundle)`, join(out, `${scene}-ir.js`));
 

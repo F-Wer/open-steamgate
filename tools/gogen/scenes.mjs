@@ -1,3 +1,4 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // A scene of the ZO4D demo, compiled to Go and checked against a recording
 // taken on A4H (docs/frame-comparison.md): the recording is the oracle.
@@ -18,7 +19,6 @@ import {funcName} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 import {SCENES} from "./scene-defs.mjs";
-import {copyFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -101,8 +101,7 @@ console.log(`Go: ${(result.nsPerFrame / 1e3).toFixed(1)} µs a frame (render_fra
 
 /* ------------------------------------------------- the same IR, emitted as JS */
 writeFileSync(join(out, "scene.mjs"), emitJs(program));
-copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
-copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
+copyJsRuntime(out);
 const m = await import(pathToFileURL(join(out, "scene.mjs")).href);
 const jsObj = new m[sc.cls]();
 const jsS = {sy: {index: 0, tabix: 0, subrc: 0}};

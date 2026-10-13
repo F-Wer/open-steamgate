@@ -1,3 +1,4 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // The whole ZO4D demo, compiled to Go and to JS from one IR, against the A4H
 // recordings: the handler, the demo director and every effect class of the
@@ -16,7 +17,7 @@ import {writeGo} from "./symbols.ts";
 // socket per scene. The frames the ABAP writes are compared with the
 // recording number by number.
 import {execFileSync} from "node:child_process";
-import {copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -77,8 +78,7 @@ const goOut = {runs: runs.map((r, i) => {
 
 /* --------------------------------------------------------------------- JS */
 writeFileSync(join(out, "demo.mjs"), emitJs(program));
-copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
-copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
+copyJsRuntime(out);
 const jsOut = runs.map((r, i) => {
   try {
     const res = execFileSync("node", ["--max-old-space-size=2000", join(here, "demo-js.mjs"), out, join(out, `run-${i}.json`)],

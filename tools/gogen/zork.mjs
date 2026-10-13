@@ -1,3 +1,4 @@
+import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
 // Zork, the whole interpreter, compiled from packs/zork through the IR to Go
 // and to JS, and played by its own speedrun: the story file and the script
@@ -8,7 +9,7 @@ import {writeGo} from "./symbols.ts";
 // The script loader of the pack reads SMW0; the harness does its few lines
 // (drop CR, split lines, tab to blank, CONDENSE, skip empty and # lines).
 import {execFileSync} from "node:child_process";
-import {copyFileSync, mkdirSync, readFileSync, writeFileSync} from "node:fs";
+import {mkdirSync, readFileSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {fileURLToPath, pathToFileURL} from "node:url";
 import {compileProgram} from "./frontend.mjs";
@@ -40,8 +41,7 @@ const go = JSON.parse(execFileSync("prlimit", ["--as=4000000000", join(out, "zor
   {maxBuffer: 1 << 28, timeout: 120000, env: {...process.env, ...(seed === null ? {} : {ZORK_SEED: String(seed)})}}).toString());
 
 writeFileSync(join(out, "zork.mjs"), emitJs(program));
-copyFileSync(join(here, "js", "abap.mjs"), join(out, "abap.mjs"));
-copyFileSync(join(here, "js", "codepage.mjs"), join(out, "codepage.mjs"));
+copyJsRuntime(out);
 const m = await import(pathToFileURL(join(out, "zork.mjs")).href);
 const js = {};
 try {

@@ -1545,7 +1545,11 @@ testdata classes, deleted after) and pinned in `semantics.mjs` on Go and JS
   keeps the structure and a missed ALL clears the table, empty matches as
   the kernel lists them. PCRE lookaround, backreferences, atomic groups,
   possessive quantifiers, \K, \G, recursion, conditionals and verbs are
-  refused by name (Go's RE2 has none), as is PCRE on a text with line ends.
+  refused by name (Go's RE2 has none). On text with line ends, only unescaped
+  `^`, `$`, `.` outside classes are refused; literals, classes and `\s` work.
+  PCRE2 non-UCP generic types; SAP's UCP setting unmeasured; measure on A4H.
+  `\s` is HT/LF/VT/FF/CR/SPACE; `\d`, `\w` and word boundaries are ASCII,
+  including under IGNORING CASE and inside negated or mixed classes.
   Hex escapes work in FIND, RESULTS, COUNT and REPLACE, outside and inside
   character classes: `\xHH` denotes U+00HH, `\xH` consumes one hex digit
   (`\x4` = U+0004), and bare `\x` is refused as `\x without hex digits`. `\x{H...}` denotes a
