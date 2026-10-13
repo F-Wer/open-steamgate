@@ -68,7 +68,7 @@ jobs:
       # The only dependency is the parser, pinned as package.json pins it.
       - name: comments outside methods in class implementations
         run: |
-          npm install --no-save --no-package-lock --ignore-scripts @abaplint/core@2.120.59
+          npm install --no-save --no-package-lock --ignore-scripts @abaplint/core@2.120.73
           node tools/osd-oo-comments.mjs
       # A field a system refuses to activate because its name is a reserved
       # word (RULE in ZOSD_L3_ALERT, A4H 2026-10-01). The public list is
