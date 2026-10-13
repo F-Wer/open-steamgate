@@ -685,10 +685,10 @@ const EXPECT = {
   ZCL_GOGEN_T_RTTIDDIC: {Go: "C/20/10", JS: "ERROR NOT_COMPILED in Native_DESCRIBE_BY_DATA: a host function of the Go runtime"},
   // open-abap-core's /UI2/CL_JSON=>DESERIALIZE end to end (ultra/json): not
   // an A4H value, a system has its own /UI2/CL_JSON. What the pieces give
-  // that were measured there (the parser's members through a non-unique
-  // sorted key come newest first, so an array fills its table in reverse;
-  // ZCL_GOGEN_T_SECKEY), where the Node host answers
-  // "osg/42/X//3:1X,2,3, bad:caught" (ANORMALIES secondary-key-duplicates).
+  // that were measured there (ZCL_GOGEN_T_SECKEY); since open-abap-core #1262
+  // the parser's key has a `seq` component, so array members keep parse order
+  // and the Node host answers "osg/42/X//3:1X,2,3, bad:caught" (before #1262
+  // reversed: ANORMALIES secondary-key-duplicates).
   // A missing member is cleared, an unknown one ignored. The JS emitter
   // has neither JSON.parse nor RTTI as host functions
   ZCL_GOGEN_T_JSONDES: {Go: "osg/42/X//3:1X,2,3, bad:caught",

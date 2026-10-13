@@ -137,8 +137,10 @@ Regressions and corrections encountered:
   emitter failure; rerun with stable inputs is recorded above.
 
 No remaining OSG behavior regression was observed in the completed targeted
-checks. Expected refusal/NOT_COMPILED results in semantics retain their
-existing expectations, including the JS native Go-host conversion path.
+checks. Two expectations changed, both following from the new core: the Go
+value of `ZCL_GOGEN_T_JSONDES` (array order, below) and its JS refusal, which
+now names `Native_CONV_OUT_CONVERT` instead of `Native_JSON_PARSE`. No
+expectation was loosened.
 
 ## Absolute regex anchors
 
@@ -162,7 +164,7 @@ rc = sy-subrc.
 WRITE / rc.
 ```
 
-| Input | Expected sy-subrc | Old pin | New pin |
+| Input | Expected sy-subrc (PCRE semantics; unmeasured, measure on A4H) | Old pin | New pin |
 | --- | --- | --- | --- |
 | `abc` | 0 | 4 | 4 |
 | `Aabcz` | 4 | 0 | 0 |
@@ -180,10 +182,7 @@ The transpiler PostgreSQL suite still needs its CI service. Node 22 and the
 full browser/optional integration matrix remain unverified locally. Absolute
 PCRE anchors remain unsupported. No observed targeted OSG failure remains in the final stable-input reruns.
 
-Dell must review and push `local/osd-build-2` to oisee/transpiler before the OSG
-branch can build on GitHub: its locked SHA is currently local-only. Then push
-`fix/transpiler-pin-2` for one OSG PR containing the core, parser, transpiler,
-JSON expectation, and verified pack pin set. No push or PR creation was
-attempted here.
+Published: `local/osd-build-2` is on oisee/transpiler and the OSG branch
+`fix/transpiler-pin-2` (PR #720) pins it; both point at the locked SHAs.
 
 The transpiler branch was re-authored to "Alice V." before publishing (same tree); the pin is its new tip `6f2119b8`.
