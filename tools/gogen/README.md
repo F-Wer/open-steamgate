@@ -27,6 +27,56 @@ Needs Node (`node_modules` of the checkout, for `@abaplint/core` and
 `@abaplint/transpiler`) and Go >= 1.26. Nothing is written outside this
 folder: `.out/` and `go/cmd/bench/zz_generated.go` are generated and ignored.
 
+## Per-object frontend cache
+
+Pass `cacheDir` to `compileProgram({folders, objects, cacheDir, ...})` to reuse
+portable class IR across processes and shards. It defaults to off. Existing
+closure drivers need only pass the same directory on each call; continue passing
+`registry` and `session` when growing a closure. Without `cacheDir`, sessions
+retain the original in-memory elementary fast path and entry shapes: scalar
+classes store signatures/diagnostics without replay operations. Full lowering
+recording is enabled only by `cacheDir`; dependency-sensitive in-memory replay
+continues as on main. `emitGo` needs no change.
+
+Every persisted lowering records its program reads and ordered effects, including
+reads made by expanded macro statements. Replay checks those observations before
+applying effects; there is no source-text independence heuristic. Keys guard the
+complete ordered registry source set and configuration because parsed definitions
+can incorporate macro, INCLUDE and type-pool inputs resolved before lowering.
+Any registry source edit or addition therefore invalidates all disk entries.
+Keys also include actual registry lookups, the git tree of `tools/gogen`, OSG HEAD,
+actual generator sources and installed toolchain code. Whole-closure readers retain
+a variant per selection; membership-only readers can share entries across shards
+with identical registry inputs. Local definitions and FOR ALL ENTRIES numbering
+are tracked program inputs too. Unsupported transcripts, nested mutations and
+nonportable abaplint identities lower normally. Parsing, type checking and emit
+remain ordinary work. Missing/corrupt/unwritable entries fall back to lowering.
+Entries are atomically replaced; the caller owns cache cleanup.
+`program.frontendCounts` reports lowered/reused classes (including session reuse).
+Cold and warm emission must match byte for byte.
+
+Objects measurement (2026-10-13, 2,522 source files, two closure rounds):
+three serial runs per mode, alternating main and branch, same driver/input and
+Node `--max-old-space-size=16384`, without CPU profiling or GC tracing.
+
+| Mode (median of 3) | Frontend s | Peak heapUsed GiB | Max RSS GiB |
+|---|---:|---:|---:|
+| origin/main (`73d72176`), session, no cacheDir | 189.810 | 10.050 | 11.247 |
+| This branch, session, no cacheDir | 192.850 | 10.038 | 11.195 |
+
+Median changes are +1.60% time, -0.12% heap and -0.46% RSS. An inspector sampler
+thread reads main-thread `process.memoryUsage().heapUsed` and V8 used heap every
+250 ms while compilation is synchronous; `/usr/bin/time -v` records max RSS.
+These are sampled heap peaks over the whole process (including emission).
+The earlier single-run boundary-probe figures did not establish a regression.
+
+Without cacheDir the disk-cache module is never loaded, so its WeakMap, source
+keys, graph/hash state and disk wrappers are not allocated. The session module
+is unchanged from main; default-off also retains main's supplied-parameter
+initialization order, local-definition map and FOR ALL ENTRIES counter. Only
+allocation-free opt-in selections are added to this path. Cold/warm replay and
+byte equality remain covered by the cache regressions.
+
 ## Shape
 
 ```
