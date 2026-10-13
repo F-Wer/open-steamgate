@@ -41,15 +41,35 @@ function toolIdentity() {
 
 // Preserve only data that can be replayed against a different registry. In
 // particular, abaplint type identities in anonymous-structure keys are unsafe.
-function portable(value, seen = new Set()) {
-  if (value === null || ["undefined", "string", "number", "boolean"].includes(typeof value)) return true;
-  if (typeof value !== "object") return false;
-  if (seen.has(value)) return true;
-  seen.add(value);
-  if (value instanceof Map) return [...value].every(([k, v]) => (k === null || typeof k !== "object") && portable(k, seen) && portable(v, seen));
-  if (value instanceof Set) return [...value].every((v) => portable(v, seen));
-  if (!Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return false;
-  return Object.values(value).every((v) => portable(v, seen));
+// Bound cache validation well below V8's Set limit; oversized lowerings compile normally.
+const PORTABLE_NODE_BUDGET = 1 << 20;
+export function portable(value) {
+  const seen = new Set(), stack = [{values: [value].values()}];
+  try {
+    while (stack.length) {
+      const frame = stack.at(-1), next = frame.values.next();
+      if (next.done) { stack.pop(); continue; }
+      if (frame.map) {
+        const [key, value] = next.value;
+        if (key !== null && typeof key === "object") return false;
+        stack.push({values: [key, value].values()});
+        continue;
+      }
+      const value = next.value;
+      if (value === null || ["undefined", "string", "number", "boolean"].includes(typeof value)) continue;
+      if (typeof value !== "object") return false;
+      if (seen.has(value)) continue;
+      if (seen.size >= PORTABLE_NODE_BUDGET) return false;
+      seen.add(value);
+      if (value instanceof Map) stack.push({values: [...value].values(), map: true});
+      else if (value instanceof Set) stack.push({values: [...value].values()});
+      else {
+        if (!Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return false;
+        stack.push({values: Object.values(value).values()});
+      }
+    }
+    return true;
+  } catch { return false; } // An unreadable value must not break compilation either.
 }
 
 // Rechecking the same input twice without an intervening write adds no guard.
