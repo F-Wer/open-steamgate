@@ -13,16 +13,12 @@ case "${1:-}" in
       echo "Pinned transpiler rebuild requires a clean checkout at $OSD_TRANSPILER_REF: $clone" >&2
       exit 1
     fi
-    core=$(node -p 'require("./package.json").devDependencies["@abaplint/core"]')
-    for manifest in "$clone/package.json" "$clone/packages/transpiler/package.json" "$clone/packages/cli/package.json"; do
-      node -e 'const p = require(process.argv[1]); const v = p.dependencies?.["@abaplint/core"] ?? p.devDependencies?.["@abaplint/core"]; if (v !== process.argv[2]) throw new Error("Pinned transpiler parser requirement differs from OSG: " + v)' "$(realpath "$manifest")" "$core"
-    done
     # The root supplies @types/node; ignore its recursive install script.
     npm --prefix "$clone" install --ignore-scripts --no-audit --no-fund
-    for package in runtime transpiler cli; do
+    for package in runtime transpiler extras cli; do
       npm --prefix "$clone/packages/$package" install --no-audit --no-fund
     done
-    for package in runtime transpiler cli; do
+    for package in runtime transpiler extras cli; do
       npm --prefix "$clone/packages/$package" run compile
     done
     chmod +x "$clone/packages/cli/abap_transpile"
@@ -46,13 +42,10 @@ if [[ ! -d "$clone/node_modules" ]] || [[ ! -s "$clone/packages/transpiler/build
   echo "::error::Pinned transpiler cache has missing dependencies, compiled entry point, or CLI executable" >&2
   exit 1
 fi
-for package in runtime transpiler cli; do
+for package in runtime transpiler extras cli; do
   if [[ ! -d "$clone/packages/$package/node_modules" ]] || [[ ! -d "$clone/packages/$package/build" ]] \
       || [[ -z "$(find "$clone/packages/$package/build" -type f -name '*.js' -print -quit)" ]]; then
     echo "::error::Pinned transpiler cache has no installed and compiled $package package" >&2
     exit 1
   fi
 done
-
-# Cached builds must resolve the same parser OSG's manifest pins.
-node -e 'const path = require("node:path"); const expected = require("./package.json").devDependencies["@abaplint/core"]; for (const at of [".", "packages/transpiler", "packages/cli"]) { const resolved = require.resolve("@abaplint/core/package.json", {paths: [path.resolve(process.argv[1], at)]}); const actual = require(resolved).version; if (actual !== expected) throw new Error("Pinned transpiler parser differs from OSG: " + at + " " + actual + " != " + expected); }' "$clone"

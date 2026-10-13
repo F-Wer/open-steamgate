@@ -64,6 +64,7 @@
         "/src/zcx_abapgit_type_not_supported.*",
         "/src/zif_abapgit_definitions.*",
         "/src/zif_abapgit_version.*",
+        "/deps/progname.dtel.xml",
         "/deps/trobjtype.dtel.xml",
         "/deps/trnspace.tabl.xml",
         "/deps/dokil.tabl.xml"
