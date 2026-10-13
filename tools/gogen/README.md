@@ -753,10 +753,11 @@ and `CREATE DATA ... LIKE LINE OF` of generic tables, `CREATE DATA ref.`,
 `LOOP AT ref->* ASSIGNING <typed>`, a variable named `value`, and `=` / `<>`
 of two object references (`ZCL_GOGEN_T_JSONGEN`, `_DREFLOOP`). The whole
 path is pinned by `ZCL_GOGEN_T_JSONDES`. Two consequences of following A4H:
-the parser reads an array's members through a non-unique sorted key, so a
-JSON array fills its table in reverse (ANORMALIES
-secondary-key-duplicates; the status tables read with ORDER BY do not show
-it, DatabaseSet and the services of the object page do), and
+the parser reads an array's members through a non-unique sorted key; since
+the rebased core (upstream open-abap-core #1262) the key carries a `seq`
+component, so members keep their parse order and a JSON array fills its
+table in source order (before #1262 it came out reversed: ANORMALIES
+secondary-key-duplicates), and
 `CREATE DATA ref LIKE LINE OF data` on a `TYPE data` parameter does not
 activate on A4H: it is refused everywhere but in `/UI2/CL_JSON=>_DESERIALIZE`
 (`TRANSPILER_MEANING`, ANORMALIES create-data-like-line-generic). The

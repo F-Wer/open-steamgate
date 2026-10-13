@@ -475,7 +475,9 @@ ENDCLASS.`;
       const entry = await client.waitFor("Debugger.paused");
       expect(entry.reason).to.equal("Break on start");
       await client.send("Debugger.resume");
-      const paused = await client.waitFor("Debugger.paused");
+      // Resuming entry loads the full system under the inspector before the
+      // method runs. Its module/seed work can exceed the small-fixture wait.
+      const paused = await client.waitFor("Debugger.paused", () => true, 30000);
       expect(paused.hitBreakpoints).to.include(set.breakpointId);
       expect(paused.callFrames[0].location.lineNumber).to.equal(breakpoint.lineNumber);
       const script = client.events.find((event) => event.method === "Debugger.scriptParsed"

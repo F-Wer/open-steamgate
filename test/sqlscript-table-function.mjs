@@ -330,9 +330,9 @@ describe("the text reader, checked against abaplint where abaplint reads the cla
     expect(differing).to.deep.equal([]);
   });
 
-  it("marks where a signature came from, and compares nothing on a class abaplint could not read", () => {
-    // the implementation-side clause drops the whole class definition; the
-    // second, plain method is what makes abaplint still find one body
+  it("marks parsed AMDP option signatures and cross-checks both methods", () => {
+    // Core 2.120.73 recognizes the implementation-side option clause.
+    // Keep both signatures and compare them with the independent text reader.
     const source = `CLASS cl_apl DEFINITION PUBLIC.
   PUBLIC SECTION.
     INTERFACES if_amdp_marker_hdb.
@@ -348,17 +348,17 @@ CLASS cl_apl IMPLEMENTATION.
   ENDMETHOD.
 ENDCLASS.`;
     const parsed = extract(source, "cl_apl.clas.abap");
-    expect(parsed.definitionSource).to.equal("text");
+    expect(parsed.definitionSource).to.equal("abaplint");
     const plainMethod = parsed.methods.find((m) => /plain/i.test(m.name));
-    expect(plainMethod.signatureSource).to.equal("text");
+    expect(plainMethod.signatureSource).to.equal("abaplint");
     expect(plainMethod.parameters.map((p) => p.name)).to.deep.equal(["iv_n", "et_rows"]);
-    expect(definitionsDisagree(source, "cl_apl.clas.abap")).to.deep.equal({compared: 0, differing: []});
+    expect(definitionsDisagree(source, "cl_apl.clas.abap")).to.deep.equal({compared: 2, differing: []});
     const fixed = extract(source.replace("OPTIONS SUPPRESS SYNTAX ERRORS", "OPTIONS READ-ONLY"), "cl_apl.clas.abap");
     expect(fixed.definitionSource).to.equal("abaplint");
     expect(fixed.methods.map((m) => m.signatureSource)).to.deep.equal(["abaplint", "abaplint"]);
   });
 
-  it("takes the text reader for one method abaplint dropped from a definition it otherwise read, and says so", () => {
+  it("uses parsed AMDP OPTIONS signatures without dropping their parameters", () => {
     const source = `CLASS cl_opt DEFINITION PUBLIC.
   PUBLIC SECTION.
     INTERFACES if_amdp_marker_hdb.
@@ -376,10 +376,10 @@ ENDCLASS.`;
     const parsed = extract(source, "cl_opt.clas.abap");
     expect(parsed.definitionSource).to.equal("abaplint");
     const byName = Object.fromEntries(parsed.methods.map((m) => [m.name.toUpperCase(), m]));
-    expect(byName.WITH_OPTIONS.signatureSource).to.equal("text");
+    expect(byName.WITH_OPTIONS.signatureSource).to.equal("abaplint");
     expect(byName.WITH_OPTIONS.parameters.map((p) => p.name)).to.deep.equal(["iv_n", "et_rows"]);
     expect(byName.PLAIN.signatureSource).to.equal("abaplint");
-    // and the cross-check compares only what abaplint read
-    expect(definitionsDisagree(source, "cl_opt.clas.abap")).to.deep.equal({compared: 1, differing: []});
+    // Core 2.120.73 reads both declarations; compare both to the text reader.
+    expect(definitionsDisagree(source, "cl_opt.clas.abap")).to.deep.equal({compared: 2, differing: []});
   });
 });

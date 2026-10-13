@@ -26,6 +26,12 @@ const resolved = layersOf(home, {...transpileConfig, input_folder: layerFolders}
 if (resolved.duplicates.length > 0) throw new Error(`the same object twice in one folder: ${JSON.stringify(resolved.duplicates)}`);
 /** the files of an object that a later layer holds too, absolute */
 export const hidden = new Set(resolved.hidden.map((f) => `${home}/${f}`));
+// CDS is lowered to DDIC views in gen/cds, as in the Node build. The
+// frontend reads .asddls separately for the CDS-to-SQL name map; loading
+// only its XML into the registry would give DatabaseSetup a sourceless DDLS.
+for (const file of layers.flatMap(walk)) {
+  if (/\.ddls\.xml$/i.test(file)) hidden.add(file);
+}
 export const overridden = resolved.overridden;
 export const libs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
   .map((d) => join(libraryPath(home, d.split("/")[0]), d.slice(d.indexOf("/") + 1))).filter(existsSync);

@@ -1,9 +1,8 @@
 import {expect} from "chai";
 import {spawn} from "node:child_process";
-import {cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync} from "node:fs";
+import {readFileSync, rmSync} from "node:fs";
+import {copyRuntimeRoot} from "./helpers/runtime-root.mjs";
 import {once} from "node:events";
-import {tmpdir} from "node:os";
-import {join, resolve} from "node:path";
 
 // A reparented child can remain a zombie until the host's init reaps it.
 // That process has exited and no longer holds memory or listening sockets.
@@ -27,13 +26,9 @@ describe("serving child supervisor lifetime", function () {
   this.timeout(60000);
   let root;
   before(() => {
-    // Source hosts prepare build/live at startup, even in lifetime probes.
-    root = mkdtempSync(join(tmpdir(), "osd-parent-exit-"));
-    for (const dir of ["src", "gen", "packs", "data", "webapp", "test"]) cpSync(resolve(dir), join(root, dir), {recursive: true});
-    for (const file of ["package.json", "abap_transpile.json", "abaplint.jsonc", "libs.lock.json"]) cpSync(resolve(file), join(root, file));
-    for (const dir of ["node_modules", "tools", "bin"]) symlinkSync(resolve(dir), join(root, dir));
-    mkdirSync(join(root, ".local"));
-    symlinkSync(resolve(".local/lars"), join(root, ".local/lars"));
+    // This probes supervisor lifetime after boot. Reuse the verified bytes
+    // with private generation links instead of timing a full cold compile.
+    root = copyRuntimeRoot();
   });
   after(() => { if (root) rmSync(root, {recursive: true, force: true}); });
   it("exits within three seconds when its booted parent is SIGKILLed", async () => {

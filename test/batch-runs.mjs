@@ -208,7 +208,8 @@ describe("durable one-shot batch runs", function () {
     }
   });
 
-  it("imports and acknowledges a pending pre-predecessor outbox row after migration", async () => {
+  it("imports and acknowledges a pending pre-predecessor outbox row after migration", async function () {
+    this.timeout(30000); // real SQLite migrations and outbox import/acknowledgement
     const sourceDb = join(dir, "pending-upgrade.sqlite");
     const db = new DatabaseSync(sourceDb);
     const oldParent = `CREATE TABLE 'zosd_job_outbox' (mandt TEXT, intent_id TEXT PRIMARY KEY,

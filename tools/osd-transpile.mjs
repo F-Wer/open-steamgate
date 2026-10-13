@@ -125,6 +125,7 @@ export function walk(dir, out = []) {
     return out;
   }
   for (const entry of entries) {
+    if (entry === ".git") continue;
     const p = join(dir, entry);
     if (statSync(p).isDirectory()) {
       walk(p, out);

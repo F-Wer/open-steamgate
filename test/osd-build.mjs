@@ -2,7 +2,7 @@ import {expect} from "chai";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {execFileSync, spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
-import {join, resolve} from "node:path";
+import {dirname, join, relative, resolve} from "node:path";
 import {build, hashOf, liveHash, missingLibraries} from "../tools/osd-build.mjs";
 import {transpile} from "../tools/osd-transpile.mjs";
 
@@ -25,6 +25,17 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
   });
 
   afterEach(() => rmSync(root, {recursive: true, force: true}));
+
+  it("compiles source without entering transient Git metadata", async () => {
+    write("src/zmetadata.prog.abap", "REPORT zmetadata. WRITE 'ok'.\n");
+    mkdirSync(join(root, "src/.git"));
+    // A vanished metadata target must not abort discovery of real ABAP.
+    symlinkSync(join(root, "removed-index-lock"), join(root, "src/.git/index.lock"));
+    const config = {input_folder: ["src"], output_folder: "output", options: {unknownTypes: "compileError"}};
+    const made = await transpile({root, config});
+    expect(made.objects).to.equal(1);
+    expect(readFileSync(join(root, "output/zmetadata.prog.mjs"), "utf8")).to.include("abap.statements.write");
+  });
 
   it("CI restore verification accepts matching inputs and refuses a stale generation", async () => {
     write("src/zcl_archive.clas.abap", "CLASS zcl_archive DEFINITION PUBLIC. ENDCLASS. CLASS zcl_archive IMPLEMENTATION. ENDCLASS.\n");
@@ -152,9 +163,10 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
 
   // N3: the transpile is a library call. The CLI is the oracle, run over the
   // same tree into a folder of its own, and the two outputs are compared
-  // file by file. The transpiler numbers its temporaries as it goes, so
-  // that counter is the one thing allowed to differ.
-  it("transpiles through the library and writes what the CLI writes", async function () {
+  // file by file. The CLI now groups project objects in project/, whereas
+  // OSG keeps its flat module layout. Resolve map sources and normalize only
+  // those module paths and the transpiler temporary counter before comparing.
+  it("matches CLI code and source mappings across output layouts", async function () {
     this.timeout(120000);
     const CLASS = (name, method) => `CLASS ${name} DEFINITION PUBLIC CREATE PUBLIC.\n  PUBLIC SECTION.\n    METHODS ${method}.\nENDCLASS.\nCLASS ${name} IMPLEMENTATION.\n  METHOD ${method}.\n  ENDMETHOD.\nENDCLASS.\n`;
     write("src/zcl_one.clas.abap", CLASS("zcl_one", "first"));
@@ -168,11 +180,28 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     execFileSync(process.execPath, [cli], {cwd: root, stdio: "pipe"});
     const made = await transpile({root, config: {...config, output_folder: "output-lib"}});
     expect(made.objects).to.equal(3);
-    const list = (dir) => readdirSync(join(root, dir)).sort();
-    expect(list("output-lib")).to.deep.equal(list("output-cli"));
-    const norm = (dir, name) => readFileSync(join(root, dir, name), "utf8").replace(/unique\d+/g, "uniqueN");
+    const list = (dir) => readdirSync(join(root, dir), {recursive: true, withFileTypes: true})
+      .filter(entry => entry.isFile())
+      .map(entry => relative(join(root, dir), join(entry.parentPath, entry.name)).replaceAll("\\", "/")).sort();
+    const flat = name => name.replace(/^project\//, "");
+    expect(list("output-lib")).to.deep.equal(list("output-cli").map(flat).sort());
+    const norm = (dir, name) => {
+      const file = join(root, dir, name);
+      const text = readFileSync(file, "utf8");
+      if (name.endsWith(".map")) {
+        const map = JSON.parse(text);
+        map.sources = map.sources.map(source => resolve(dirname(file), decodeURIComponent(source)));
+        const sourceText = map.sources.map(source => readFileSync(source, "utf8"));
+        // CLI embeds source text; OSG maps point at the checkout's files.
+        if (map.sourcesContent) expect(map.sourcesContent).to.deep.equal(sourceText);
+        delete map.sourcesContent;
+        return map;
+      }
+      return text.replace(/unique\d+/g, "uniqueN")
+        .replace(/"\.\/project\//g, '"./').replace(/"\.\.\/_init\.mjs"/g, '"./_init.mjs"');
+    };
     for (const name of list("output-cli")) {
-      expect(norm("output-lib", name), name).to.equal(norm("output-cli", name));
+      expect(norm("output-lib", flat(name)), name).to.deep.equal(norm("output-cli", name));
     }
     // and the map names its source the way the CLI names it, relative to the output
     expect(readFileSync(join(root, "output-lib", "zcl_one.clas.mjs.map"), "utf8")).to.contain("../src/zcl_one.clas.abap");
