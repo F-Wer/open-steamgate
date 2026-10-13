@@ -46,6 +46,28 @@ describe("osgo unit CI entry point", function () {
     assert.deepEqual(snapshot(input), before);
     assert.equal(existsSync(resolve(result.buildDir)), false, "generated Go tree cleaned");
   });
+  it("runs character-set positions, fixed-width blanks and short circuits on both emitters", () => {
+    const name = "zcl_gogen_t_setpos";
+    for (const suffix of ["clas.abap", "clas.testclasses.abap"]) {
+      const file = `${name}.${suffix}`;
+      writeFileSync(join(input, file), readFileSync(join(root, "tools/gogen/testdata", file)));
+    }
+    const expected = ["POSITIONS", "TRAILING_BLANKS", "SHORT_CIRCUIT"];
+    const go = invoke(input, ["--json"]);
+    assert.equal(go.status, 0, go.stdout + go.stderr);
+    const goRows = JSON.parse(go.stdout).rows;
+    // IR-JS uses emit-js, not the separate abaplint/transpiler JS host.
+    const out = join(temp, "irjs");
+    const js = spawnSync(process.execPath, ["tools/gogen/unit-js.mjs", "--fixture", input, "--out", out],
+      {cwd: root, encoding: "utf8", timeout: 180000, maxBuffer: 5e6});
+    assert.equal(js.error, undefined, js.stderr);
+    assert.equal(js.status, 0, js.stdout + js.stderr);
+    const jsRows = JSON.parse(readFileSync(join(out, "results.json"), "utf8"));
+    for (const rows of [goRows, jsRows]) {
+      assert.deepEqual(rows.map((row) => row.method).sort(), [...expected].sort());
+      assert.deepEqual(rows.map((row) => row.status), expected.map(() => "SUCCESS"));
+    }
+  });
   for (const jobs of [1, 2]) it(`attributes fatal recursion to its own class with jobs=${jobs}`, () => {
     const fixtureDir = join(root, "tools/gogen/testdata-unit-crash");
     const before = snapshot(fixtureDir);

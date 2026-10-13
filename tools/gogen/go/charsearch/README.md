@@ -10,7 +10,8 @@ Matching is case-sensitive and retains trailing blanks. Runtime positions use
 UTF-16 units, including isolated surrogate halves.
 
 Reference: [SAP character comparisons](https://help.sap.com/docs/SUPPORT_CONTENT/abaptools/3362709374.html).
-This change follows documented semantics; it has not yet been measured on A4H.
+SAP behaviour, including surrogate-half membership, is unmeasured; measure on A4H.
+Go/JS parity does not establish SAP behaviour.
 
 Verification on 2026-10-12:
 
