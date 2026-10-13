@@ -18,8 +18,9 @@ The upstream comparison contains only `packages/`, `test/`, `package.json`
 and `package-lock.json`.
 
 open-abap-core remains at `84125c41c22e4c0d45e8037e8b60c691bb64de8d`.
-All commits remain local. The new transpiler SHA is unpublished; validation
-uses the exact local commit without changing the tracked repository URL.
+OSG commits remain local. The transpiler SHA is published on
+`oisee/transpiler` branch `local/osd-build-3b`; validation uses that exact
+commit from the tracked repository.
 
 ## Root cause
 
@@ -54,7 +55,9 @@ build compiled all 2,375 objects. The linked-fork build also compiled all
 - Keep the current main JSON refusal expectation in gogen semantics.
   Reapplying #720 restored an obsolete `Native_CONV_OUT_CONVERT` refusal;
   main now implements that JS conversion, so the precise remaining refusal
-  is `Native_JSON_PARSE`. The expected Go JSON values remain unchanged.
+  is `Native_JSON_PARSE`. The expected Go JSON array changes from
+  `3:3,2,1X` to `3:1X,2,3`: upstream open-abap-core #1262 adds `seq` to
+  the parent key so array members keep parse order.
 - The full Go host check exposed sourceless CDS metadata in its registry.
   `tools/gogen/osg-build.mjs` now excludes DDLS XML, while continuing to read
   CDS source for its name map and using the generated DDIC views, as the
@@ -207,15 +210,16 @@ namespace smoke. Latest-tip results use the `latest-` log prefix, including
 baseline argument; the corrected comparison passed against the unmodified
 fetched-main checkout. Earlier failed attempts remain separately labelled.
 
-All commits are local. Nothing was pushed.
+OSG commits are local. The transpiler commit is published on
+`oisee/transpiler` branch `local/osd-build-3b`.
 
 ## Corrected-base validation
 
 Validation uses OSG `6c5479e996636806ab38e6c036e0160a9df90064` and transpiler
 `f34e9bf4947daaf6464566b42b1e3ef1eaeb369c`. Earlier results above are historical.
-Fresh checkouts resolve the unpublished transpiler commit from the local clone;
-the tracked pin retains the public repository URL. All artifact consumers verify
-the newly built tree and its exact transpiler/parser identity before testing.
+Fresh checkouts resolve the published transpiler commit from
+`oisee/transpiler` branch `local/osd-build-3b` at the tracked public repository URL.
+All artifact consumers verify the newly built tree and its exact transpiler/parser identity before testing.
 
 | Check | Corrected-pin result |
 | --- | --- |

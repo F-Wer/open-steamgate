@@ -193,7 +193,8 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
         map.sources = map.sources.map(source => resolve(dirname(file), decodeURIComponent(source)));
         const sourceText = map.sources.map(source => readFileSync(source, "utf8"));
         // CLI embeds source text; OSG maps point at the checkout's files.
-        if (map.sourcesContent) expect(map.sourcesContent).to.deep.equal(sourceText);
+        if (dir === "output-cli") expect(map.sourcesContent).to.be.an("array");
+        if (dir === "output-cli" || map.sourcesContent) expect(map.sourcesContent).to.deep.equal(sourceText);
         delete map.sourcesContent;
         return map;
       }

@@ -1945,7 +1945,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-23-epoch-ms-overflow — `ZCL_STG_JSON=>EPOCH_MS` overflows `i` on a system, and the transpiler runtime lets it through
 
-- Status: `fixed in OSG` (EPOCH_MS computes in p); the transpiler runtime's missing range check is still open The transpiler runtime's `i` range check: abaplint/transpiler#1955 (open), pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-3b026-10-08b` 753230cb = the previous pin e2a459b1 plus its four commits.
+- Status: `fixed in OSG` (EPOCH_MS computes in p); the transpiler runtime's missing range check is still open The transpiler runtime's `i` range check: abaplint/transpiler#1955 (open), pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-08b` 753230cb = the previous pin e2a459b1 plus its four commits.
 - Discovery date: `2026-09-23`
 - Affected versions: `@abaplint/transpiler` 2.13.89 (npm) runtime; OSG's own `src/gateway/zcl_stg_json.clas.abap`
 - Affected ABAP statement, runtime API or adapter: an arithmetic expression of `i` operands embedded in a string template, `rv_ms = |{ ( lv_days * 86400 + lv_seconds ) * 1000 }|` in `EPOCH_MS`, which every `Edm.DateTime` of a JSON answer goes through
@@ -2172,7 +2172,7 @@ for `zosd_status_app`, which has been deployed for a day.
 
 ### ANOMALY-2026-09-29-runtime-in-options — `x IN range` evaluates only I EQ, E EQ and I CP, and E EQ alone decides
 
-- Status: `fixed` (2026-09-30: abaplint/transpiler#1928, merged upstream as ac55899212; this tree pins `oisee/transpiler` `local/osd-build-3b026-09-30` at `085ab4a9`, upstream main plus two local fixes, until the fix is on npm)
+- Status: `fixed` (2026-09-30: abaplint/transpiler#1928, merged upstream as ac55899212; this tree pins `oisee/transpiler` `local/osd-build-2026-09-30` at `085ab4a9`, upstream main plus two local fixes, until the fix is on npm)
 - Discovery date: `2026-09-29`
 - Affected versions: `@abaplint/runtime 2.13.89` (`build/src/compare/in.js`), as pinned in this tree
 - Affected ABAP statement, runtime API or adapter: the logical expression `dobj IN range_tab` outside Open SQL (`IF`, `CHECK`, `LOOP ... WHERE`); `SELECT ... WHERE f IN range` goes through Open SQL and is not affected
@@ -2869,7 +2869,7 @@ point approximation and is format-checked before masking in wire tests.
 
 ### ANOMALY-2026-09-25-zip-read-int4 — open-abap-core's `CL_ABAP_ZIP=>LOAD` overflows `i` in `LCL_STREAM=>READ_INT4`, and the transpiler runtime lets it through
 
-- Status: `open` The transpiler runtime's `i` range check: abaplint/transpiler#1955 (open), pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-3b026-10-08b` 753230cb = the previous pin e2a459b1 plus its four commits.
+- Status: `open` The transpiler runtime's `i` range check: abaplint/transpiler#1955 (open), pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-08b` 753230cb = the previous pin e2a459b1 plus its four commits.
 - Discovery date: `2026-09-25`
 - Affected versions: open-abap-core (`src/abap/cl_abap_zip.clas.locals_imp.abap`, as cloned in `.local/lars/open-abap-core`); `@abaplint/runtime` 2.13.89
 - Affected ABAP statement, runtime API or adapter: `LCL_STREAM=>READ_INT4` (and `READ_INT2`'s pattern): `DO 4 TIMES. ... lv_factor = lv_factor * 256. ENDDO.`, which after the fourth byte computes 256 ** 4 into an `i`; `CL_ABAP_ZIP=>LOAD` calls it for every header
@@ -2918,7 +2918,7 @@ point approximation and is format-checked before masking in wire tests.
 
 ### ANOMALY-2026-09-30-dataset-not-supported — every DATASET statement throws "not supported" in the transpiler
 
-- Status: `pinned locally; upstream: backlog` (the hook is on `oisee/transpiler` `local/osd-build-3b026-09-30` at `ddb0a993`; the same change as a single commit on branch `dataset-hook` off abaplint/transpiler main passed the critic gate and waits for the maintainer's capacity)
+- Status: `pinned locally; upstream: backlog` (the hook is on `oisee/transpiler` `local/osd-build-2026-09-30` at `ddb0a993`; the same change as a single commit on branch `dataset-hook` off abaplint/transpiler main passed the critic gate and waits for the maintainer's capacity)
 - Discovery date: `2026-09-30`
 - Affected versions: `@abaplint/transpiler` and `@abaplint/runtime` up to 2.13.93 on npm and abaplint/transpiler main at dd83da9
 - Affected ABAP statement, runtime API or adapter: `OPEN DATASET`, `READ DATASET`, `TRANSFER`, `CLOSE DATASET`, `DELETE DATASET`, `GET DATASET`, `SET DATASET` (TRUNCATE and SORT are unchanged)
@@ -3142,7 +3142,7 @@ point approximation and is format-checked before masking in wire tests.
 
 ### ANOMALY-2026-09-30-fae-one-select-per-row — FOR ALL ENTRIES sends one SELECT per row of the driving table
 
-- Status: `fixed here, pinned locally` (`oisee/transpiler` e97e82c7 on branch `local/osd-build-3b026-10-01`: one SELECT per block of 50 driving rows, each row's condition in parentheses under OR; before: open, recorded)
+- Status: `fixed here, pinned locally` (`oisee/transpiler` e97e82c7 on branch `local/osd-build-2026-10-01`: one SELECT per block of 50 driving rows, each row's condition in parentheses under OR; before: open, recorded)
 - Discovery date: `2026-09-30`
 - Affected versions: `@abaplint/transpiler` 2.13.93 and abaplint/transpiler main at dd83da9 (`packages/transpiler/src/statements/select.ts`, the `SQLForAllEntries` branch), as pinned in this tree (`oisee/transpiler` at `ddb0a993`)
 - Affected ABAP statement, runtime API or adapter: `SELECT ... FOR ALL ENTRIES IN itab WHERE ...`
@@ -3602,7 +3602,7 @@ point approximation and is format-checked before masking in wire tests.
 
 ### ANOMALY-2026-10-02-get-run-time-units — GET RUN TIME FIELD returns milliseconds since the previous call, not microseconds since the first
 
-- Status: `fixed upstream: abaplint/transpiler#1956 (merged 2026-10-03), pinned 2026-10-07` (`libs.lock.json` transpiler oisee/transpiler `local/osd-build-3b026-10-07` 2ff0e801 = the previous pin plus a cherry-pick of #1956; microseconds since the first call, monotonic, per ABAP instance; a host resets the origin with `context.runTime = undefined`)
+- Status: `fixed upstream: abaplint/transpiler#1956 (merged 2026-10-03), pinned 2026-10-07` (`libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-07` 2ff0e801 = the previous pin plus a cherry-pick of #1956; microseconds since the first call, monotonic, per ABAP instance; a host resets the origin with `context.runTime = undefined`)
 - Discovery date: `2026-10-02`
 - Affected versions: OSD `vscode-v0.6.1511` (JS runtime)
 - Affected ABAP statement, runtime API or adapter: `GET RUN TIME FIELD lv_t0. … GET RUN TIME FIELD lv_t1. lv_d = lv_t1 - lv_t0.`
@@ -3960,12 +3960,12 @@ Not an anomaly, recorded for porting: on 7.58, `FIND ... REGEX` (POSIX) raises a
 - Actual local behaviour: OSG-JS gave false for every initial reference and threw "Right-hand side of 'instanceof' is not an object" for `object`.
 - Workaround: none needed after the pin; abapiti's generator also writes `x IS BOUND AND x IS INSTANCE OF c`.
 - Regression: abaplint/transpiler `test/operators/instance_of.ts` (18 cases, 16 fail before the fix), carried by the pin.
-- Upstream: https://github.com/abaplint/transpiler/pull/1975 (branch inside the repository; CI and Regression green, 64/64 rows); pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-3b026-10-08` e2a459b1 = the previous pin 2ff0e801 plus a cherry-pick of #1975.
+- Upstream: https://github.com/abaplint/transpiler/pull/1975 (branch inside the repository; CI and Regression green, 64/64 rows); pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-08` e2a459b1 = the previous pin 2ff0e801 plus a cherry-pick of #1975.
 - Upstream version containing a fix: unknown.
 
 ### ANOMALY-2026-10-08-zip-read-int4 - cl_abap_zip's read_int4 overflows type i, and only the Go runtime notices
 
-- Status: `fixed upstream` (open-abap/open-abap-core#1282, ce4ddaad, 2026-10-02); pinned 2026-10-08 The transpiler runtime's `i` range check: abaplint/transpiler#1955 (open), pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-3b026-10-08b` 753230cb = the previous pin e2a459b1 plus its four commits.
+- Status: `fixed upstream` (open-abap/open-abap-core#1282, ce4ddaad, 2026-10-02); pinned 2026-10-08 The transpiler runtime's `i` range check: abaplint/transpiler#1955 (open), pinned 2026-10-08 as `libs.lock.json` transpiler oisee/transpiler `local/osd-build-2026-10-08b` 753230cb = the previous pin e2a459b1 plus its four commits.
 - Discovery: abapiti's case 033, `cl_abap_zip=>load` raising `CX_SY_ARITHMETIC_OVERFLOW` on osgo for an ordinary 50-file ZIP, while OSG-JS loaded it.
 - Affected path: open-abap-core `lcl_stream=>read_int4` (`cl_abap_zip.clas.locals_imp.abap`) before #1282: `rv_int = rv_int + lv_val * lv_factor`, then `lv_factor = lv_factor * 256`, all in `i`; the factor reaches 2^32 after the fourth byte for any input.
 - Expected SAP behaviour (7.58): the same method body dumps `COMPUTE_INT_TIMES_OVERFLOW` for both `01020304` and `01020380` (measured on A4H by abapiti on 2026-10-08 in a throwaway package, removed after). SAP's own `cl_abap_zip` is not affected; this is open-abap-core's implementation.

@@ -22,15 +22,9 @@ checkout() {
 }
 npm ci --include=dev --include=optional
 eval "$(node tools/osd-lock.mjs github-env)"
+export OSD_TRANSPILER_REPO OSD_TRANSPILER_REF
 checkout "$OSD_TRANSPILER_REPO" "$OSD_TRANSPILER_REF" ../transpiler
-npm --prefix ../transpiler install --ignore-scripts --no-audit --no-fund
-for package in runtime transpiler extras cli; do
-  npm --prefix "../transpiler/packages/$package" install --no-audit --no-fund
-done
-for package in runtime transpiler extras cli; do
-  npm --prefix "../transpiler/packages/$package" run compile
-done
-chmod +x ../transpiler/packages/cli/abap_transpile
+bash tools/osd-ci-transpiler-build.sh rebuild
 node tools/osd-link.mjs transpiler packages/transpiler
 node tools/osd-link.mjs transpiler-cli packages/cli
 node tools/osd-link.mjs runtime packages/runtime
