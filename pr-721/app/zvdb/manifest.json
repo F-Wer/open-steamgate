@@ -1,0 +1,18 @@
+{
+  "_version": "1.59.0",
+  "sap.app": {
+    "id": "osd.zvdb",
+    "type": "application",
+    "title": "Vector Workbench",
+    "description": "Compare portable ABAP and database-native vector search",
+    "applicationVersion": {"version": "0.1.0"},
+    "dataSources": {
+      "main": {"uri": "../../sap/opu/odata/sap/ZVDB_100_SRV/", "type": "OData", "settings": {"odataVersion": "2.0"}}
+    }
+  },
+  "sap.ui": {"technology": "UI5", "deviceTypes": {"desktop": true, "tablet": true, "phone": true}},
+  "sap.ui5": {
+    "dependencies": {"minUI5Version": "1.120.0", "libs": {"sap.m": {}, "sap.ui.core": {}, "sap.ui.layout": {}}},
+    "models": {"": {"dataSource": "main", "settings": {"useBatch": false, "defaultCountMode": "Inline"}}}
+  }
+}
