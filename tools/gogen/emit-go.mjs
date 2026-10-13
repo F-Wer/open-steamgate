@@ -4,6 +4,7 @@ import {localConstant, localConstantDeclarations} from "./emit-local-constants.m
 import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
+import {sinkLocals, generatedBindings} from "./sink-locals.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
 import {emitBuiltinGo} from "./emit-builtins.mjs";
@@ -968,10 +969,8 @@ function method(cls, m) {
   // 00 bytes, d, t, n, p) starts at the type's initial value, as the JS
   // emitter's locals do; before (ultra/packs, ZCL_GOGEN_T_BYTECAT) an x never
   // assigned read as zero bytes long
-  for (const l of m.locals) {
-    const z = OWNERSHIP.declarations.has(l) && l.type.k === "x" ? `${ownedType(l)}{}` : zero(l.type);
-    lines.push(isGoZero(z) ? `\tvar ${ident(l.name)} ${ownedType(l)}` : `\tvar ${ident(l.name)} ${ownedType(l)} = ${z}`, `\t_ = ${ident(l.name)}`);
-  }
+  const sunkLocals = sinkLocals(m);
+  const localIndex = lines.length;
   // the RETURNING parameter starts at its initial value too (the JS emitter's
   // let r = zero(t)); Go's named result starts at Go's zero value
   if (m.returning && !isGoZero(zero(m.returning.type))) lines.push(`\t${ident(m.returning.name)} = ${zero(m.returning.type)}`);
@@ -988,7 +987,7 @@ function method(cls, m) {
   collectStatics(m.body);
   if (staticStores.size) lines.push("\t// The store never replaces class pointers; cache them for this method call.");
   for (const [owner, store] of staticStores) lines.push(`\t${store} := St_${typeName(owner)}(s)`);
-  const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m, staticStores};
+  const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m, staticStores, sunkLocals, sinkSites: []};
   const valueOutputs = m.params.filter((p) => p.dir !== "importing" && p.byValue);
   if (valueOutputs.length) {
     ctx.valueOutputs = new Set(valueOutputs.map((p) => p.name));
@@ -1003,8 +1002,23 @@ function method(cls, m) {
     for (const p of valueOutputs) lines.push(`\t*${ident(p.name)} = ${copied(`${ident(p.name)}_value`, p.type)}`);
   } else lines.push(...stmtList(m.body, ctx, 1));
   lines.push("\treturn", "}");
-  if (LINES && m.pos) lines.push(RESET);
-  return lines;
+  // Inspect actual generated Go before adding any ABAP local declarations.
+  // Method-wide bindings deliberately include descendants and enclosing
+  // constructs: sinking must not change which slot generated code refers to.
+  const bindings = ctx.sinkSites.length ? generatedBindings(lines.join("\n")) : new Set();
+  const sunk = new Set();
+  for (const site of ctx.sinkSites) {
+    site.locals = site.locals.filter(l => bindings && !bindings.has(ident(l.name)));
+    for (const l of site.locals) sunk.add(l);
+  }
+  lines.splice(localIndex, 0, ...m.locals.filter(l => !sunk.has(l)).flatMap(l => localDeclaration(l, 1)));
+  const rendered = lines.flatMap(line => {
+    if (!line.startsWith("\u0000sink:")) return [line];
+    const site = ctx.sinkSites[Number(line.slice(6))];
+    return site.locals.flatMap(l => localDeclaration(l, site.depth));
+  });
+  if (LINES && m.pos) rendered.push(RESET);
+  return rendered;
 }
 
 function hostMethod(cls, m) {
@@ -1313,8 +1327,18 @@ const RESET = "\u0000reset-position";
 // GOGEN_NOLINE=1 leaves the directives out, for debugging the emitter itself
 const LINES = !process.env.GOGEN_NOLINE;
 
+function localDeclaration(l, d) {
+  const z = OWNERSHIP.declarations.has(l) && l.type.k === "x" ? `${ownedType(l)}{}` : zero(l.type);
+  return [isGoZero(z) ? `${tab(d)}var ${ident(l.name)} ${ownedType(l)}` : `${tab(d)}var ${ident(l.name)} ${ownedType(l)} = ${z}`, `${tab(d)}_ = ${ident(l.name)}`];
+}
+
 function stmtList(body, ctx, d) {
   const lines = [];
+  const locals = ctx.sunkLocals?.get(body);
+  if (locals?.length) {
+    lines.push(`\u0000sink:${ctx.sinkSites.length}`);
+    ctx.sinkSites.push({locals, depth: d});
+  }
   for (let i = 0; i < body.length; i++) {
     const st = body[i], next = body[i + 1];
     if (movePair(st, next, ctx, body[i - 1])) {

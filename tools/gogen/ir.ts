@@ -262,6 +262,7 @@ export interface Method {
   readonly returning?: Field | null;
   readonly static?: boolean; readonly private?: boolean; readonly abstract?: boolean;
   readonly locals?: readonly Field[]; readonly fieldSymbols?: readonly Field[];
+  readonly sinkUnsafe?: boolean; // dynamic names or opaque source: preserve method lifetime
   readonly body?: readonly Stmt[]; readonly calls?: readonly string[]; readonly pos?: Position;
   readonly unsupported?: string; readonly fm?: boolean; readonly dropped?: boolean; readonly amcProgram?: string;
 }
