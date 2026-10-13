@@ -1732,7 +1732,7 @@ export function ConcatLinesOf(t, sep) {
 const PCRE_REFUSED = [[/\(\?=/, "a lookahead (?=...)"], [/\(\?!/, "a negative lookahead (?!...)"], [/\(\?<=/, "a lookbehind (?<=...)"],
   [/\(\?<!/, "a negative lookbehind (?<!...)"], [/\(\?>/, "an atomic group (?>...)"], [/\\[1-9]|\\g\{?-?\d|\\k[<{']/, "a backreference"],
   [/[*+?}]\+/, "a possessive quantifier"], [/\\K/, "\\K"], [/\\G/, "\\G"], [/\\Z/, "\\Z"], [/\(\?(R|\d|&|P>|\()/, "a recursion or a conditional"],
-  [/\(\*/, "a verb (*...)"], [/\\[cexoNXRhHvV]/, "an escape RE2 reads differently or not at all"]];
+  [/\(\*/, "a verb (*...)"], [/\\[ceoNXRhHvV]/, "an escape RE2 reads differently or not at all"]];
 export function FindResults(s, p, kind, icase, all) {
   if (p === "") notCompiled("FIND ... RESULTS: an empty pattern is not measured");
   if (kind === "" && !icase) {
@@ -1753,11 +1753,14 @@ export function FindResults(s, p, kind, icase, all) {
     p = extendedPCRE(p, anchors);
     const syntax = p.replace(/\\./gs, "_").replace(/\[(?:\\.|[^\]\\])*\]/g, "_");
     if (/\(\?[A-Za-z-]/.test(syntax)) notCompiled("FIND PCRE: an unsupported inline flag group: " + p);
-    const plain = p.replaceAll("\\\\", "");
+    // Hide rewritten scalar braces from the possessive-quantifier refusal.
+    const plain = p.replaceAll("\\\\", "").replace(/\\x\{[0-9a-f]+\}/g, "_");
     for (const [r, what] of PCRE_REFUSED) if (r.test(plain)) notCompiled(`FIND PCRE: ${what} is not in Go's RE2: ${p}`);
+    if (/\\u/.test(plain)) notCompiled("FIND PCRE: RE2 does not read this pattern (error parsing regexp: invalid escape sequence: `\\u`); whether PCRE does is not measured");
     if (/[\n\r]/.test(s) && (!anchors.length || /[\^$.]/.test(syntax))) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
     // Translate after validating user syntax; \z must reject a final newline too.
     for (const [i, anchor] of anchors.reverse()) p = p.slice(0, i) + (anchor === "A" ? "^" : "(?![\\s\\S])") + p.slice(i + 2);
+    p = p.replace(/\\\\|\\x\{[0-9a-f]+\}/g, e => e.startsWith("\\x") ? "\\u" + e.slice(2) : e);
     try { re = new RegExp(p, (icase ? "i" : "") + "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
   } else {
     const pat = kind === "" ? p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : p;
@@ -1880,6 +1883,27 @@ function pcreAll(s, p, icase, all) {
   });
 }
 
+// Hex escapes are Unicode scalars; short forms and bare refusals are unmeasured; measure on A4H.
+// Scan before extended-mode stripping, retaining escaped backslashes and classes.
+function pcreHex(p, x) {
+  let end = x + 1, value = 0;
+  const braced = p[end] === "{";
+  if (braced) end++;
+  const start = end;
+  while (end < p.length && /[0-9a-f]/i.test(p[end]) && (braced || end - start < 2)) {
+    if (value <= 0x10ffff) value = value * 16 + parseInt(p[end], 16);
+    end++;
+  }
+  if (braced) {
+    if (end === start || p[end] !== "}") notCompiled("FIND PCRE: a malformed braced hex escape");
+    end++;
+  }
+  if (!braced && end === start) notCompiled("FIND PCRE: \\x without hex digits");
+  if (value > 0x10ffff) notCompiled("FIND PCRE: a hex escape above U+10FFFF");
+  if (value >= 0xd800 && value <= 0xdfff) notCompiled("FIND PCRE: a surrogate hex escape (U+D800-U+DFFF)");
+  return ["\\x{" + value.toString(16) + "}", end - 1]; // Validate before JS translation.
+}
+
 // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
 function extendedPCRE(p, anchors) {
   for (const escape of ["\\Q", "\\E"]) {
@@ -1906,6 +1930,12 @@ function extendedPCRE(p, anchors) {
     }
     if (c === "\\" && i + 1 < p.length) {
       const next = p[++i];
+      if (next === "x") {
+        const [hex, end] = pcreHex(p, i);
+        out += hex;
+        i = end;
+        continue;
+      }
       if (next === "A" || next === "z") {
         if (inClass) notCompiled("FIND PCRE: unsupported anchor escape in character class \\" + next);
         anchors.push([out.length, next]);

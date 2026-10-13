@@ -273,6 +273,8 @@ const EXPECT = {
   // A4H is not run for these regressions.
   // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
   // Unmeasured: Round 2 literal brackets, POSIX classes, and UTF-16 fixed-field padding.
+  // Hex escape and UTF-16 spans: unmeasured; measure on A4H.
+  ZCL_GOGEN_T_PCREHEX: "nbsp:0/1/1 class:0/1/1 ascii:0/1/1 short:0/1/1 nul:0/1/1 bmp:0/1/1 astral:0/3/2 literal:0/1/4 count:0/2 results:0/3/2 first:0/Xa😀 all:0/XaY",
   ZCL_GOGEN_T_PCREPLAIN: "lazy:2/3/0 short:2/1 greedy:2/2 ic:2/3/aab all:2/0 countic:2/0 miss:2/3/aab/4 replace:xxaa!/0 replaceall:XXX/0 table:2/2/3/0 emoji:2/1/a scalar:0/2/😀 res:0/2 res:2/1 regex:2/1 rxres:0/2 rxres:2/1 emreplace:😀a! rxreplace:😀a! extended:2/0 escaped:3/0 class:1/0 noextended:3/0 literals:\\$ab/ab/ negclass:4 classletter:1/0 initialbracket:1/0 posix:3/0 fixedpcre:😀a/4 fixedregex:😀a/4 padded:😀X/0",
   // Unmeasured: unsupported PCRE replacement escapes must refuse, never lose the backslash.
   ZCL_GOGEN_T_PCREESCAPE: {Go: "ERROR NOT_COMPILED in REPLACE PCRE: unsupported replacement escape \\U at zcl_gogen_t_pcreescape.clas.abap:9", JS: "ERROR NOT_COMPILED in REPLACE PCRE: unsupported replacement escape \\U"},
