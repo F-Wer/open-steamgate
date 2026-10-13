@@ -233,7 +233,7 @@ CLASS zcl_gogen_shadow_test DEFINITION PUBLIC FINAL CREATE PUBLIC.
 ENDCLASS.
 CLASS zcl_gogen_shadow_test IMPLEMENTATION.
   METHOD run.
-    IF charsearch CS 'b'.
+    IF charsearch CS 'b' OR charsearch CO 'ab' OR charsearch CA 'b'.
       rv = abap_true.
     ENDIF.
   ENDMETHOD.

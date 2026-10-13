@@ -7,10 +7,10 @@ export function emitCondition(c, ctx, {expr, zero, place, ident, cond}) {
       const n = ctx.loop++;
       return `(() => { const rows${n} = ${expr(c.range, ctx)}; let hasI${n} = false, hit${n} = false; for (const r${n} of rows${n}) { let match${n}; if (r${n}.Option === "EQ") match${n} = ${expr(c.value, ctx)} === r${n}.Low; else if (r${n}.Option === "BT") match${n} = ${expr(c.value, ctx)} >= r${n}.Low && ${expr(c.value, ctx)} <= r${n}.High; else throw new abap.AbapError("NOT_COMPILED", "IN range: selection option other than EQ or BT"); if (r${n}.Sign === "I") { hasI${n} = true; if (match${n}) hit${n} = true; } else if (r${n}.Sign === "E") { if (match${n}) return false; } else throw new abap.AbapError("NOT_COMPILED", "IN range: selection sign other than I or E"); } return !hasI${n} || hit${n}; })()`;
     }
-    case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "co": return `abap.COWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cs": return `abap.CSWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.csubject})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat}, ${!!c.csubject})`;
-    case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "ca": return `abap.CAWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
       if ([c.type, c.l.type, c.r.type].some(t => t?.k === "dref")) return "abap.DataRefCompare()";
       if (c.l.e === "unwrap_chars" || c.r.e === "unwrap_chars") {

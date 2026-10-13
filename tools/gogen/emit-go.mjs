@@ -2439,10 +2439,10 @@ function cond(c, ctx) {
       // field names through ident(): capitalised only in a layered build
       return `func() bool { rows${n} := ${expr(c.range, ctx)}; hasI${n}, hit${n} := false, false; for _, r${n} := range rows${n} { match${n} := false; switch r${n}.${ident("OPTION")} { case "EQ": match${n} = ${expr(c.value, ctx)} == r${n}.${ident("LOW")}; case "BT": match${n} = ${expr(c.value, ctx)} >= r${n}.${ident("LOW")} && ${expr(c.value, ctx)} <= r${n}.${ident("HIGH")}; default: panic(abap.NotCompiled("IN range", "selection option other than EQ or BT")) }; if r${n}.${ident("SIGN")} == "I" { hasI${n} = true; if match${n} { hit${n} = true } } else if r${n}.${ident("SIGN")} == "E" { if match${n} { return false } } else { panic(abap.NotCompiled("IN range", "selection sign other than I or E")) } }; return !hasI${n} || hit${n} }()`;
     }
-    case "co": return `abap.CO(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "co": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.OnlyWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cs": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.WithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.csubject})`;
     case "cp": return `abap.CP(${expr(c.l, ctx)}, ${expr(c.r, ctx)}, ${!!c.cpat}, ${!!c.csubject})`;
-    case "ca": return `abap.CA(${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
+    case "ca": HELPER_IMPORTS.add("charsearch"); return `hCharsearch.AnyWithPos(s, ${expr(c.l, ctx)}, ${expr(c.r, ctx)})`;
     case "cmp":
       // a generic operand (frontend compareValues, unwrap_chars): the pair
       // decides the comparison type, so both go to abap.CmpData as data

@@ -391,6 +391,21 @@ export function DateAdd(date, days) {
   if (out < "15821015" || out > "99991231") throw notCompiled("date arithmetic: a result outside the measured range");
   return out;
 }
+// CO/CN and CA/NA share offsets even when the frontend negates the result.
+function characterSetWithPos(s, a, b, wantMember) {
+  const mask = new Set();
+  for (let i = 0; i < b.length; i++) mask.add(b.charCodeAt(i));
+  for (let i = 0; i < a.length; i++) {
+    if (mask.has(a.charCodeAt(i)) === wantMember) {
+      s.sy.fdpos = i;
+      return wantMember;
+    }
+  }
+  s.sy.fdpos = a.length;
+  return !wantMember;
+}
+export const COWithPos = (s, a, b) => characterSetWithPos(s, a, b, false);
+export const CAWithPos = (s, a, b) => characterSetWithPos(s, a, b, true);
 export function CSWithPos(s, a, b, fixed = false) {
   if ((a === "" || (fixed && a.replace(/ +$/, "") === "")) && b !== "") {
     s.sy.fdpos = a.length;
