@@ -183,10 +183,11 @@ func (goldenCompiler) Available(context.Context) error { return nil }
 func (goldenCompiler) Check(_ context.Context, in CompilerInput) ([]Issue, error) {
 	if in.Type == "CLAS" && in.Name == "ZCL_BAD" {
 		return []Issue{{OBJ_TYPE: "CLAS", OBJ_NAME: "ZCL_BAD", Severity: "E", LINE: 3, COL: 10,
+			URI: "/sap/bc/adt/oo/classes/zcl_bad/source/main",
 			MESSAGE: `Method name "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" is too long, maximum length is 30 characters`}}, nil
 	}
 	if in.Name == "ZCL_PORTABLE" && in.Include == "main" {
-		return []Issue{{Severity: "W", LINE: 7, COL: 1, MESSAGE: "Portable AMDP: not supported on sqlite: CAST to INTEGER cannot raise in SQLite: it returns 0 where HANA and DuckDB raise"}}, nil
+		return []Issue{{Severity: "W", LINE: 7, COL: 1, URI: "/sap/bc/adt/oo/classes/zcl_portable/source/main", MESSAGE: "Portable AMDP: not supported on sqlite: CAST to INTEGER cannot raise in SQLite: it returns 0 where HANA and DuckDB raise"}}, nil
 	}
 
 	return nil, nil

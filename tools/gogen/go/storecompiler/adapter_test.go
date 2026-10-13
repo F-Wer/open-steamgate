@@ -36,7 +36,11 @@ func TestMain(m *testing.M) {
 				response["limits"] = compiler.Limits{MaxSnapshotBytes: 1024, MaxConcurrentRequests: 1}
 			} else {
 				if request.Snapshot.CheckMode == "checkrun" {
-					raw, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "test", "fixtures", "osgo-store", "checkrun-report-golden.json"))
+					path := os.Getenv("STORECOMPILER_REPORT_FIXTURE")
+					if path == "" {
+						path = filepath.Join("..", "..", "..", "..", "test", "fixtures", "osgo-store", "checkrun-report-golden.json")
+					}
+					raw, err := os.ReadFile(path)
 					if err != nil {
 						panic(err)
 					}

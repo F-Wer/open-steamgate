@@ -7,154 +7,22 @@
           "severity": "E",
           "line": 1,
           "column": 1,
-          "message": "missing coordinates <token> & value"
+          "message": "missing coordinates <token> & value",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
         },
         {
           "severity": "E",
           "line": 1,
           "column": 1,
-          "message": "null coordinates"
+          "message": "null coordinates",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
         },
         {
           "severity": "",
           "line": 1,
           "column": 1,
-          "message": "empty severity"
-        },
-        {
-          "severity": "W",
-          "line": 0,
-          "column": 0,
-          "message": "explicit zero"
-        },
-        {
-          "severity": "I",
-          "line": 2,
-          "column": 3,
-          "message": "include URI"
-        },
-        {
-          "severity": "W",
-          "line": 4,
-          "column": 5,
-          "message": "fallback URI"
-        }
-      ]
-    },
-    "diagnostics": [
-      {
-        "severity": "E",
-        "code": "ABAP_SYNTAX",
-        "text": "missing coordinates <token> & value",
-        "rule": "",
-        "object": {
-          "type": "PROG",
-          "name": "ZREPORT"
-        },
-        "include": "",
-        "line": 1,
-        "col": 0,
-        "endLine": 1,
-        "endCol": 0
-      },
-      {
-        "severity": "E",
-        "code": "ABAP_SYNTAX",
-        "text": "null coordinates",
-        "rule": "",
-        "object": {
-          "type": "PROG",
-          "name": "ZREPORT"
-        },
-        "include": "",
-        "line": 1,
-        "col": 0,
-        "endLine": 1,
-        "endCol": 0
-      },
-      {
-        "severity": "",
-        "code": "ABAP_SYNTAX",
-        "text": "empty severity",
-        "rule": "",
-        "object": {
-          "type": "PROG",
-          "name": "ZREPORT"
-        },
-        "include": "",
-        "line": 1,
-        "col": 0,
-        "endLine": 1,
-        "endCol": 0
-      },
-      {
-        "severity": "W",
-        "code": "ABAP_SYNTAX",
-        "text": "explicit zero",
-        "rule": "",
-        "object": {
-          "type": "PROG",
-          "name": "ZREPORT"
-        },
-        "include": "",
-        "line": 0,
-        "col": -1,
-        "endLine": 0,
-        "endCol": 0
-      },
-      {
-        "severity": "I",
-        "code": "ABAP_SYNTAX",
-        "text": "include URI",
-        "rule": "",
-        "object": {
-          "type": "PROG",
-          "name": "ZREPORT"
-        },
-        "include": "",
-        "line": 2,
-        "col": 2,
-        "endLine": 2,
-        "endCol": 2
-      },
-      {
-        "severity": "W",
-        "code": "ABAP_SYNTAX",
-        "text": "fallback URI",
-        "rule": "",
-        "object": {
-          "type": "PROG",
-          "name": "ZREPORT"
-        },
-        "include": "",
-        "line": 4,
-        "col": 4,
-        "endLine": 4,
-        "endCol": 4
-      }
-    ]
-  },
-  "warm": {
-    "report": {
-      "status": "processed",
-      "issues": [
-        {
-          "severity": "E",
-          "line": 1,
-          "column": 1,
-          "message": "missing coordinates <token> & value"
-        },
-        {
-          "severity": "E",
-          "line": 1,
-          "column": 1,
-          "message": "null coordinates"
-        },
-        {
-          "severity": "",
-          "line": 1,
-          "column": 1,
-          "message": "empty severity"
+          "message": "empty severity",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
         },
         {
           "severity": "W",
@@ -168,7 +36,7 @@
           "line": 2,
           "column": 3,
           "message": "include URI",
-          "uri": "/sap/bc/adt/oo/classes/zclass/includes/definitions/source/main"
+          "uri": "/sap/bc/adt/oo/classes/zclass/includes/definitions"
         },
         {
           "severity": "W",
@@ -181,6 +49,7 @@
     },
     "diagnostics": [
       {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
         "severity": "E",
         "code": "ABAP_SYNTAX",
         "text": "missing coordinates <token> & value",
@@ -196,6 +65,7 @@
         "endCol": 0
       },
       {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
         "severity": "E",
         "code": "ABAP_SYNTAX",
         "text": "null coordinates",
@@ -211,6 +81,7 @@
         "endCol": 0
       },
       {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
         "severity": "",
         "code": "ABAP_SYNTAX",
         "text": "empty severity",
@@ -242,7 +113,154 @@
         "endCol": 0
       },
       {
-        "uri": "/sap/bc/adt/oo/classes/zclass/includes/definitions/source/main",
+        "uri": "/sap/bc/adt/oo/classes/zclass/includes/definitions",
+        "severity": "I",
+        "code": "ABAP_SYNTAX",
+        "text": "include URI",
+        "rule": "",
+        "object": {
+          "type": "PROG",
+          "name": "ZREPORT"
+        },
+        "include": "",
+        "line": 2,
+        "col": 2,
+        "endLine": 2,
+        "endCol": 2
+      },
+      {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
+        "severity": "W",
+        "code": "ABAP_SYNTAX",
+        "text": "fallback URI",
+        "rule": "",
+        "object": {
+          "type": "PROG",
+          "name": "ZREPORT"
+        },
+        "include": "",
+        "line": 4,
+        "col": 4,
+        "endLine": 4,
+        "endCol": 4
+      }
+    ]
+  },
+  "warm": {
+    "report": {
+      "status": "processed",
+      "issues": [
+        {
+          "severity": "E",
+          "line": 1,
+          "column": 1,
+          "message": "missing coordinates <token> & value",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
+        },
+        {
+          "severity": "E",
+          "line": 1,
+          "column": 1,
+          "message": "null coordinates",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
+        },
+        {
+          "severity": "",
+          "line": 1,
+          "column": 1,
+          "message": "empty severity",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
+        },
+        {
+          "severity": "W",
+          "line": 0,
+          "column": 0,
+          "message": "explicit zero",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
+        },
+        {
+          "severity": "I",
+          "line": 2,
+          "column": 3,
+          "message": "include URI",
+          "uri": "/sap/bc/adt/oo/classes/zclass/includes/definitions"
+        },
+        {
+          "severity": "W",
+          "line": 4,
+          "column": 5,
+          "message": "fallback URI",
+          "uri": "/sap/bc/adt/programs/programs/zreport/source/main"
+        }
+      ]
+    },
+    "diagnostics": [
+      {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
+        "severity": "E",
+        "code": "ABAP_SYNTAX",
+        "text": "missing coordinates <token> & value",
+        "rule": "",
+        "object": {
+          "type": "PROG",
+          "name": "ZREPORT"
+        },
+        "include": "",
+        "line": 1,
+        "col": 0,
+        "endLine": 1,
+        "endCol": 0
+      },
+      {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
+        "severity": "E",
+        "code": "ABAP_SYNTAX",
+        "text": "null coordinates",
+        "rule": "",
+        "object": {
+          "type": "PROG",
+          "name": "ZREPORT"
+        },
+        "include": "",
+        "line": 1,
+        "col": 0,
+        "endLine": 1,
+        "endCol": 0
+      },
+      {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
+        "severity": "",
+        "code": "ABAP_SYNTAX",
+        "text": "empty severity",
+        "rule": "",
+        "object": {
+          "type": "PROG",
+          "name": "ZREPORT"
+        },
+        "include": "",
+        "line": 1,
+        "col": 0,
+        "endLine": 1,
+        "endCol": 0
+      },
+      {
+        "uri": "/sap/bc/adt/programs/programs/zreport/source/main",
+        "severity": "W",
+        "code": "ABAP_SYNTAX",
+        "text": "explicit zero",
+        "rule": "",
+        "object": {
+          "type": "PROG",
+          "name": "ZREPORT"
+        },
+        "include": "",
+        "line": 0,
+        "col": -1,
+        "endLine": 0,
+        "endCol": 0
+      },
+      {
+        "uri": "/sap/bc/adt/oo/classes/zclass/includes/definitions",
         "severity": "I",
         "code": "ABAP_SYNTAX",
         "text": "include URI",
