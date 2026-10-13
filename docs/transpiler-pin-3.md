@@ -211,5 +211,70 @@ All commits are local. Nothing was pushed.
 
 ## Corrected-base validation
 
-Fresh CI-equivalent runs are in progress for the corrected pin. Earlier results
-above are historical and do not establish the new SHA as validated.
+Validation uses OSG `6c5479e996636806ab38e6c036e0160a9df90064` and transpiler
+`f34e9bf4947daaf6464566b42b1e3ef1eaeb369c`. Earlier results above are historical.
+Fresh checkouts resolve the unpublished transpiler commit from the local clone;
+the tracked pin retains the public repository URL. All artifact consumers verify
+the newly built tree and its exact transpiler/parser identity before testing.
+
+| Check | Corrected-pin result |
+| --- | --- |
+| Transpiler own npm test and lint, including PostgreSQL | Pass; 3,138 passing, 29 pending |
+| Fresh OSG build, lint, ABAP Unit, BAL restart, artifact | Pass; 2,375 objects; 96 classes and 803 methods; no Unit failures; 79 lint warnings, no errors |
+| Focused pin and compiler-adapter regressions | Pass; 25 cases |
+| Full gogen workflow | Pass; 1,877 s within 2,100 s; 109 passing, 1 pending; built-in group retry |
+
+The first gogen group timed out in the hostile-Git configuration case at its
+unchanged two-second limit. The built-in complete-group retry passed; that case
+took 1.64 seconds on retry. No assertion, timeout or required check was removed.
+
+| Main shard | Result |
+| --- | --- |
+| 1/6 | Pass; 2,255 distinct passing, 2 pending; two built-in file retries |
+| 2/6 | Pass; 1,248 passing, 6 pending; first pass |
+| 3/6 | Pass; 1,772 passing, 10 pending; first pass |
+| 4/6 | Pass; 1,398 passing, 15 pending; first pass |
+| 5/6 | Pass; 1,095 passing, 9 pending; first pass |
+| 6/6 | Pass; 1,788 passing, 17 pending; first pass |
+
+The six shards cover 9,556 distinct passing cases and 59 pending cases. The
+first shard retried the complete cockpit file after a connection reset and the
+complete release-notes file after its two-second timeout. Both passed unchanged
+in isolation. The other five shards required no retries. Private-corpus cases
+remain explicitly pending because no private corpus is present.
+
+Consumer smoke passed on Node 24: SQLite, DuckDB, Go CLI, jobs, DSL L3 and C
+in ABAP. Its intentional UI skip is covered by the separate browser workflow.
+The Go host workflow passed vet/APC/media/gateway, its ADT compilation gate,
+and the ADT and ABAP-FS conformance ratchets. ABAP-FS reports 22 PASS,
+1 expected FAIL and 23 MISSING, with no regressions; these are reported gaps,
+not a claim that every conformance case succeeds.
+
+The browser workflow passed 26 main cases and four DuckDB workbench cases.
+The required kernel conformance profile passed against the pinned corpus.
+The complete packaging group passed 16 install/repackage cases.
+The Go inventory workflow passed its documented exit policy: 519 SUCCESS,
+267 NOT_COMPILED, 7 SKIPPED and 17 FAILED, with accepted exit 1. Its sXML
+benchmark also passed; this records the method gaps rather than treating every
+Go method as successful.
+
+The seeded standalone binary passed the unchanged bubblewrap smoke as an
+unprivileged user in the local Linux guest: both HTTP 200 checks, checkout
+isolation and process ownership. Its external and guest binary bytes matched
+before the successful run. The first guest attempt had replayed a dirty
+filesystem journal over the staged binary; the mismatching bytes were detected,
+the image repaired, and the exact new binary reinserted. No application source,
+smoke assertion or five-minute startup deadline changed.
+
+The first lifecycle workflow failed when the warm compiler did not become
+ready under concurrent packaging load. Its incomplete evidence was rejected.
+A fresh complete rerun passed with no competing heavy job: 124 PASS,
+4 N/A and 3 MISSING, including both clients' creation, edits, checks,
+activations, active readback and confirmed cleanup. No readiness limit or
+functional assertion was changed. Lifecycle latencies remain advisory under
+the workflow policy; its functional evidence gate passed. All CI-equivalent
+workflows have final passing results.
+
+Corrected-base evidence is retained under ignored `.local/pin3-corrected-ci/`;
+the transpiler and focused logs are in ignored `.local/pin3-final-ci/` with the
+`clean-base-` prefix. Failed attempts remain alongside the final passing runs.
