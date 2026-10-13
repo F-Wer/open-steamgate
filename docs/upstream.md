@@ -8,7 +8,7 @@
 > moves to a published version plus what remains (core pin, MOD).
 
 
-The current transpiler and runtime build is `local/osd-build-2` at `6f2119b85b496d537aedb6d33a91392c3f60231f`
+The current transpiler and runtime build is `local/osd-build-3b` at `f34e9bf4947daaf6464566b42b1e3ef1eaeb369c`
 (2.14.3, parser 2.120.73). [The pin move report](transpiler-pin-2.md) lists
 the retained and dropped fork commits. The dossier below is the historical snapshot. Every one of those fixes has an entry
 in `ANORMALIES.md` and a branch in that clone, and `npm run parked` prints the

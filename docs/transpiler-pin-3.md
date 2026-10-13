@@ -1,20 +1,25 @@
 # Transpiler pin 3
 
-Reapplies PR #720 on main after its revert, with the missing npm dependency
-move. The fork remains at `6f2119b85b496d537aedb6d33a91392c3f60231f`;
-open-abap-core remains at `84125c41c22e4c0d45e8037e8b60c691bb64de8d`.
-No compiler fix is needed for the reported traversal failure.
+Reapplies PR #720 with compiler, runtime and CLI 2.14.3 paired with parser
+2.120.73. OSG is based on current `origin/main`
+`16c024c8fc175b5656d643034b0fe8dde484740f`.
 
-Resumed against OSG `origin/main` at `73d72176`, including #721, #723
-and #722. A final fetch found #724, #725 and #726 at `16c024c8`; the
-local `fix/transpiler-pin-3` branch was rebased again onto that fetched tip.
-The complete CI-equivalent validation is refreshed on that tree.
-The fork branch `local/osd-build-3` was rebased onto its own current
-`origin/main`, `3fbabdf7`. That old main carries separate translator assets;
-they remain, while the current compiler dependency manifest replaces its
-obsolete, incompatible tree-sitter dependencies. The compiler and tests
-are unchanged from `local/osd-build-2`. The published fork pin remains
-`6f2119b8`, which is already available for clean CI clones. Nothing is pushed.
+The corrected transpiler branch `local/osd-build-3b` starts directly from
+published `origin/local/osd-build-2`
+`6f2119b85b496d537aedb6d33a91392c3f60231f`, which is based on upstream
+abaplint/transpiler main plus our fork fixes. Its new tip is
+`f34e9bf4947daaf6464566b42b1e3ef1eaeb369c`. The only new change is a compiler
+regression for `CREATE DATA TYPE HANDLE`; the clean base already supplies
+all three 2.14.3 packages and parser 2.120.73. No merge or rebase onto the
+fork's main is part of this branch. The earlier `local/osd-build-3` base
+was incorrect and is superseded; its unrelated translator assets and
+private context are absent from the corrected branch and its ancestry.
+The upstream comparison contains only `packages/`, `test/`, `package.json`
+and `package-lock.json`.
+
+open-abap-core remains at `84125c41c22e4c0d45e8037e8b60c691bb64de8d`.
+All commits remain local. The new transpiler SHA is unpublished; validation
+uses the exact local commit without changing the tracked repository URL.
 
 ## Root cause
 
@@ -103,7 +108,7 @@ build compiled all 2,375 objects. The linked-fork build also compiled all
   script-URL and unit-result assertions remain. Both complete affected test
   files pass together: 17 cases with resource isolation and no retries.
 
-## Validation
+## Earlier validation (before base correction)
 
 Workflow jobs run in separate checkouts with their pinned source packs and
 seven library clones. Main-workflow consumers restore and verify the built
@@ -203,3 +208,8 @@ baseline argument; the corrected comparison passed against the unmodified
 fetched-main checkout. Earlier failed attempts remain separately labelled.
 
 All commits are local. Nothing was pushed.
+
+## Corrected-base validation
+
+Fresh CI-equivalent runs are in progress for the corrected pin. Earlier results
+above are historical and do not establish the new SHA as validated.
