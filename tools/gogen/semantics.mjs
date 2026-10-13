@@ -889,13 +889,13 @@ for (const f of demoCopies) {
   if (readFileSync(theirs, "utf8") !== readFileSync(join(here, "testdata", f), "utf8")) demoDrift.push(f);
 }
 // sorted: zcl_gogen_t_uncaught_read reads what zcl_gogen_t_uncaught left
-const objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
+let objects = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".clas.abap")).map((f) => f.split(".")[0]).sort();
 // the function groups (parity-wave1: ZGOGEN_T_FG, called by ZCL_GOGEN_T_FM)
 // A focused invocation still checks the shared Go/JS oracle rows.
 const selected = process.argv.slice(2).flatMap((arg, i, args) => arg === "--class" ? [args[i + 1]?.toLowerCase()] : []);
 if (selected.length) {
   for (const name of selected) if (!objects.includes(name)) throw new Error(`unknown semantics class: ${name}`);
-  objects.splice(0, objects.length, ...objects.filter((name) => selected.includes(name)));
+  objects = objects.filter((name) => selected.includes(name));
 }
 const groups = readdirSync(join(here, "testdata")).filter((f) => f.endsWith(".fugr.xml")).map((f) => f.split(".")[0]).sort();
 // the roots of the exception classes, and get_text( )'s helper, compiled
@@ -911,7 +911,7 @@ const CORE = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_ERROR", "CX_SY_CONVERSION_NO
 const program = compileProgram({folders: [join(here, "testdata"), core, ajson], objects: [...objects, ...(objects.includes("zcl_gogen_t__pilot") ? ["zcl_gogen_t_pilchild"] : []), ...groups, ...CORE]});
 // the classes that carry a test: a static RUN of their own (the others are
 // the classes those tests use)
-objects.splice(0, objects.length, ...objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static)));
+objects = objects.filter((o) => program.classes.find((c) => c.name === o.toUpperCase())?.methods.some((m) => m.name === "RUN" && m.static));
 if (program.skipped.length) console.log(`not compiled: ${program.skipped.join("; ")}`);
 const out = join(here, ".out", "semantics");
 mkdirSync(out, {recursive: true});

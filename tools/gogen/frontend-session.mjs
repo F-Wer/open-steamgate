@@ -1,3 +1,4 @@
+import {append} from "./append.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // A unit closure keeps one immutable registry. Reuse lowering only for
 // elementary classes directly. Dependency-sensitive classes record their
@@ -68,8 +69,8 @@ export function compileClass(ctx, obj, lower, session) {
     Object.assign(program, cached.current);
     for (const [k, sig] of cached.sigs ?? []) program.sigs.set(k, sig);
     if (!cached.replay) {
-      program.skipped.push(...cached.skipped);
-      program.partial.push(...cached.partial);
+      append(program.skipped, cached.skipped);
+      append(program.partial, cached.partial);
     }
     counts.reused++;
     counts.reusedClasses.push(key);

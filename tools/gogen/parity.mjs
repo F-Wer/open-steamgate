@@ -1,3 +1,4 @@
+import {append} from "./append.mjs";
 // Parity: OSG's own HTTP-level suites, run against OSG on Node and against
 // OSGo, the same test files, each suite file on a fresh server of each kind.
 //
@@ -339,7 +340,7 @@ if (flag("changed") && !reportOnly) {
   for (const f of kept) results.osgo[f] = prev[f];
   httpSuites = httpSuites.filter((f) => !kept.includes(f));
   console.log(`--changed: ${httpSuites.length} suite(s) to run, ${kept.length} kept from ${osgoPath} (passed in full last time): ${kept.map(slug).join(", ") || "none"}`);
-  httpSuites.push(...kept);
+  append(httpSuites, kept);
   keptSuites = new Set(kept);
 }
 phase("setup");
@@ -665,13 +666,19 @@ ranked.forEach((g, i) => {
     md.push("");
   }
 }
-if (osgoOnly.length) md.push("## Pass on OSGo, fail on Node", "", ...osgoOnly.map((t) => `- ${t.file}: ${t.title}`), "");
+if (osgoOnly.length) {
+  md.push("## Pass on OSGo, fail on Node", "");
+  append(md, osgoOnly.map((t) => `- ${t.file}: ${t.title}`));
+  md.push("");
+}
 phase("compare and report");
 summary.phases = phases;
 summary.genWarnings = genWarnings;
 summary.wallMs = Date.now() - T0;
 writeFileSync(join(out, "parity.json"), JSON.stringify(summary, null, 1));
-md.push("## Wall time", "", "| phase | s |", "|---|---:|", ...phases.map((p) => `| ${p.name} | ${(p.ms / 1000).toFixed(1)} |`), `| total | ${(summary.wallMs / 1000).toFixed(1)} |`, "");
+md.push("## Wall time", "", "| phase | s |", "|---|---:|");
+append(md, phases.map((p) => `| ${p.name} | ${(p.ms / 1000).toFixed(1)} |`));
+md.push(`| total | ${(summary.wallMs / 1000).toFixed(1)} |`, "");
 writeFileSync(join(out, "parity.md"), md.join("\n"));
 console.log(`\nscore ${pct(summary.score)} (${passedH}/${denomH}: ${denom.length} Node-passed - ${known} go-matches-system - ${adtAll} adt-deferred - ${cdAll} compiler-deferred); raw ${pct(summary.scoreRaw)} (${passed.length}/${denom.length})`);
 console.log(`${failing.length} failing in ${ranked.length} groups; not applicable: ${summary.totals.notApplicableSuites} suites, ${summary.totals.notApplicableTests ?? "?"} tests`);

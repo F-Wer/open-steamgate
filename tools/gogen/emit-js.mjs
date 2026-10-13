@@ -1,3 +1,4 @@
+import {append} from "./append.mjs";
 import {objectRttiJs, exceptionClass} from "./emit-exception.mjs";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {constructorFactories} from "./emit-constructors.ts";
@@ -38,7 +39,7 @@ function literal(c) {
   }
   if (c.type.k === "i" || c.type.k === "f") return String(Number(c.value));
   if (c.type.k === "int8") return `${BigInt(c.value)}n`;
-  if (c.type.k === "x" || c.type.k === "xstring") return JSON.stringify(String.fromCharCode(...hexBytes(c.value, c.type.len)));
+  if (c.type.k === "x" || c.type.k === "xstring") return JSON.stringify(hexBytes(c.value, c.type.len).map((byte) => String.fromCharCode(byte)).join(""));
   return JSON.stringify(c.type.k === "c" ? c.value.replace(/ +$/, "") : c.value);
 }
 
@@ -174,7 +175,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`export function new_${st.go}() {`, `  return {${st.fields.map((f) => `${ident(f.name)}: ${zero(f.type)}`).join(", ")}};`, "}");
   }
   out.push("");
-  out.push(...localConstantDeclarations(program.consts, {js: true, zero, literal}));
+  append(out, localConstantDeclarations(program.consts, {js: true, zero, literal}));
   out.push("");
   const compiledNames = new Set(program.classes.map((c) => c.name));
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
@@ -189,7 +190,9 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
   // superclasses and every interface along the chain
   const isOf = (c) => {
     const names = ["OBJECT"];
-    for (let x = c; x; x = x.super ? byName.get(x.super) : null) names.push(x.name, ...(x.interfaces ?? []));
+    for (let x = c; x; x = x.super ? byName.get(x.super) : null) {
+      append(names, [x.name], x.interfaces ?? []);
+    }
     return names;
   };
   for (const cls of ordered) {
@@ -222,7 +225,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, ...(chainCctor(cls) ? [`    ${typeName(cls.name)}.$ensure(s);`] : []), `    const o = new ${typeName(cls.name)}();`,
       ...(ctorAt?.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
-    for (const m of all) out.push(...method(cls, m));
+    for (const m of all) append(out, method(cls, m));
     for (const m of cls.stubs ?? []) {
       if (m.name === "CONSTRUCTOR") continue;
       out.push(`  ${m.static ? "static " : ""}${typeName(m.name)}() { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: ${m.reason}`)}); }`);
@@ -237,8 +240,8 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
   }
   const supers = Object.entries(program.exceptionSupers ?? {}).sort(([a], [b]) => a.localeCompare(b));
   if (supers.length) out.push(`abap.registerSupers(${JSON.stringify(Object.fromEntries(supers))});`, "");
-  out.push(...staticRegistry(program));
-  out.push(...descDecls());
+  append(out, staticRegistry(program));
+  append(out, descDecls());
   return out.join("\n") + "\n";
 }
 
@@ -267,8 +270,7 @@ function staticRegistry(program) {
         lines.push(`  const ${v} = ${JSON.stringify(p.name)} in a ? ${read} : ${absent};`);
         return v;
       });
-      out.push(`abap.registerStatic(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${JSON.stringify(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, (s, a) => {`,
-        ...lines, `  ${typeName(cls.name)}.${typeName(m.name)}(${["s", ...args].join(", ")});`, "});");
+      append(out, [`abap.registerStatic(${JSON.stringify(`${cls.name}=>${m.name}`)}, ${JSON.stringify(m.params.filter((p) => p.dir === "importing").map((p) => p.name))}, (s, a) => {`], lines, [`  ${typeName(cls.name)}.${typeName(m.name)}(${["s", ...args].join(", ")});`, "});"]);
     }
   }
   out.push("");
@@ -315,7 +317,7 @@ function method(cls, m) {
   // data would need a box for the place it points at; refused here honestly
   const odd = (m.fieldSymbols ?? []).find((f) => f.type.k !== "struct" && f.type.k !== "data" && !["i", "int8", "string", "c", "n", "p", "d", "t", "x", "xstring", "f"].includes(f.type.k));
   if (odd) lines.push(`    throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: field symbol ${odd.name} of a ${odd.type.k}: the JS emitter holds only rows of structures`)});`);
-  else lines.push(...m.body.flatMap((st) => stmt(st, ctx, 2)));
+  else append(lines, m.body.flatMap((st) => stmt(st, ctx, 2)));
   if (ret) lines.push(`    return ${ret};`);
   lines.push("  }");
   return lines;
@@ -639,9 +641,9 @@ function stmtLines(st, ctx, d) {
       const lines = [];
       st.branches.forEach((b, i) => {
         lines.push(`${t}${i === 0 ? "if" : "} else if"} (${cond(b.cond, ctx)}) {`);
-        lines.push(...b.body.flatMap((x) => stmt(x, ctx, d + 1)));
+        append(lines, b.body.flatMap((x) => stmt(x, ctx, d + 1)));
       });
-      if (st.else !== null) lines.push(`${t}} else {`, ...st.else.flatMap((x) => stmt(x, ctx, d + 1)));
+      if (st.else !== null) append(lines, [`${t}} else {`], st.else.flatMap((x) => stmt(x, ctx, d + 1)));
       lines.push(`${t}}`);
       return lines;
     }
@@ -649,11 +651,11 @@ function stmtLines(st, ctx, d) {
       const lines = [`${t}{`, `${t}  const ${st.temp} = ${expr(st.subject, ctx)};`];
       st.branches.forEach((b, i) => {
         lines.push(`${t}  ${i === 0 ? "if" : "} else if"} (${cond(b.cond, ctx)}) {`);
-        lines.push(...b.body.flatMap((x) => stmt(x, ctx, d + 2)));
+        append(lines, b.body.flatMap((x) => stmt(x, ctx, d + 2)));
       });
       if (st.else !== null) {
         lines.push(st.branches.length ? `${t}  } else {` : `${t}  {`);
-        lines.push(...st.else.flatMap((x) => stmt(x, ctx, d + 2)));
+        append(lines, st.else.flatMap((x) => stmt(x, ctx, d + 2)));
       }
       if (st.branches.length || st.else !== null) lines.push(`${t}  }`);
       lines.push(`${t}}`);
@@ -664,7 +666,7 @@ function stmtLines(st, ctx, d) {
       const lines = [`${t}{`, `${t}  const save${n} = s.sy.index;`];
       if (st.times === null) lines.push(`${t}  for (let i${n} = 1; ; i${n}++) {`);
       else lines.push(`${t}  const n${n} = ${expr(st.times, ctx)};`, `${t}  for (let i${n} = 1; i${n} <= n${n}; i${n}++) {`);
-      lines.push(`${t}    s.sy.index = i${n};`, ...st.body.flatMap((x) => stmt(x, ctx, d + 2)), `${t}  }`, `${t}  s.sy.index = save${n};`, `${t}}`);
+      append(lines, [`${t}    s.sy.index = i${n};`], st.body.flatMap((x) => stmt(x, ctx, d + 2)), [`${t}  }`, `${t}  s.sy.index = save${n};`, `${t}}`]);
       return lines;
     }
     case "while": {

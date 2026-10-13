@@ -1,3 +1,4 @@
+import {append} from "./append.mjs";
 // Re-run the binaries of an isolated full inventory, one owner at a time.
 // Only classes with a built binary enter this measurement; the inventory
 // JSON names every skipped class and method.
@@ -17,7 +18,7 @@ for (const owner of dirs) {
   const result = spawnSync(bin, [], {encoding: "utf8", timeout: 120000, maxBuffer: 20e6});
   if (result.status !== 0) throw new Error(`${owner} binary failed: ${result.stderr || result.error?.message}`);
   binaries++;
-  rows.push(...JSON.parse(result.stdout));
+  append(rows, JSON.parse(result.stdout));
 }
 console.log(JSON.stringify({binaries, methods: rows.length, success: rows.filter((r) => r.status === "SUCCESS").length,
   failed: rows.filter((r) => r.status === "FAILED").length}));
