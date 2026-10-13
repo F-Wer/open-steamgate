@@ -61,6 +61,16 @@ and a method that calls a refused one is refused in turn. Refused on
 purpose until measured: `i` -> `string` (the sign goes to the end there).
 Packed numbers came later and are their own section below.
 
+## Method local declarations
+
+Go emission sinks a method local into the innermost branch, loop or TRY
+body that contains every reference and resets the whole value on its first
+top-level touch. Otherwise it keeps ABAP's method lifetime. References,
+field-symbol aliases, opaque calls and dynamic names are conservative;
+`DATA ... VALUE` initializers remain at method entry. Both locations use the
+same type, ownership and initial-value logic. Set `GOGEN_SINK_LOCALS=0` to
+retain all declarations at function scope.
+
 ## Measured, 2026-09-23
 
 16-core x86-64 workstation (WSL2), Node 26.9, Go 1.26.0,

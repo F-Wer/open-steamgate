@@ -675,6 +675,7 @@ function functionGroupIr(ctx0, g) {
         }
       }
       const body = node.findDirectStructure(Structures.Body);
+      ctx.sinkUnsafe = !!body?.findAllExpressionsRecursive(Expressions.Dynamic).length;
       ctx.inits = [];
       hoistLocalConstants(body, ctx, {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported});
       const compiled = body === undefined ? [] : block(body, ctx);
@@ -683,7 +684,7 @@ function functionGroupIr(ctx0, g) {
       // arguments are evaluated, like Node's wrapper (osd-enq-host.mjs)
       if (x.updateTask) compiled.unshift({s: "note_update_task"});
       cls.methods.push({...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+        body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
     } catch (e) {
       // a module is not a class: a path of the front end written for classes
       // may fail outside a refusal; such a module becomes a dumping stub
@@ -1685,6 +1686,7 @@ function classIr(ctx0, obj) {
       const scope = spaghetti.lookupPosition(node.getFirstToken().getStart(), file.getFilename());
       const ctx = {program, reg, className, scopeName, owner: obj.owner ?? className, method: name, sig, signatures, scope, file, spaghetti, locals: new Map(), temps: 0};
       const body = node.findDirectStructure(Structures.Body);
+      ctx.sinkUnsafe = !!body?.findAllExpressionsRecursive(Expressions.Dynamic).length;
       const known = new Set([...sig.params.map((p) => p.name), sig.returning?.name].filter(Boolean));
       ctx.fieldSymbols = new Map();
       const inlineTables = inlineTableLocals(body);
@@ -1712,7 +1714,7 @@ function classIr(ctx0, obj) {
       const compiled = body === undefined ? [] : block(body, ctx);
       compiled.unshift(...ctx.inits);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
-        body: compiled, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
+        body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
       // by the class, not the method: a producer kept in an attribute and
       // sent from a method that never names the type is this class's call
       // too (the critic on #263). The AMC classes are not callers, as Node's
@@ -2351,6 +2353,9 @@ function whereOf(cc, rowType, ctx, text) {
 
 function statement(node, ctx) {
   const text = node.concatTokens();
+  // Dynamic access can name any method local, even a literal name omitted
+  // from the lowered IR. STATICS and opaque kernel code also retain lifetime.
+  if (/^STATICS\b|\bKERNEL\b/i.test(text) || node.findAllExpressions(Expressions.Dynamic).length) ctx.sinkUnsafe = true;
   if (isStmt(node, Statements.Constant) && ctx.localConstants?.has(upper(node.findFirstExpression(Expressions.DefinitionName)?.concatTokens() ?? ""))) return undefined;
   if (isStmt(node, Statements.Data) || isStmt(node, Statements.Constant)) {
     // DATA VALUE is initialized at method entry, including inside loops.
