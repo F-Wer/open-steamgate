@@ -288,3 +288,59 @@ test("FIRST RESULTS table uses first-match iteration and still refuses sorted ta
     assert.match(bad.partial[0], /RESULTS into other than a standard table/);
   }
 });
+
+// Unmeasured; measure on A4H. Same hex cases and UTF-16 spans as pcre_hex_test.go.
+test("PCRE hex escapes agree across FIND, RESULTS, COUNT and REPLACE", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const [p, text, off, n] of [
+    [String.raw`\xA0`, "😀\u00a0", 2, 1],
+    [String.raw`[\x00-\x1F\xA0]`, "😀\u00a0", 2, 1],
+    [String.raw`[\x00-\x1F\xA0]`, "a\x1f", 1, 1],
+    [String.raw`[\x4]`, "a\x04", 1, 1],
+    [String.raw`[\x{263A}]`, "a☺", 1, 1],
+    [String.raw`\x41`, "😀A", 2, 1], [String.raw`\x4`, "a\x04", 1, 1],
+    [String.raw`\x414`, "aA4", 1, 2],
+    [String.raw`\x{263A}`, "a☺", 1, 1], [String.raw`\x{1F600}`, "a😀", 1, 2],
+    [String.raw`[\x{1F600}-\x{1F601}]`, "a😁", 1, 2],
+    [String.raw`\x{000000000000001F600}+`, "a😀😀", 1, 4],
+    [String.raw`\x{10FFFF}`, "a\u{10ffff}", 1, 2],
+    [String.raw`\\x41`, String.raw`a\x41`, 1, 4], [String.raw`[\\x41]+`, String.raw`a\x41`, 1, 4],
+    [String.raw`\x4 1`, "a\x041", 1, 2],
+    [String.raw`\x23\x20\x5B\x5C`, "a# [\\", 1, 4],
+    [String.raw`\A\x41\z`, "A", 0, 1], [String.raw`\x41 # \x{D800}`, "A", 0, 1],
+  ]) {
+    assert.deepEqual(a.FindResults(text, p, "P", false, true), [[off, n]], p);
+    assert.deepEqual(a.FindStmt(text, p, true, false, 0, true), [true, off, n, []], p);
+    assert.equal(a.FindAllCount(text, p, true, false, true), 1, p);
+    for (const all of [false, true]) assert.deepEqual(a.ReplaceStmt(text, p, "X", true, all, false, 0, a.NoLength, -1, true),
+      [text.slice(0, off) + "X" + text.slice(off + n), 0], p);
+  }
+  assert.deepEqual(a.FindResults("😀A😀", String.raw`(\x{1F600})`, "P", false, true), [[0, 2, 0, 2], [3, 2, 3, 2]]);
+});
+
+test("PCRE hex escapes refuse invalid scalars and retain other escape refusals", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const [p, reason] of [
+    [String.raw`\x{D800}`, "a surrogate hex escape"], [String.raw`[\x{DFFF}]`, "a surrogate hex escape"],
+    [String.raw`\x{110000}`, "a hex escape above U+10FFFF"],
+    [String.raw`\x{FFFFFFFFFFFFFFFFFFFFFFFF}`, "a hex escape above U+10FFFF"],
+    [String.raw`\x{}`, "a malformed braced hex escape"], [String.raw`\x{41`, "a malformed braced hex escape"],
+    [String.raw`\x{4G}`, "a malformed braced hex escape"],
+    [String.raw`\x41++`, "a possessive quantifier"],
+    [String.raw`\u{41}+`, String.raw`a possessive quantifier is not in Go's RE2: \u{41}+`],
+    [String.raw`\u0041`, "RE2 does not read this pattern (error parsing regexp: invalid escape sequence: `\\u`); whether PCRE does is not measured"],
+    [String.raw`\x`, String.raw`\x without hex digits`],
+    [String.raw`[\x]`, String.raw`\x without hex digits`],
+    [String.raw`\xg`, String.raw`\x without hex digits`],
+    [String.raw`\x 41`, String.raw`\x without hex digits`],
+    [String.raw`\x\x11`, String.raw`\x without hex digits`],
+  ]) {
+    for (const run of [
+      () => a.FindResults("A", p, "P", false, true),
+      () => a.FindStmt("A", p, true, false, 0, true),
+      () => a.FindAllCount("A", p, true, false, true),
+      () => a.ReplaceStmt("A", p, "X", true, true, false, 0, a.NoLength, -1, true),
+    ]) assert.throws(run, e => e.message.includes("NOT_COMPILED in FIND PCRE: " + reason), p);
+  }
+  for (const escape of "ceoNXRhHvV") assert.throws(() => a.FindResults("a", "\\" + escape, "P", false, true), /NOT_COMPILED/);
+});

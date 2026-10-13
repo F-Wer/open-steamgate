@@ -4,12 +4,14 @@ import (
 	"osg/gogen/byteops"
 	"osg/gogen/bytesection"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
 )
 
 var regexCache sync.Map
+var pcreHexScalar = regexp.MustCompile(`\\x\{[0-9a-f]+\}`)
 var pcreInlineFlags = regexp.MustCompile(`\(\?[A-Za-z-]`)
 
 // FindStmt is FIND [REGEX] p IN s, as measured on A4H 2026-09-23: POSIX, so the
@@ -313,7 +315,7 @@ var pcreRefused = []struct {
 	{regexp.MustCompile(`\\Z`), "\\Z"},
 	{regexp.MustCompile(`\(\?(R|\d|&|P>|\()`), "a recursion or a conditional"},
 	{regexp.MustCompile(`\(\*`), "a verb (*...)"},
-	{regexp.MustCompile(`\\[cexoNXRhHvV]`), "an escape RE2 reads differently or not at all"},
+	{regexp.MustCompile(`\\[ceoNXRhHvV]`), "an escape RE2 reads differently or not at all"},
 }
 
 // compilePCRE is the pattern for PCRE, leftmost-first, and its "after"
@@ -326,6 +328,8 @@ func compilePCRE(p string, icase bool, s string) (*regexp.Regexp, *regexp.Regexp
 		panic(NotCompiled("FIND PCRE", "an unsupported inline flag group: "+p))
 	}
 	plain := strings.NewReplacer(`\\`, "").Replace(p)
+	// A scalar escape followed by + is repetition, not a possessive quantifier.
+	plain = pcreHexScalar.ReplaceAllString(plain, "_")
 	for _, r := range pcreRefused {
 		if r.re.MatchString(plain) {
 			panic(NotCompiled("FIND PCRE", r.what+" is not in Go's RE2: "+p))
@@ -373,6 +377,50 @@ func pcreAll(s, p string, icase, all bool) [][]int {
 	return out
 }
 
+// PCRE hex escapes denote Unicode scalars in UTF mode. The short forms and bare
+// refusals are unmeasured; measure on A4H. Read before extended-mode stripping
+// so whitespace cannot join two separate hex digits.
+func pcreHex(p string, x int) (string, int) {
+	end := x + 1
+	braced := end < len(p) && p[end] == '{'
+	if braced {
+		end++
+	}
+	start := end
+	value := 0
+	for end < len(p) {
+		c := p[end]
+		if c >= 'A' && c <= 'F' {
+			c += 'a' - 'A'
+		}
+		digit := strings.IndexByte("0123456789abcdef", c)
+		if digit < 0 || (!braced && end-start == 2) {
+			break
+		}
+		// Saturate to reject arbitrarily long escapes without integer overflow.
+		if value <= 0x10ffff {
+			value = value*16 + digit
+		}
+		end++
+	}
+	if braced {
+		if end == start || end >= len(p) || p[end] != '}' {
+			panic(NotCompiled("FIND PCRE", "a malformed braced hex escape"))
+		}
+		end++
+	}
+	if !braced && end == start {
+		panic(NotCompiled("FIND PCRE", `\x without hex digits`))
+	}
+	if value > 0x10ffff {
+		panic(NotCompiled("FIND PCRE", "a hex escape above U+10FFFF"))
+	}
+	if value >= 0xd800 && value <= 0xdfff {
+		panic(NotCompiled("FIND PCRE", "a surrogate hex escape (U+D800-U+DFFF)"))
+	}
+	return `\x{` + strconv.FormatInt(int64(value), 16) + "}", end - 1
+}
+
 // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
 func extendedPCRE(p string) string {
 	for _, escape := range []string{`\Q`, `\E`} {
@@ -402,6 +450,12 @@ func extendedPCRE(p string) string {
 		}
 		if c == '\\' && i+1 < len(p) {
 			i++
+			if p[i] == 'x' {
+				hex, end := pcreHex(p, i)
+				out.WriteString(hex)
+				i = end
+				continue
+			}
 			if inClass && (p[i] == 'A' || p[i] == 'z') {
 				panic(NotCompiled("FIND PCRE", "unsupported anchor escape in character class \\"+string(p[i])))
 			}

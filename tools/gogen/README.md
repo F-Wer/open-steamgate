@@ -1470,6 +1470,19 @@ testdata classes, deleted after) and pinned in `semantics.mjs` on Go and JS
   the kernel lists them. PCRE lookaround, backreferences, atomic groups,
   possessive quantifiers, \K, \G, recursion, conditionals and verbs are
   refused by name (Go's RE2 has none), as is PCRE on a text with line ends.
+  Hex escapes work in FIND, RESULTS, COUNT and REPLACE, outside and inside
+  character classes: `\xHH` denotes U+00HH, `\xH` consumes one hex digit
+  (`\x4` = U+0004), and bare `\x` is refused as `\x without hex digits`. `\x{H...}` denotes a
+  Unicode code point. The scanner emits RE2 `\x{...}` and JS `\u{...}`
+  with the existing `u` flag, preserving literal `\\x41`, extended-mode
+  comments, and the UTF-16 offsets and lengths from #714 (astral length 2).
+  Malformed braced hex, surrogates U+D800–U+DFFF and values above U+10FFFF
+  refuse with named NOT_COMPILED reasons. Escapes `\c \e \o \N \X \R
+  \h \H \v \V` remain refused as escapes RE2 reads differently or not
+  at all; `\Q...\E` remains refused.
+  [SAP's regex examples](https://github.com/SAP-samples/abap-cheat-sheets/blob/main/28_Regular_Expressions.md)
+  document hex code points and UTF mode. Short forms, bare refusals, astral behavior,
+  and these host refusals are **unmeasured; measure on A4H**.
   JS is leftmost-first for REGEX too (pinned apart). REPLACE ... RESULTS is
   not done.
 
