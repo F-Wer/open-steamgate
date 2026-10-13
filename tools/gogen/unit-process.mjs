@@ -1,3 +1,4 @@
+import {append} from "./append.mjs";
 // Process scheduling and crash recovery for the ABAP Unit runner.
 import {spawn, spawnSync} from "node:child_process";
 import {existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, unlinkSync, writeFileSync} from "node:fs";
@@ -132,7 +133,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
   const recover = async (keys, run, resultsFile, seedFile) => {
     const result = completed(keys, run, resultsFile);
     const failPending = (pending, reason) => {
-      for (const key of pending) result.rows.push(...groups.find((g) => g.key === key).methods.map((r) =>
+      for (const key of pending) append(result.rows, groups.find((g) => g.key === key).methods.map((r) =>
         ({...r, source: "harness", status: "FAILED", message: `runner died: ${reason}`})));
     };
     const emptyCheckpoint = result.rows.length === 0 && !result.started;
@@ -154,9 +155,9 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
       const retry = await runProcess(["--classes-file", classesFile, "--results-out", retryResults,
         ...(seedFile ? ["--seed-image", seedFile] : [])], env, retryDir);
       const own = completed([key], retry, retryResults);
-      result.rows.push(...own.rows);
+      append(result.rows, own.rows);
       Object.assign(result.durations, own.durations);
-      if (own.pending.length) result.rows.push(...groups.find((g) => g.key === key).methods.map((r) =>
+      if (own.pending.length) append(result.rows, groups.find((g) => g.key === key).methods.map((r) =>
         ({...r, source: "harness", status: "FAILED", message: `runner died: ${retry.status === 0 && !retry.killReason ? "incomplete result" : died(retry)}`})));
       rmSync(retryDir, {recursive: true, force: true});
       // An empty checkpoint followed by the same initial failure indicates a
@@ -241,7 +242,7 @@ export async function runUnit({bin, groups, ready, jobs, out, runDir}) {
       return {rows: result.rows, durations: latest};
     }));
     const mergeStarted = performance.now();
-    for (const result of results) { actual.push(...result.rows); Object.assign(durations, result.durations); }
+    for (const result of results) { append(actual, result.rows); Object.assign(durations, result.durations); }
     saveTimingsOrWarn(durations);
     runDetail.mergeMs = Math.round(performance.now() - mergeStarted);
     rmSync(scratchDir, {recursive: true, force: true});

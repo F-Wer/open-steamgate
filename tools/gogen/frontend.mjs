@@ -1,3 +1,4 @@
+import {append} from "./append.mjs";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // ABAP -> IR, for the Go backend spike (tools/gogen/README.md).
@@ -119,7 +120,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   // only the objects named are compiled, and only their syntax errors count
   // a namespace is written # in a file name and / in the object's name
   const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
-  const wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
+  let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
   const ddls = [];
   const walk = (dir) => {
     for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
@@ -168,7 +169,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   // Tolerant surveys leave broken objects out, retaining their diagnostics.
   if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
-  if (broken.size > 0) wanted.splice(0, wanted.length, ...wanted.filter((w) => !broken.has(w)));
+  if (broken.size > 0) wanted = wanted.filter((w) => !broken.has(w));
 
   // A literal CALL FUNCTION is a dependency on its function group. The
   // registry already knows each module's group; include it before signatures
@@ -274,7 +275,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
       for (const i of [name, ...componentInterfaces(reg, name)]) {
         const all = reg.getObject("INTF", i)?.getDefinition()?.getMethodDefinitions();
         if (!all) continue;
-        sigs.push(...Array.from(Array.isArray(all) ? all : all.getAll()).map((m) => methodSignature(ictx, i, `${i}~${upper(m.getName())}`)));
+        append(sigs, Array.from(Array.isArray(all) ? all : all.getAll()).map((m) => methodSignature(ictx, i, `${i}~${upper(m.getName())}`)));
       }
       // a CLASS-METHODS of an interface is the class's function, not a method of the reference
       program.interfaceMethods.set(name, sigs.filter((x) => !x.unsupported && !x.static));
@@ -696,8 +697,9 @@ function functionGroupIr(ctx0, g) {
       ctx.sinkUnsafe = !!body?.findAllExpressionsRecursive(Expressions.Dynamic).length;
       ctx.inits = [];
       hoistLocalConstants(body, ctx, {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported});
-      const compiled = body === undefined ? [] : block(body, ctx);
-      compiled.unshift(...ctx.inits);
+      const bodyStatements = body === undefined ? [] : block(body, ctx);
+      const compiled = [];
+      append(compiled, ctx.inits, bodyStatements);
       // an update-task module marks the LUW on entry, after its caller's
       // arguments are evaluated, like Node's wrapper (osd-enq-host.mjs)
       if (x.updateTask) compiled.unshift({s: "note_update_task"});
@@ -1610,7 +1612,7 @@ function classIr(ctx0, obj) {
   // one, and the value would split in two
   const inherited = new Set(ancestors(reg, className).flatMap((c) => (clasDef(reg, c)?.getImplementing() ?? [])
     .flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))])));
-  attributes.push(...implementedAttributes(program, implemented.filter((i) => !inherited.has(i))));
+  append(attributes, implementedAttributes(program, implemented.filter((i) => !inherited.has(i))));
   for (const intf of implemented.map((name) => ({name}))) {
     const idef = reg.getObject("INTF", intf.name)?.getDefinition();
     if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
@@ -1734,8 +1736,9 @@ function classIr(ctx0, obj) {
       }
       ctx.inits = [];
       hoistLocalConstants(body, ctx, {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported});
-      const compiled = body === undefined ? [] : block(body, ctx);
-      compiled.unshift(...ctx.inits);
+      const bodyStatements = body === undefined ? [] : block(body, ctx);
+      const compiled = [];
+      append(compiled, ctx.inits, bodyStatements);
       const ir = {...sig, fieldSymbols: [...ctx.fieldSymbols].map(([n, t]) => ({name: n, type: t})), locals: [...ctx.locals].map(([n, t]) => ({name: n, type: t})).sort((a, b) => a.name.localeCompare(b.name)),
         body: compiled, sinkUnsafe: !!ctx.sinkUnsafe, calls: ctx.calls ?? [], pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}};
       // by the class, not the method: a producer kept in an attribute and
@@ -2020,7 +2023,7 @@ function tryBlock(node, ctx) {
     // (A4H 2026-09-23: "a CATCH clause already exists ... uses the superclass")
     const shadow = names.find((n) => seen.some((e) => isSubclass(ctx.reg, n, e)));
     if (shadow) throw new Unsupported(`CATCH ${shadow} after a CATCH of its superclass`);
-    seen.push(...names);
+    append(seen, names);
     const covers = RUNTIME_CX.filter((cx) => names.some((n) => isSubclass(ctx.reg, cx, n)));
     // exception objects (RAISE EXCEPTION): taken when the raised class is one
     // of the names or inherits from one, decided at run time
@@ -2090,7 +2093,7 @@ function structure(node, ctx) {
     if (/\bVALUE\b/i.test(node.concatTokens())) throw new Unsupported(`DATA BEGIN OF with VALUE: ${node.concatTokens().slice(0, 60)}`);
     return {s: "nop"};
   }
-  if (isStruct(node, Structures.Constants)) { ctx.inits.push(...(ctx.localConstantFields?.get(node) ?? [])); return {s: "nop"}; }
+  if (isStruct(node, Structures.Constants)) { append(ctx.inits, ctx.localConstantFields?.get(node) ?? []); return {s: "nop"}; }
   if (isStruct(node, Structures.Try)) return tryBlock(node, ctx);
   if (isStruct(node, Structures.If)) {
     const branches = [{cond: cond(node.findDirectStatement(Statements.If).findDirectExpression(Expressions.Cond), ctx), body: bodyOf(node, ctx)}];
@@ -3973,7 +3976,7 @@ function source(node, ctx, outer, hint = outer) {
       throw new Unsupported(`bit operation on other than x fields of one length: ${node.concatTokens()}`);
     }
     if (leaves.every((t) => t.k === "x")) {
-      return arith(node, ctx, X(Math.max(...leaves.map((t) => t.len))));
+      return arith(node, ctx, X(leaves.reduce((max, t) => Math.max(max, t.len), -Infinity)));
     }
     // Retain the existing dynamic AND/OR refusal; CRC needs only XOR.
     const ops = node.getChildren().filter((c) => isExpr(c, Expressions.ArithOperator)).map((c) => upper(c.concatTokens()));

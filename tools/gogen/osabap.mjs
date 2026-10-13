@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {append} from "./append.mjs";
 import {writeGo, reportSymbols} from "./symbols.ts";
 // Build one classic ABAP report as a small native command. The report's
 // selection screen is its command-line contract; the Go host is deliberately
@@ -29,7 +30,7 @@ for (let i = 0; i < cli.length; i++) {
     else {
       const names = value.split(",").map((name) => name.trim().toUpperCase());
       if (names.some((name) => !/^[A-Z_][A-Z0-9_]*$/.test(name))) throw new Error(`osabap: ${arg}: invalid parameter name in ${value}`);
-      readOptions[arg].push(...names);
+      append(readOptions[arg], names);
     }
   } else if (arg.startsWith("-")) throw new Error(`osabap: unknown build option ${arg}`);
   else positional.push(arg);
@@ -209,7 +210,7 @@ while (pending.length > 0) {
     if (seen.has(name) || !coreFiles.has(name)) continue;
     seen.add(name);
     coreObjects.push(name);
-    for (const path of coreFiles.get(name)) next.push(...namesIn(readFileSync(path, "utf8")));
+    for (const path of coreFiles.get(name)) append(next, namesIn(readFileSync(path, "utf8")));
   }
   pending = next;
 }

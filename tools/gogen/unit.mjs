@@ -1,3 +1,4 @@
+import {append} from "./append.mjs";
 import {funcName, writeGo, writeSymbols, refreshSymbolBuild} from "./symbols.ts";
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.
@@ -59,9 +60,9 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
     }
     try {
       const result = JSON.parse(child.stdout);
-      rows.push(...result.rows);
+      append(rows, result.rows);
       if (result.cache?.status in cacheCounts) cacheCounts[result.cache.status]++;
-      timingMs.frontendClosureRounds.push(...(result.timingMs?.frontendClosureRounds ?? []));
+      append(timingMs.frontendClosureRounds, result.timingMs?.frontendClosureRounds ?? []);
       for (const phase of ["emit", "goBuild", "run"]) timingMs[phase] += result.timingMs?.[phase] ?? 0;
     }
     catch { rows.push({class: owner, source: "harness", status: "NOT_COMPILED", message: child.stderr || "invalid child result"}); }
@@ -210,7 +211,7 @@ function alertsOf(key, seen = new Set()) {
     if (n.s === "stub") alerts.push(n.reason);
     if (n.e === "call") {
       const target = n.owner ?? (n.receiver?.type?.k === "ref" ? n.receiver.type.name : name);
-      if (target) alerts.push(...alertsOf(`${target}=>${n.method}`, seen));
+      if (target) append(alerts, alertsOf(`${target}=>${n.method}`, seen));
     }
     for (const [k, v] of Object.entries(n)) if (k !== "type") visit(v);
   };
@@ -287,10 +288,10 @@ const typeLayer = (t) => !t ? 0 : t.k === "table" ? typeLayer(t.row)
   : t.k === "struct" ? (structLayer.get(t.go) ?? 0)
     : t.k === "ref" ? (t.intf ? interfaceLayer.get(t.name) : layer.get(t.name)) ?? 0 : 0;
 const bodyTypeLayer = (node) => {
-  if (Array.isArray(node)) return Math.max(0, ...node.map(bodyTypeLayer));
+  if (Array.isArray(node)) return node.reduce((max, value) => Math.max(max, bodyTypeLayer(value)), 0);
   if (!node || typeof node !== "object") return 0;
-  return Math.max(typeLayer(node.type), ...Object.entries(node)
-    .filter(([key]) => key !== "type").map(([, value]) => bodyTypeLayer(value)));
+  return Object.entries(node).reduce((max, [key, value]) =>
+    key === "type" ? max : Math.max(max, bodyTypeLayer(value)), typeLayer(node.type));
 };
 const classRefs = (c) => {
   const refs = new Set(referencedClasses({...program, classes: [c], structs: new Map()}));
@@ -329,12 +330,13 @@ while (promoted) {
   promoted = false;
   for (const [name, st] of program.structs) {
     const owner = classSymbols.find(({symbol}) => name.startsWith(symbol + "__"));
-    const next = Math.max(structLayer.get(name), owner ? layer.get(owner.name) : 0,
-      ...st.fields.map((f) => typeLayer(f.type)));
+    const next = st.fields.reduce((max, f) => Math.max(max, typeLayer(f.type)),
+      Math.max(structLayer.get(name), owner ? layer.get(owner.name) : 0));
     if (next > structLayer.get(name)) { structLayer.set(name, next); promoted = true; }
   }
   for (const [name, sigs] of program.interfaceMethods) {
-    const next = Math.max(interfaceLayer.get(name), ...sigs.flatMap((m) => [typeLayer(m.returning?.type), ...m.params.map((p) => typeLayer(p.type))]));
+    const next = sigs.reduce((max, m) => m.params.reduce((tier, p) => Math.max(tier, typeLayer(p.type)),
+      Math.max(max, typeLayer(m.returning?.type))), interfaceLayer.get(name));
     if (next > interfaceLayer.get(name)) { interfaceLayer.set(name, next); promoted = true; }
   }
   for (const c of program.classes) {
