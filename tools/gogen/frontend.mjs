@@ -104,16 +104,16 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session}) {
+export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
   // rule too: without it a statement that does not parse is dropped silently);
   // the default config runs every lint rule, which was 45 % of a build
   config.rules = {check_syntax: true, parser_error: true};
-  // a counter per program, so a second compileProgram in one process names
-  // its FOR ALL ENTRIES rows as the first did (incremental rebuilds)
+  // Reset the ordinary module counter on each compile, as on main.
   FAE_N = 0;
+  PERSIST_LOWERING = !!cacheDir;
   const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
   // every file of the folders is loaded, so a class sees what it refers to;
   // only the objects named are compiled, and only their syntax errors count
@@ -145,7 +145,21 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     cdsViewsByRegistry.set(reg, cdsSqlViews(ddls));
   }
   REG = reg;
-  prepareSession(session, reg);
+  // Load cache code and its module state only for an explicit opt-in.
+  const diskFrontend = cacheDir ? require("./frontend-object-cache.mjs") : undefined;
+  if (diskFrontend) {
+    session = diskFrontend.cacheSession(session, reg, cacheDir);
+    diskFrontend.prepareDiskSession(session, reg);
+  } else {
+    if (session?.disk) {
+      session.classes.clear();
+      delete session.disk;
+      delete session.diskRoot;
+      delete session.cacheDir;
+    }
+    prepareSession(session, reg);
+  }
+  const compile = diskFrontend ? diskFrontend.compileDiskClass : compileClass;
   // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
   // its generic REF TO object sibling. The dynamic raise path below checks
   // the actual registered object; retain every other syntax diagnostic.
@@ -188,6 +202,8 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   const program = {anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
     excAttrs: new Set(), dynStatics: new Set(), intfOwnAttrs: new Map(), interfaceAttrs: new Map(), structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
     diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
+  if (PERSIST_LOWERING) Object.assign(program, {faeN: 0, localDefs: new Map()});
+  if (PERSIST_LOWERING) PROGRAM = program;
   program.supplied = suppliedParams(reg, program.wanted);
   PROGRAM = program;
   const ctx0 = {reg, program};
@@ -213,7 +229,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     for (const l of localClasses(reg, obj, includeTests === true || includeTests?.has?.(upper(obj.getName())))) {
       program.locals.set(`${upper(obj.getName())}|${l.local}`, l.name);
       program.wanted.add(l.name);
-      LOCAL_DEFS.set(l.name, l.def);
+      (PERSIST_LOWERING ? program.localDefs : LOCAL_DEFS).set(l.name, l.def);
       localDefs.push(l);
     }
   }
@@ -241,9 +257,9 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
   };
   for (const obj of reg.getObjects()) {
-    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(compileClass(ctx0, obj, lowerClass, session));
+    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(compile(ctx0, obj, lowerClass, session));
   }
-  for (const l of localDefs) program.classes.push(compileClass(ctx0, l, lowerClass, session));
+  for (const l of localDefs) program.classes.push(compile(ctx0, l, lowerClass, session));
   for (const g of readable) program.classes.push(functionGroupIr(ctx0, g));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
@@ -539,11 +555,13 @@ function componentInterfaces(reg, intf, seen = new Set()) {
 // parity-wave2: CL_ABAP_ZIP (LCL_STREAM: the zip's bytes and its CRC-32),
 // the SEGW RepoSet zip
 const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_STRING_READER", "CL_ABAP_ZIP", "CL_ABAP_UNIT_ASSERT", "ZCL_AJSON"]);
-// the definitions of the local classes compiled, by their compiled name
-const LOCAL_DEFS = new Map();
 // a class's definition: a global class of the registry, or a local class of
 // LOCAL_CLASSES by its compiled name (OWNER:LOCAL)
-const clasDef = (reg, name) => LOCAL_DEFS.get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
+// Track local definitions only for persisted lowerings. Ordinary sessions
+// retain main's module-local map, without adding reads to their transcripts.
+const LOCAL_DEFS = new Map();
+let PERSIST_LOWERING = false;
+const clasDef = (reg, name) => (PERSIST_LOWERING ? PROGRAM.localDefs : LOCAL_DEFS).get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
 
 function localClasses(reg, obj, includeTests = false) {
   const owner = upper(obj.getName());
@@ -5031,8 +5049,8 @@ function selectStatement(node, ctx, text) {
     if (sel.findDirectExpression(Expressions.SQLGroupBy) || sel.findFirstExpression(Expressions.SQLAggregation) || sel.findDirectExpression(Expressions.SQLOrderBy)) {
       throw new Unsupported(`FOR ALL ENTRIES with GROUP BY, an aggregate or ORDER BY: not measured: ${text}`);
     }
-    FAE_N += 1;
-    fae = {name: upper(drvSrc.concatTokens().replace(/^@/, "")), row: drv.type.row, n: FAE_N, table: drv};
+    const n = PERSIST_LOWERING ? ++ctx.program.faeN : ++FAE_N;
+    fae = {name: upper(drvSrc.concatTokens().replace(/^@/, "")), row: drv.type.row, n, table: drv};
   }
   const tb = selectTable(sel, ctx, text);
   const scalarAggregate = /^SELECT\s+(MAX|MIN|SUM)\s*\(\s*(\w+)\s*\)/i.exec(text);
@@ -5894,7 +5912,7 @@ function constructorSignature(ctx, clsName) {
   // a class without a constructor of its own is created through the
   // nearest superclass's
   // a local class (LOCAL_CLASSES) has its definition by its compiled name
-  const def = LOCAL_DEFS.get(clsName) ?? ctx.reg.getObject("CLAS", declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName)?.getDefinition();
+  const def = (PERSIST_LOWERING ? ctx.program.localDefs : LOCAL_DEFS).get(clsName) ?? ctx.reg.getObject("CLAS", declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName)?.getDefinition();
   const m = def?.getMethodDefinitions().getByName("CONSTRUCTOR");
   if (m === undefined) return [];
   const p = m.getParameters();
@@ -6748,7 +6766,7 @@ let PROGRAM = null;
 function implementsIntf(expr, cls, intf) {
   if (cls === intf) return true;
   for (const c of [cls, ...(REG ? ancestors(REG, cls) : [])]) {
-    const def = REG?.getObject("CLAS", c)?.getDefinition() ?? REG?.getObject("INTF", c)?.getDefinition() ?? LOCAL_DEFS.get(c);
+    const def = REG?.getObject("CLAS", c)?.getDefinition() ?? REG?.getObject("INTF", c)?.getDefinition() ?? (PERSIST_LOWERING ? PROGRAM.localDefs : LOCAL_DEFS).get(c);
     if ((def?.getImplementing?.() ?? []).some((i) => upper(i.name) === intf || (REG && componentInterfaces(REG, upper(i.name)).includes(intf)))) return true;
   }
   return false;
