@@ -613,6 +613,15 @@ E.2  A pack is a directory, not a rebuild                                [S]  DO
         hash is taken before the generators run and gen/ is an input. The
         dev loop does that second build by itself
 
+E.10 OCI layers and a system index                                      [M]
+     ├─ step 1: digest-pinned registry pull, OCI pack sources, tree digest
+     │  verification and self-describing fetched folders (PR #737)
+     ├─ step 2: reproducible abapGit layer build/push, ordered system index,
+     │  cross-repository mounts with upload fallback, inspection and a
+     │  fail-closed leak gate; manual GHCR smoke workflow (not run locally)
+     └─ formats and commands: docs/oci-layers.md; installing an entire system
+        from its index remains future work
+
 E.5  The launchpad sandbox asks for a config we do not serve   [S]  DONE 2026-09-19
      ├─ Alice, 2026-09-16, from the browser console on the second machine:
      │  GET /appconfig/fioriSandboxConfig.json answers 404 on every open,

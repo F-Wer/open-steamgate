@@ -297,6 +297,9 @@ pack's own `src/` comes **after** it in `abap`, so the few files a
 repository needs changed to run here are the overlay and nothing else, and
 `git status` of the pack shows exactly what was changed against upstream.
 
+For building and publishing layers and ordered systems, see
+[OCI layers and systems](oci-layers.md).
+
 An OCI registry can supply the same folder by manifest digest:
 
 ```json

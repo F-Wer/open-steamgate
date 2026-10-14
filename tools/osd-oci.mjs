@@ -84,9 +84,10 @@ export function client(ref, options = {}) {
   const env = options.env ?? process.env;
   const fetchImpl = options.fetch ?? fetch;
   let bearer;
-  async function get(path, headers = {}) {
-    const url = base(parsed) + `${parsed.repository}/${path}`;
-    const send = () => fetchImpl(url, {headers: {...headers, ...(bearer ? {authorization: `Bearer ${bearer}`} : {})}, redirect: "follow"});
+  async function request(path, {method = "GET", headers = {}, body, allow = []} = {}) {
+    const url = new URL(path, base(parsed) + `${parsed.repository}/`).href;
+    if (new URL(url).origin !== new URL(base(parsed)).origin) throw new OciError("UNSAFE_LOCATION", "registry upload location must have the same origin");
+    const send = () => fetchImpl(url, {method, body, headers: {...headers, ...(bearer ? {authorization: `Bearer ${bearer}`} : {})}, redirect: method === "GET" ? "follow" : "error"});
     let res = await send();
     if (res.status === 401 && !bearer) {
       const c = challenge(res.headers.get("www-authenticate"));
@@ -99,19 +100,19 @@ export function client(ref, options = {}) {
       }
       const q = realm.searchParams;
       if (c.service) q.set("service", c.service);
-      q.set("scope", c.scope ?? `repository:${parsed.repository}:pull`);
+      q.set("scope", options.push ? `repository:${parsed.repository}:pull,push` : c.scope ?? `repository:${parsed.repository}:pull`);
       const basic = credentials(parsed.registry, env);
       const t = await fetchImpl(realm.href, {headers: basic ? {authorization: `Basic ${basic}`} : {}, redirect: "error"});
       if (!t.ok) throw new OciError("UNAUTHORIZED", `${c.realm}: token request answered ${t.status}`);
-      const body = await t.json();
+      const body = JSON.parse((await boundedBody(t, JSON_LIMIT)).toString("utf8"));
       bearer = body.token ?? body.access_token;
       if (!bearer) throw new OciError("UNAUTHORIZED", `${c.realm}: no token in the answer`);
       res = await send();
     }
-    if (!res.ok) throw new OciError(res.status === 404 ? "NOT_FOUND" : "HTTP", `${url}: ${res.status}`);
+    if (!res.ok && !allow.includes(res.status)) throw new OciError(res.status === 404 ? "NOT_FOUND" : "HTTP", `${url}: ${res.status}`);
     return res;
   }
-  return {ref: parsed, get};
+  return {ref: parsed, request, get: (path, headers) => request(path, {headers})};
 }
 
 const JSON_LIMIT = 4 * 1024 * 1024;
@@ -214,4 +215,39 @@ export async function pull(ref, options = {}) {
   const layers = [];
   for (const descriptor of m.json.layers ?? []) layers.push({descriptor, bytes: await blob(ref, descriptor, {...options, client: c})});
   return {manifest: m, config, layers};
+}
+
+/** Upload verified bytes, mounting from another repository when possible. */
+export async function pushBlob(ref, bytes, options = {}) {
+  const c = options.client ?? client(ref, {...options, push: true});
+  const digest = sha256(bytes);
+  const head = await c.request(`blobs/${digest}`, {method: "HEAD", allow: [404]});
+  if (head.ok) return digest;
+  const mount = options.from ? `?mount=${digest}&from=${encodeURIComponent(options.from)}` : "";
+  const start = await c.request(`blobs/uploads/${mount}`, {method: "POST"});
+  if (start.status === 201) return digest;
+  const location = start.headers.get("location");
+  if (!location) throw new OciError("BAD_UPLOAD", "registry omitted upload Location");
+  const url = new URL(location, base(c.ref) + `${c.ref.repository}/blobs/uploads/`);
+  url.searchParams.set("digest", digest);
+  await c.request(url.href, {method: "PUT", body: bytes, headers: {"content-type": "application/octet-stream"}});
+  return digest;
+}
+
+/** PUT by tag or digest; the result is always the digest of the exact bytes. */
+export async function pushManifest(ref, bytes, options = {}) {
+  if (bytes.length > JSON_LIMIT) throw new OciError("SIZE_MISMATCH", "manifest exceeds 4 MiB");
+  const c = options.client ?? client(ref, {...options, push: true});
+  const digest = sha256(bytes);
+  if (c.ref.digest && c.ref.digest !== digest) throw new OciError("DIGEST_MISMATCH", "manifest does not match destination digest");
+  await c.request(`manifests/${c.ref.digest ?? c.ref.tag}`, {method: "PUT", body: bytes,
+    headers: {"content-type": JSON.parse(bytes).mediaType}});
+  return digest;
+}
+
+/** Push a built layer's blobs followed by its manifest. */
+export async function push(ref, layer, options = {}) {
+  const c = client(ref, {...options, push: true});
+  for (const bytes of [layer.configBytes, layer.zip]) await pushBlob(ref, bytes, {...options, client: c});
+  return pushManifest(ref, layer.manifestBytes, {...options, client: c});
 }

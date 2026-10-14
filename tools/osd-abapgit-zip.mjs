@@ -353,13 +353,17 @@ export function zipInProcess(dir) {
   };
   for (const r of roots) walk(r);
   paths.sort();
+  return zipFiles(paths.map((path) => ({path, bytes: readFileSync(join(dir, path))})), {level: 6});
+}
+
+/** Deterministic ZIP over a sorted list of files, shared with OCI layers. */
+export function zipFiles(files, {level = 9} = {}) {
   const DOS_DATE = (0 << 9) | (1 << 5) | 1; // 1980-01-01
   const locals = [];
   const centrals = [];
   let offset = 0;
-  for (const p of paths) {
-    const data = readFileSync(join(dir, p));
-    const packed = deflateRawSync(data);
+  for (const {path: p, bytes: data} of files) {
+    const packed = deflateRawSync(data, {level});
     const name = Buffer.from(p, "utf8");
     const crc = crc32(data);
     const head = Buffer.alloc(30);
@@ -394,8 +398,8 @@ export function zipInProcess(dir) {
   const central = Buffer.concat(centrals);
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(paths.length, 8);
-  end.writeUInt16LE(paths.length, 10);
+  end.writeUInt16LE(files.length, 8);
+  end.writeUInt16LE(files.length, 10);
   end.writeUInt32LE(central.length, 12);
   end.writeUInt32LE(offset, 16);
   return Buffer.concat([...locals, central, end]);
