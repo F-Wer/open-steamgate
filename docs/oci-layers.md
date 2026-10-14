@@ -37,18 +37,24 @@ with `org.opencontainers.image.title` equal to `<name>.zip`. Config and blob
 descriptors contain the SHA-256 digest and byte size of their exact bytes.
 
 The ZIP is an abapGit offline repository. When the folder contains a root
-`.abapgit.xml`, all its files retain their relative paths, including its
+`.abapgit.xml`, its files retain their relative paths, including its
 STARTING_FOLDER layout. Otherwise all files are placed under `src/` and the
 builder generates `.abapgit.xml` with STARTING_FOLDER `/src/`. Symlinks and
 other nonregular entries are refused, as is `.osd-source.json` at any depth;
 build from the original source tree rather than a fetched tree's identity file.
+The builder skips `.git` (directories and files) and `node_modules` at any
+depth and logs each exclusion. Copied layers containing them are refused.
 
-Files are sorted by UTF-8 path bytes, deflated at explicit level 9, and encoded
-with UTF-8 flags, fixed version fields, no extra fields and the fixed ZIP date
+Files are sorted by UTF-8 path bytes, stored without compression (method 0),
+and encoded with UTF-8 flags, fixed version fields, no extra fields and the fixed ZIP date
 1980-01-01. No current timestamps appear in the config, manifest or index.
 The shared ZIP encoder also serves `osd-abapgit-zip`'s in-process path, which
 retains its existing compression level. Rebuilding the same inputs produces
-identical ZIP, config and manifest bytes.
+identical ZIP, config and manifest bytes across Node and Bun: the digest is
+runtime-independent because entries are stored. abapGit's `cl_abap_zip` reads
+method 0. Before republishing a layer, the tool extracts and re-encodes its
+ZIP and requires byte equality (`NOT_CANONICAL` otherwise), rejecting comments,
+extra fields, compression and differing entry order. It also verifies treeDigest.
 
 `treeDigest` uses `tools/osd-oci.mjs`'s shared helper: SHA-256 of concatenated
 `<content sha256 hex>  <archive relative path>\n` lines, sorted by UTF-8 path
@@ -59,6 +65,9 @@ this before selecting `path` (default `src`) and applying exclusions:
 ```json
 {"sources":[{"folder":"upstream","oci":"ghcr.io/owner/osd/example@sha256:<64-hex>","path":"src","exclude":[]}]}
 ```
+
+A layer whose STARTING_FOLDER is not `/src/` needs an explicit `path` in the
+pack source, for example `"path":"objects"` for STARTING_FOLDER `/objects/`.
 
 ## System format
 
@@ -72,9 +81,10 @@ them; array position alone does not establish order. Inspect checks the index
 identity against each layer config and verifies each layer's tree digest.
 
 Index annotations include `org.osd.osg.commit` from `git rev-parse HEAD` of the
-building OSG tree when available, and `org.osd.transpiler` as `repo@ref` from
-that tree's `libs.lock.json`. `OSD_ROOT` selects that tree; otherwise it is the
-working directory. There is no created timestamp.
+tool's OSG checkout (resolved relative to the module), omitted when it has no
+Git metadata. `org.osd.transpiler` is `repo@ref` from `libs.lock.json` under
+`OSD_ROOT` or the working directory, omitted when no transpiler is recorded.
+There is no created timestamp.
 
 All referenced manifests and blobs live in the index's repository. Descriptors
 carry no repository. For layers from other repositories on the same registry,
@@ -95,11 +105,16 @@ must be HTTPS except for local test registries. JSON reads are capped at 4 MiB;
 blob reads are bounded by their descriptor size and verified by digest.
 
 Before any registry write, the layer CLI runs `tools/osd-leak-scan.mjs --paths`
-over a temporary copy of the publishable files and config/annotations JSON.
+over every published file's content under neutral `content/000001.txt` names,
+a `paths.txt` listing archive paths, and `meta.json` with config, manifest/index
+annotations and destination references (repository and tag). Original OCI JSON
+bytes also pass through the neutral content scan before publication. Files and
+metadata exceeding the scanner's 8 MiB size limit are refused rather than skipped.
 A system scans every downloaded layer and the index before copying anything.
-Any failed scan, including a missing identifier list, refuses publication with
-`LEAK` and CLI exit 2. The scanner finds `.local/leak-identifiers.json` or the
-path in `OSD_LEAK_IDENTIFIERS` using its normal lookup rules. Findings are
+Scanner exit 1 refuses publication with `LEAK` and redacted findings (CLI exit 2).
+Scanner exit 2, including a missing identifier list, or a spawn failure refuses
+with `SCAN_FAILED` and its reason. The scanner finds `.local/leak-identifiers.json`
+or the path in `OSD_LEAK_IDENTIFIERS` using its normal lookup rules. Findings are
 redacted. The gate does not change or weaken scanner rules.
 
 `.github/workflows/oci-layers.yml` is manual only. It publishes two smoke

@@ -1,9 +1,10 @@
 import {expect} from "chai";
-import {spawnSync} from "node:child_process";
+import {execFileSync, spawnSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {abapgitXml} from "../tools/osd-abapgit-zip.mjs";
+import {load as parseYaml} from "js-yaml";
+import {abapgitXml, zipFiles} from "../tools/osd-abapgit-zip.mjs";
 import {build, inspect, leakGate, main, pushSystem, systemLayers} from "../tools/osd-layer.mjs";
 import {manifest, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "../tools/osd-oci.mjs";
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
@@ -144,10 +145,6 @@ describe("osd-layer: reproducible publishing", function () {
       expect(result.stderr).to.include("LEAK");
       expect(r.requests).to.equal(0);
       rmSync(join(folder, "secret.txt"));
-      write(join(folder, ".git/private.txt"), "forbidden_publish_identifier");
-      await refusal(() => main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "pack"]), "LEAK");
-      expect(r.requests).to.equal(0);
-      rmSync(join(folder, ".git"), {recursive: true});
       await refusal(() => main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "pack", "--source", "forbidden_publish_identifier@abc:src"]), "LEAK");
       expect(r.requests).to.equal(0);
     } finally { await new Promise((done) => r.server.close(done)); }
@@ -165,13 +162,169 @@ describe("osd-layer: reproducible publishing", function () {
     } finally { await new Promise((done) => r.server.close(done)); }
   });
 
+  it("scans original config and manifest bytes before copying foreign layers", async () => {
+    const r = registry(), host = await listening(r);
+    try {
+      const layer = build(folder, options);
+      // A duplicate JSON key disappears from the parsed config, but its bytes travel.
+      layer.configBytes = Buffer.from('{"name":"forbidden_publish_identifier",' + layer.configBytes.toString().slice(1));
+      Object.assign(layer.manifest.config, {digest: sha256(layer.configBytes), size: layer.configBytes.length});
+      layer.manifestBytes = Buffer.from(JSON.stringify(layer.manifest));
+      const digest = await push(`${host}/foreign/one:v1`, layer), uploads = r.uploads;
+      await refusal(() => pushSystem(`${host}/system/all:v1`, [`${host}/foreign/one@${digest}`]), "LEAK");
+      expect(r.uploads).to.equal(uploads);
+      expect(r.mounts).to.equal(0);
+    } finally { await new Promise((done) => r.server.close(done)); }
+  });
+
   it("fails closed without an identifier list", () => {
     delete process.env.OSD_LEAK_IDENTIFIERS;
     // In a standalone copy the scanner has neither repository nor sibling config.
     const scanner = join(root, "tools/osd-leak-scan.mjs");
     write(scanner, readFileSync(join(oldCwd, "tools/osd-leak-scan.mjs")));
+    write(join(root, "tools/osd-main.mjs"), readFileSync(join(oldCwd, "tools/osd-main.mjs")));
     process.env.OSD_SELF = JSON.stringify([process.execPath, join(oldCwd, "test/helpers/osd-layer-host.mjs"), root]);
-    expect(() => leakGate([build(folder, options).files], {})).to.throw(/identifier list is missing/);
+    expect(() => leakGate([build(folder, options).files], {})).to.throw(/SCAN_FAILED/);
+  });
+
+  it("uses stored entries and identical Node/Bun child-process digests", () => {
+    write(join(folder, "varied.txt"), Array.from({length: 3000}, (_, i) => `line ${i % 71}: ${i * 17}\n`).join(""));
+    const script = join(oldCwd, "tools/osd-layer.mjs");
+    const run = (command, out) => {
+      const result = spawnSync(command, [script, "build", folder, "--name", "smoke", "--kind", "pack", "--out", out], {encoding: "utf8"});
+      expect(result.status, result.stderr).to.equal(0);
+      return [sha256(readFileSync(join(out, "smoke.zip"))), sha256(readFileSync(join(out, "manifest.json")))];
+    };
+    const node = run("node", join(root, "node"));
+    expect(readFileSync(join(root, "node/smoke.zip")).readUInt16LE(8)).to.equal(0);
+    if (spawnSync("bun", ["--version"]).error?.code === "ENOENT") {
+      console.log("Bun not on PATH: skipping Node/Bun digest comparison");
+      return;
+    }
+    expect(run("bun", join(root, "bun"))).to.deep.equal(node);
+  });
+
+  for (const foreign of ["comment", "deflate", "order", "treeDigest"]) it(`refuses foreign layer ${foreign} before destination writes`, async () => {
+    const r = registry(), host = await listening(r);
+    try {
+      const layer = build(folder, options);
+      if (foreign === "comment") {
+        const zip = Buffer.from(layer.zip);
+        const comment = Buffer.from("forbidden_publish_identifier");
+        zip.writeUInt16LE(comment.length, zip.length - 2);
+        layer.zip = Buffer.concat([zip, comment]);
+      } else if (foreign === "deflate") layer.zip = zipFiles(layer.files, {method: 8});
+      else if (foreign === "order") layer.zip = zipFiles([...layer.files].reverse(), {method: 0});
+      else {
+        layer.config.treeDigest = `sha256:${"0".repeat(64)}`;
+        layer.configBytes = Buffer.from(JSON.stringify(layer.config));
+        Object.assign(layer.manifest.config, {digest: sha256(layer.configBytes), size: layer.configBytes.length});
+      }
+      Object.assign(layer.manifest.layers[0], {digest: sha256(layer.zip), size: layer.zip.length});
+      layer.manifestBytes = Buffer.from(JSON.stringify(layer.manifest));
+      const digest = await push(`${host}/foreign/one:v1`, layer), uploads = r.uploads;
+      await refusal(() => pushSystem(`${host}/system/all:v1`, [`${host}/foreign/one@${digest}`]), foreign === "treeDigest" ? "TREE_MISMATCH" : "NOT_CANONICAL");
+      expect(r.uploads).to.equal(uploads);
+      expect(r.mounts).to.equal(0);
+    } finally { await new Promise((done) => r.server.close(done)); }
+  });
+
+  for (const name of ["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "go.sum", "Cargo.lock", ".leak-allow.json", ".git/objects/opaque"]) it(`scans content under neutral names: ${name}`, () => {
+    expect(() => leakGate([[{path: name, bytes: Buffer.from("forbidden_publish_identifier")}]], {})).to.throw(/LEAK|publish refused/);
+  });
+
+  it("refuses oversized content instead of skipping it", () => {
+    expect(() => leakGate([[{path: "large.txt", bytes: Buffer.alloc(8 * 1024 * 1024 + 1, 32)}]], {})).to.throw(/size limit/);
+  });
+
+  it("scans archive paths and reports redacted hits", () => {
+    expect(() => leakGate([[{path: "forbidden_publish_identifier.txt", bytes: Buffer.from("safe")}]], {})).to.throw(/sha256:/);
+  });
+
+  it("resolves the scanner from its module when unhosted in another cwd", () => {
+    delete process.env.OSD_SELF;
+    expect(() => leakGate([build(folder, options).files], {})).not.to.throw();
+    expect(() => leakGate([[{path: "safe", bytes: Buffer.from("forbidden_publish_identifier")}]], {})).to.throw(/sha256:/);
+  });
+
+  it("distinguishes scanner spawn failures and exit 2 from leaks", () => {
+    process.env.OSD_SELF = JSON.stringify([join(root, "missing-scanner")]);
+    expect(() => leakGate([build(folder, options).files], {})).to.throw(/SCAN_FAILED:.*ENOENT/);
+    process.env.OSD_SELF = JSON.stringify([process.execPath, "-e", "process.exit(2)"]);
+    expect(() => leakGate([build(folder, options).files], {})).to.throw(/SCAN_FAILED:.*2/);
+  });
+
+  for (const system of [false, true]) it(`scans ${system ? "system" : "layer"} destination references`, async () => {
+    const r = registry(), host = await listening(r);
+    try {
+      if (system) {
+        const digest = await push(`${host}/source/one:v1`, build(folder, options)), uploads = r.uploads;
+        await refusal(() => pushSystem(`${host}/system/all:forbidden_publish_identifier`, [`${host}/source/one@${digest}`]), "LEAK");
+        expect(r.uploads).to.equal(uploads);
+        expect(r.mounts).to.equal(0);
+      } else {
+        await refusal(() => main(["push", `${host}/forbidden_publish_identifier/pack:v1`, folder, "--name", "smoke", "--kind", "pack"]), "LEAK");
+        expect(r.requests).to.equal(0);
+      }
+    } finally { await new Promise((done) => r.server.close(done)); }
+  });
+
+  it("excludes .git directories, .git files and node_modules and logs exclusions", async () => {
+    const r = registry(), host = await listening(r), logs = [], original = console.error;
+    console.error = (...args) => logs.push(args.join(" "));
+    try {
+      write(join(folder, ".git/config"), "forbidden_publish_identifier");
+      write(join(folder, "nested/.git"), "forbidden_publish_identifier");
+      write(join(folder, "node_modules/pkg/index.js"), "forbidden_publish_identifier");
+      await main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "pack"]);
+      const layer = await pull(`${host}/osd/pack@${build(folder, options).digest}`);
+      expect([...archiveFiles(layer.layers[0].bytes).keys()]).to.deep.equal([".abapgit.xml", "src/zcl_smoke.clas.abap"]);
+      expect(logs.join("\n")).to.include(".git").and.include("node_modules");
+    } finally { console.error = original; await new Promise((done) => r.server.close(done)); }
+  });
+
+  it("preserves upload Location query bytes", async () => {
+    const requests = [], bytes = Buffer.from("zip");
+    await pushBlob("registry.example/osd/pack:v1", bytes, {fetch: async (url) => {
+      requests.push(String(url));
+      if (requests.length === 1) return new Response(null, {status: 404});
+      if (requests.length === 2) return new Response(null, {status: 202, headers: {location: "/upload?token=a%20b&signature=x~y"}});
+      return new Response(null, {status: 201});
+    }});
+    expect(requests[2]).to.equal(`https://registry.example/upload?token=a%20b&signature=x~y&digest=${encodeURIComponent(sha256(bytes))}`);
+  });
+
+  it("keeps publication credentials out of install steps", () => {
+    const workflow = parseYaml(readFileSync(join(oldCwd, ".github/workflows/oci-layers.yml"), "utf8"));
+    const job = workflow.jobs.smoke;
+    expect(job.env).not.to.have.property("GITHUB_TOKEN");
+    expect(job.env).not.to.have.property("GITHUB_ACTOR");
+    expect(job.steps.find((s) => s.uses?.startsWith("actions/checkout")).with["persist-credentials"]).to.equal(false);
+    const publish = job.steps.find((s) => s.name?.startsWith("publish two"));
+    expect(publish.env).to.have.property("GITHUB_TOKEN");
+    expect(publish.env).to.have.property("GITHUB_ACTOR");
+  });
+
+  for (const check of ["absent transpiler", "tool checkout commit", "downloads blobs only once"]) it(`handles ${check}`, async () => {
+    write(join(root, "libs.lock.json"), JSON.stringify(check === "absent transpiler" ? {} : {transpiler: {repo: "example/transpiler", ref: "test"}}));
+    execFileSync("git", ["init", "--quiet"], {cwd: root});
+    execFileSync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "fixture"], {cwd: root});
+    const r = registry({mount: false}), host = await listening(r), reads = new Map();
+    const fetchOnce = async (url, init) => {
+      if ((!init?.method || init.method === "GET") && String(url).includes("/blobs/")) {
+        reads.set(String(url), (reads.get(String(url)) ?? 0) + 1);
+        if (check === "downloads blobs only once") expect(reads.get(String(url)), String(url)).to.equal(1);
+      }
+      return fetch(url, init);
+    };
+    try {
+      const digest = await push(`${host}/source/one:v1`, build(folder, options));
+      const target = `${host}/system/all:v1`;
+      const index = await pushSystem(target, [`${host}/source/one@${digest}`], {root, fetch: fetchOnce});
+      const result = await manifest(`${host}/system/all@${index}`);
+      if (check === "absent transpiler") expect(result.json.annotations).not.to.have.property("org.osd.transpiler");
+      if (check === "tool checkout commit") expect(result.json.annotations["org.osd.osg.commit"]).to.equal(execFileSync("git", ["rev-parse", "HEAD"], {cwd: oldCwd, encoding: "utf8"}).trim());
+    } finally { await new Promise((done) => r.server.close(done)); }
   });
 
   it("refuses upload redirects to another origin before forwarding a token", async () => {

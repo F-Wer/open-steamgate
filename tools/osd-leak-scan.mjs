@@ -28,10 +28,13 @@ import {createHash} from "node:crypto";
 // gitignored, and the scan says so when it is missing rather than passing
 // quietly: a check that silently loses half its patterns is the failure this
 // tool exists to prevent.
+import {runsAs} from "./osd-main.mjs";
 import {fileURLToPath} from "node:url";
 import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { resolve, join, relative } from "node:path";
+
+export const MAX_SCAN_BYTES = 8 * 1024 * 1024;
 
 const PRIVATE_V4 =
   /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g;
@@ -284,7 +287,7 @@ function scan(root, sources, names) {
     } else {
       text = source.text;
     }
-    if (text.length > 8 * 1024 * 1024) continue;
+    if (text.length > MAX_SCAN_BYTES) continue;
 
     const seen = new Set();
     const note = (how, what, value) => {
@@ -355,91 +358,93 @@ function namedFiles(root, paths) {
   return out;
 }
 
-const args = process.argv.slice(2);
-// the root positional is only what stands before --paths / --range, whose own
-// arguments are positionals too and are not the root
-const beforeLists = args.slice(0, Math.min(
-  ...[args.indexOf("--paths"), args.indexOf("--range")].filter((i) => i >= 0).concat([args.length]),
-));
-const rootArg = beforeLists.find((a) => !a.startsWith("--")) ?? ".";
-const root = resolve(rootArg);
-const all = args.includes("--all");
-const rangeAt = args.indexOf("--range");
-// everything after --range is passed to rev-list, minus the root positional
-// wherever it landed: `--range <local> --not --remotes=origin` is three tokens,
-// and only the whole of it names the commits a push actually adds.
-const rangeArgs = rangeAt >= 0 ? args.slice(rangeAt + 1).filter((a) => a !== rootArg) : null;
-const pathsAt = args.indexOf("--paths");
-const pathArgs = pathsAt >= 0 ? args.slice(pathsAt + 1).filter((a) => !a.startsWith("--")) : null;
+if (runsAs("osd-leak-scan.mjs")) {
+  const args = process.argv.slice(2);
+  // the root positional is only what stands before --paths / --range, whose own
+  // arguments are positionals too and are not the root
+  const beforeLists = args.slice(0, Math.min(
+    ...[args.indexOf("--paths"), args.indexOf("--range")].filter((i) => i >= 0).concat([args.length]),
+  ));
+  const rootArg = beforeLists.find((a) => !a.startsWith("--")) ?? ".";
+  const root = resolve(rootArg);
+  const all = args.includes("--all");
+  const rangeAt = args.indexOf("--range");
+  // everything after --range is passed to rev-list, minus the root positional
+  // wherever it landed: `--range <local> --not --remotes=origin` is three tokens,
+  // and only the whole of it names the commits a push actually adds.
+  const rangeArgs = rangeAt >= 0 ? args.slice(rangeAt + 1).filter((a) => a !== rootArg) : null;
+  const pathsAt = args.indexOf("--paths");
+  const pathArgs = pathsAt >= 0 ? args.slice(pathsAt + 1).filter((a) => !a.startsWith("--")) : null;
 
-const names = identifiers(root);
-// In CI the list comes from an Actions secret and the log is public, so a hit
-// must not print the very name it caught, nor the category it is filed under
-// (a category name can say more than the name). --redact prints the file, the
-// kind of view, a category number and a short hash of the value; the same scan
-// on a machine with the list says what it is. --print-masks emits one
-// ::add-mask:: line per name and category, so the runner masks them anywhere
-// in the log as a second guard.
-const redact = args.includes("--redact") || process.env.OSD_LEAK_REDACT === "1";
-if (args.includes("--print-masks")) {
-  const seenMask = new Set();
-  for (const { kind, value } of names ?? []) {
-    for (const s of [kind, value]) {
-      if (seenMask.has(s)) continue;
-      seenMask.add(s);
-      console.log(`::add-mask::${s}`);
+  const names = identifiers(root);
+  // In CI the list comes from an Actions secret and the log is public, so a hit
+  // must not print the very name it caught, nor the category it is filed under
+  // (a category name can say more than the name). --redact prints the file, the
+  // kind of view, a category number and a short hash of the value; the same scan
+  // on a machine with the list says what it is. --print-masks emits one
+  // ::add-mask:: line per name and category, so the runner masks them anywhere
+  // in the log as a second guard.
+  const redact = args.includes("--redact") || process.env.OSD_LEAK_REDACT === "1";
+  if (args.includes("--print-masks")) {
+    const seenMask = new Set();
+    for (const { kind, value } of names ?? []) {
+      for (const s of [kind, value]) {
+        if (seenMask.has(s)) continue;
+        seenMask.add(s);
+        console.log(`::add-mask::${s}`);
+      }
     }
+    process.exit(names ? 0 : 2);
   }
-  process.exit(names ? 0 : 2);
-}
-const kinds = [...new Set((names ?? []).map((n) => n.kind))];
-const shown = (h) => {
-  if (!redact) return `${h.what} (${h.how}): ${h.text}`;
-  const n = kinds.indexOf(h.what);
-  const label = n >= 0 ? `имя из списка, категория #${n + 1}` : h.what;
-  const digest = createHash("sha256").update(h.text.toLowerCase()).digest("hex").slice(0, 8);
-  return `${label} (${h.how}): sha256:${digest}`;
-};
-const files = pathArgs
-  ? namedFiles(root, pathArgs)
-  : rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
-const hits = scan(root, files, names);
+  const kinds = [...new Set((names ?? []).map((n) => n.kind))];
+  const shown = (h) => {
+    if (!redact) return `${h.what} (${h.how}): ${h.text}`;
+    const n = kinds.indexOf(h.what);
+    const label = n >= 0 ? `имя из списка, категория #${n + 1}` : h.what;
+    const digest = createHash("sha256").update(h.text.toLowerCase()).digest("hex").slice(0, 8);
+    return `${label} (${h.how}): sha256:${digest}`;
+  };
+  const files = pathArgs
+    ? namedFiles(root, pathArgs)
+    : rangeArgs ? blobsInRange(root, rangeArgs) : all ? trackedFiles(root) : stagedFiles(root);
+  const hits = scan(root, files, names);
 
-if (!names) {
-  console.error(
-    "osd-leak-scan: нет .local/leak-identifiers.json — структурные правила работают,\n" +
-    "               но имена хостов и пользователей не проверены. Это половина проверки.",
-  );
-}
-console.error(`osd-leak-scan: ${files.length} файлов, ${hits.length} совпадений`);
-
-// Nothing looked at is not a pass. A scan that reads no file prints the same
-// reassuring line as a clean one, which is how a folder of drafts under
-// .local/ was called clean by a check that could not see it. Only the
-// explicit mode fails on it: staging nothing, or pushing nothing, is a
-// legitimate empty set and must not block a commit.
-if (files.length === 0) {
-  const explicit = pathArgs !== null;
-  console.error(
-    "osd-leak-scan: ни одного файла не прочитано — это не \"чисто\", это \"нечего было смотреть\"." +
-    (explicit ? "" : "\n               Для файлов вне git: node tools/osd-leak-scan.mjs --paths <путь> [<путь>…]"),
-  );
-  if (explicit) process.exit(2);
-}
-
-if (hits.length) {
-  const byFile = new Map();
-  for (const h of hits) {
-    if (!byFile.has(h.file)) byFile.set(h.file, []);
-    byFile.get(h.file).push(h);
+  if (!names) {
+    console.error(
+      "osd-leak-scan: нет .local/leak-identifiers.json — структурные правила работают,\n" +
+      "               но имена хостов и пользователей не проверены. Это половина проверки.",
+    );
   }
-  console.error("");
-  for (const [file, list] of byFile) {
-    console.error(`  ${file}`);
-    for (const h of list) console.error(`      ${shown(h)}`);
+  console.error(`osd-leak-scan: ${files.length} файлов, ${hits.length} совпадений`);
+
+  // Nothing looked at is not a pass. A scan that reads no file prints the same
+  // reassuring line as a clean one, which is how a folder of drafts under
+  // .local/ was called clean by a check that could not see it. Only the
+  // explicit mode fails on it: staging nothing, or pushing nothing, is a
+  // legitimate empty set and must not block a commit.
+  if (files.length === 0) {
+    const explicit = pathArgs !== null;
+    console.error(
+      "osd-leak-scan: ни одного файла не прочитано — это не \"чисто\", это \"нечего было смотреть\"." +
+      (explicit ? "" : "\n               Для файлов вне git: node tools/osd-leak-scan.mjs --paths <путь> [<путь>…]"),
+    );
+    if (explicit) process.exit(2);
   }
-  console.error("");
-  console.error("Это публичный репозиторий. Вычисти или положи под .local/.");
-  process.exit(1);
+
+  if (hits.length) {
+    const byFile = new Map();
+    for (const h of hits) {
+      if (!byFile.has(h.file)) byFile.set(h.file, []);
+      byFile.get(h.file).push(h);
+    }
+    console.error("");
+    for (const [file, list] of byFile) {
+      console.error(`  ${file}`);
+      for (const h of list) console.error(`      ${shown(h)}`);
+    }
+    console.error("");
+    console.error("Это публичный репозиторий. Вычисти или положи под .local/.");
+    process.exit(1);
+  }
+  if (!names) process.exit(2);
 }
-if (!names) process.exit(2);

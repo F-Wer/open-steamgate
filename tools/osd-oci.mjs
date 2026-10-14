@@ -210,11 +210,11 @@ export async function pull(ref, options = {}) {
   if (empty && (descriptor.digest !== "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" || descriptor.size !== 2)) {
     throw new OciError("BAD_DESCRIPTOR", "invalid OCI empty config descriptor");
   }
-  const config = empty ? undefined : JSON.parse((await blob(ref, descriptor,
-    {...options, client: c, maxSize: JSON_LIMIT})).toString("utf8"));
+  const configBytes = empty ? undefined : await blob(ref, descriptor, {...options, client: c, maxSize: JSON_LIMIT});
+  const config = empty ? undefined : JSON.parse(configBytes.toString("utf8"));
   const layers = [];
   for (const descriptor of m.json.layers ?? []) layers.push({descriptor, bytes: await blob(ref, descriptor, {...options, client: c})});
-  return {manifest: m, config, layers};
+  return {manifest: m, config, configBytes, layers};
 }
 
 /** Upload verified bytes, mounting from another repository when possible. */
@@ -229,7 +229,7 @@ export async function pushBlob(ref, bytes, options = {}) {
   const location = start.headers.get("location");
   if (!location) throw new OciError("BAD_UPLOAD", "registry omitted upload Location");
   const url = new URL(location, base(c.ref) + `${c.ref.repository}/blobs/uploads/`);
-  url.searchParams.set("digest", digest);
+  url.search += `${url.search ? "&" : "?"}digest=${encodeURIComponent(digest)}`;
   await c.request(url.href, {method: "PUT", body: bytes, headers: {"content-type": "application/octet-stream"}});
   return digest;
 }

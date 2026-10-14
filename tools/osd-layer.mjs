@@ -1,13 +1,19 @@
 // Reproducible abapGit layers and ordered OCI systems (docs/oci-layers.md).
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {fileURLToPath} from "node:url";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {abapgitXml, zipFiles} from "./osd-abapgit-zip.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
-import {MEDIA, OciError, blob, client, formatRef, manifest, parseRef, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "./osd-oci.mjs";
+import {MEDIA, OciError, client, formatRef, manifest, parseRef, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "./osd-oci.mjs";
 import {toolCommand} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
+import {MAX_SCAN_BYTES} from "./osd-leak-scan.mjs";
+
+const moduleDir = dirname(fileURLToPath(import.meta.url));
+const toolRoot = resolve(moduleDir, "..");
+const layerZip = (files) => zipFiles([...files].sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path))), {method: 0});
 
 const LAYER = "application/vnd.osd.layer.v1";
 const SYSTEM = "application/vnd.osd.system.v1";
@@ -22,6 +28,10 @@ const fail = (code, message) => { throw new OciError(code, message); };
 function folderFiles(folder) {
   const files = [];
   const walk = (path) => {
+    if (path.split("/").some((part) => part === ".git" || part === "node_modules")) {
+      console.error(`osd-layer: skipping ${path}`);
+      return;
+    }
     const full = join(folder, path), st = lstatSync(full);
     if (path.split("/").includes(".osd-source.json")) fail("RESERVED_NAME", ".osd-source.json cannot be published");
     if (st.isDirectory()) {
@@ -50,7 +60,7 @@ export function build(folder, {name, kind, source} = {}) {
     annotations["org.opencontainers.image.source"] = m[1];
   }
   files.sort((a, b) => Buffer.compare(Buffer.from(a.path), Buffer.from(b.path)));
-  const zip = zipFiles(files), configBytes = jsonBytes(config);
+  const zip = layerZip(files), configBytes = jsonBytes(config);
   // Apply the pull reader's path, collision and size rules before publishing.
   archiveFiles(zip);
   const manifest = {schemaVersion: 2, mediaType: MEDIA.manifest, artifactType: LAYER,
@@ -61,26 +71,36 @@ export function build(folder, {name, kind, source} = {}) {
 }
 
 /** Scan the exact publishable tree and metadata, before the first write. */
-export function leakGate(trees, metadata) {
+export function leakGate(trees, metadata, documents = []) {
   const temp = mkdtempSync(join(tmpdir(), "osd-layer-scan-"));
   try {
-    const paths = [];
-    for (const [i, files] of trees.entries()) {
+    const paths = [], archivePaths = [];
+    mkdirSync(join(temp, "content"));
+    const content = (bytes, label) => {
+      if (bytes.length > MAX_SCAN_BYTES) fail("LEAK", `publish refused: ${label} exceeds scanner size limit (${MAX_SCAN_BYTES} bytes)`);
+      const file = join(temp, "content", `${String(paths.length + 1).padStart(6, "0")}.txt`);
+      writeFileSync(file, bytes);
+      paths.push(file);
+    };
+    for (const files of trees) {
       for (const {path, bytes} of files) {
-        const file = join(temp, `tree-${i}`, path);
-        mkdirSync(dirname(file), {recursive: true});
-        writeFileSync(file, bytes);
-        paths.push(file);
+        content(bytes, path);
+        archivePaths.push(path);
       }
     }
-    const metadataFile = join(temp, "metadata.json");
-    writeFileSync(metadataFile, JSON.stringify(metadata, null, 2));
-    // Explicit files also cover content under .git or node_modules, which
-    // the scanner skips when recursively discovering a folder.
-    paths.push(metadataFile);
-    const [command, ...args] = toolCommand("tools/osd-leak-scan.mjs", ["--redact", "--paths", ...paths]);
+    // Scan the original JSON bytes too: parsing can discard duplicate keys.
+    for (const bytes of documents) content(bytes, "OCI metadata");
+    for (const [name, bytes] of [["paths.txt", archivePaths.join("\n")], ["meta.json", JSON.stringify(metadata, null, 2)]]) {
+      if (Buffer.byteLength(bytes) > MAX_SCAN_BYTES) fail("LEAK", `publish refused: ${name} exceeds scanner size limit (${MAX_SCAN_BYTES} bytes)`);
+      const file = join(temp, name);
+      writeFileSync(file, bytes);
+      paths.push(file);
+    }
+    const [command, ...args] = toolCommand(join(moduleDir, "osd-leak-scan.mjs"), ["--redact", "--paths", ...paths]);
     const result = spawnSync(command, args, {encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
-    if (result.error || result.status !== 0) fail("LEAK", "publish refused: leak scan failed or identifier list is missing");
+    const reason = result.error?.message ?? result.stderr?.trim() ?? result.stdout?.trim();
+    if (result.error || result.status !== 0 && result.status !== 1) fail("SCAN_FAILED", `SCAN_FAILED: ${reason || `scanner exit ${result.status}, signal ${result.signal}`}`);
+    if (result.status === 1) fail("LEAK", `publish refused: ${reason || "scanner found identifiers"}`);
   } finally { rmSync(temp, {recursive: true, force: true}); }
 }
 
@@ -92,6 +112,8 @@ function validateLayer(layer) {
     || m.annotations?.[NAME] !== c.name || m.annotations?.[KIND] !== c.kind
     || m.layers[0].annotations?.["org.opencontainers.image.title"] !== `${c.name}.zip`) fail("BAD_LAYER", "invalid OSD layer");
   const files = [...archiveFiles(layer.layers[0].bytes)].map(([path, bytes]) => ({path, bytes}));
+  if (!layerZip(files).equals(layer.layers[0].bytes)) fail("NOT_CANONICAL", "layer ZIP is not canonical");
+  if (files.some(({path}) => path.split("/").some((part) => part === ".git" || part === "node_modules"))) fail("RESERVED_NAME", ".git and node_modules cannot be published");
   if (files.some(({path}) => path.split("/").includes(".osd-source.json"))) fail("RESERVED_NAME", ".osd-source.json cannot be published");
   if (treeDigest(files.map(({path, bytes}) => [path, bytes])) !== c.treeDigest) fail("TREE_MISMATCH", "layer treeDigest does not match its ZIP");
   return files;
@@ -109,12 +131,12 @@ export function systemLayers(index) {
 
 function systemAnnotations(root) {
   const out = {};
-  try { out["org.osd.osg.commit"] = execFileSync("git", ["rev-parse", "HEAD"], {cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}).trim(); }
+  try { out["org.osd.osg.commit"] = execFileSync("git", ["rev-parse", "HEAD"], {cwd: toolRoot, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}).trim(); }
   catch { /* A source distribution can have no Git metadata. */ }
   const lock = join(root, "libs.lock.json");
   if (existsSync(lock)) {
     const {transpiler} = JSON.parse(readFileSync(lock, "utf8"));
-    out["org.osd.transpiler"] = `${transpiler.repo}@${transpiler.ref}`;
+    if (transpiler) out["org.osd.transpiler"] = `${transpiler.repo}@${transpiler.ref}`;
   }
   return out;
 }
@@ -131,13 +153,13 @@ export async function pushSystem(target, refs, options = {}) {
     manifests: layers.map(({layer}, i) => ({...descriptor(MEDIA.manifest, layer.manifest.bytes),
       annotations: {[NAME]: layer.config.name, [KIND]: layer.config.kind, [ORDER]: String(i)}})),
     annotations: systemAnnotations(options.root ?? process.env.OSD_ROOT ?? process.cwd())};
-  leakGate(layers.map((l) => l.files), [index, ...layers.map(({layer}) => ({manifest: layer.manifest.json, config: layer.config}))]);
+  leakGate(layers.map((l) => l.files), {destination: target, index, layers: layers.map(({layer}) => ({manifest: layer.manifest.json, config: layer.config}))},
+    [jsonBytes(index), ...layers.flatMap(({layer}) => [layer.configBytes, layer.manifest.bytes])]);
   const c = client(target, {...options, push: true});
   for (const {ref, layer} of layers) {
     const src = parseRef(ref);
     if (src.registry === dest.registry && src.repository === dest.repository) continue;
-    for (const d of [layer.manifest.json.config, ...layer.manifest.json.layers]) {
-      const bytes = await blob(ref, d, options);
+    for (const bytes of [layer.configBytes, ...layer.layers.map((l) => l.bytes)]) {
       await pushBlob(target, bytes, {...options, client: c, from: src.registry === dest.registry ? src.repository : undefined});
     }
     await pushManifest(formatRef({...dest, digest: layer.manifest.digest}), layer.manifest.bytes, options);
@@ -191,7 +213,7 @@ export async function main(args) {
     for (const [name, bytes] of [[`${options.name}.zip`, layer.zip], ["config.json", layer.configBytes], ["manifest.json", layer.manifestBytes]]) writeFileSync(join(options.out, name), bytes);
     console.log(`treeDigest ${layer.config.treeDigest}\nmanifest ${layer.digest}`);
   } else {
-    leakGate([layer.files], {config: layer.config, manifest: layer.manifest});
+    leakGate([layer.files], {destination: positionals[0], config: layer.config, manifest: layer.manifest}, [layer.configBytes, layer.manifestBytes]);
     const digest = await push(positionals[0], layer);
     console.log(formatRef({...parseRef(positionals[0]), digest}));
   }

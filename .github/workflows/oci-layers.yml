@@ -16,11 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
-      GITHUB_ACTOR: '${{ github.actor }}'
       OSD_LEAK_REDACT: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -37,6 +37,8 @@ jobs:
           node tools/osd-leak-scan.mjs --print-masks
       - name: publish two layers and a system, inspect and fetch
         env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          GITHUB_ACTOR: '${{ github.actor }}'
           OWNER: '${{ github.repository_owner }}'
           RUN_ID: '${{ github.run_id }}'
         run: |

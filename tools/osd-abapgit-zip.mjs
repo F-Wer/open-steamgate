@@ -357,20 +357,21 @@ export function zipInProcess(dir) {
 }
 
 /** Deterministic ZIP over a sorted list of files, shared with OCI layers. */
-export function zipFiles(files, {level = 9} = {}) {
+export function zipFiles(files, {level = 9, method = 8} = {}) {
+  if (![0, 8].includes(method)) throw new Error("unsupported ZIP method");
   const DOS_DATE = (0 << 9) | (1 << 5) | 1; // 1980-01-01
   const locals = [];
   const centrals = [];
   let offset = 0;
   for (const {path: p, bytes: data} of files) {
-    const packed = deflateRawSync(data, {level});
+    const packed = method === 0 ? data : deflateRawSync(data, {level});
     const name = Buffer.from(p, "utf8");
     const crc = crc32(data);
     const head = Buffer.alloc(30);
     head.writeUInt32LE(0x04034b50, 0);
     head.writeUInt16LE(20, 4);
     head.writeUInt16LE(0x0800, 6); // UTF-8 names
-    head.writeUInt16LE(8, 8);
+    head.writeUInt16LE(method, 8);
     head.writeUInt16LE(0, 10);
     head.writeUInt16LE(DOS_DATE, 12);
     head.writeUInt32LE(crc, 14);
@@ -383,7 +384,7 @@ export function zipFiles(files, {level = 9} = {}) {
     cen.writeUInt16LE(20, 4);
     cen.writeUInt16LE(20, 6);
     cen.writeUInt16LE(0x0800, 8);
-    cen.writeUInt16LE(8, 10);
+    cen.writeUInt16LE(method, 10);
     cen.writeUInt16LE(0, 12);
     cen.writeUInt16LE(DOS_DATE, 14);
     cen.writeUInt32LE(crc, 16);
