@@ -41,6 +41,16 @@ describe("osd-oci: pulling a layer by digest", function () {
     } finally { r.server.close(); }
   });
 
+  it("round2: accepts gzip blobs whose decoded bytes exactly match descriptor size", async () => {
+    const r = registry({gzip: true}), host = await listening(r);
+    try {
+      const bytes = Buffer.from("small");
+      const digest = r.publish([bytes], {});
+      const result = await pull(`${host}/osd/pack@${digest}`, {cacheDir: cache});
+      expect(result.layers[0].bytes).to.deep.equal(bytes);
+    } finally { r.server.close(); }
+  });
+
   it("follows the Bearer challenge, verifies every digest and reads the cache the second time", async () => {
     const r = registry();
     const host = await listening(r);

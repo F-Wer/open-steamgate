@@ -1,17 +1,18 @@
 import {expect} from "chai";
-import {execFileSync} from "node:child_process";
-import fs, {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {execFileSync, spawn} from "node:child_process";
+import fs, {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {syncBuiltinESMExports} from "node:module";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {MARKER, FetchFailed, describeUnfetched, fetchAll, fetchSource, unfetched} from "../tools/osd-fetch.mjs";
-import {BadPack, packsOf} from "../tools/osd-packs.mjs";
+import {SOURCE, sourceOf, BadPack, packsOf} from "../tools/osd-packs.mjs";
 
 import {registry, listening} from "./helpers/oci-registry.mjs";
 import {treeDigest} from "../tools/osd-oci.mjs";
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {zipInProcess} from "../tools/osd-abapgit-zip.mjs";
-import {prepare} from "../tools/osd-build.mjs";
+import {filesIn, objectOf} from "../tools/osd-inputs.mjs";
+import {hashOf, prepare} from "../tools/osd-build.mjs";
 
 // Patch the real filesystem binding so failures exercise the old code too.
 async function withFsFaults(patches, run) {
@@ -287,17 +288,19 @@ describe("tools/osd-fetch: an OCI pack source", function () {
     });
   }
 
-  it("hardening 6: concurrent sources retain both installed identities in the marker", async () => {
+  it("round2: concurrent sources retain folder-local identities", async () => {
     const digest = r.publish([bytes], {});
     const pack = declare(digest);
     const one = pack.sources[0];
     const two = {...one, folder: "games", dir: join(dir, "games"), path: "src/sub"};
+    write("packs/theirs/osd-pack.json", JSON.stringify({abap: ["upstream", "games"], sources:
+      [one, two].map(({folder, oci, path, exclude}) => ({folder, oci, path, exclude}))}));
     const answers = await Promise.all([fetchSource(pack, one), fetchSource(pack, two)]);
-    const marker = JSON.parse(readFileSync(join(dir, MARKER)));
     for (const [source, answer] of [[one, answers[0]], [two, answers[1]]]) {
-      expect(marker[source.folder]).to.include({oci: source.oci, digest, files: answer.files, path: source.path});
+      expect(sourceOf(source.dir)).to.include({oci: source.oci, digest, files: answer.files, path: source.path});
       expect(readFileSync(join(source.dir, source === one ? "sub/zcl_two.clas.abap" : "zcl_two.clas.abap"), "utf8")).to.equal("* nested\r\n");
     }
+    expect(unfetched(root, {})).to.deep.equal([]);
     expect(readdirSync(dir).filter((p) => p.startsWith(".osd-fetch-"))).to.deep.equal([]);
   });
 
@@ -306,12 +309,12 @@ describe("tools/osd-fetch: an OCI pack source", function () {
     await fetchPack(pack);
     const logs = [];
     const answer = await withFsFaults({rmSync(remove, path, options) {
-      if (path.endsWith(".old")) throw new Error("cleanup failed");
+      if (path.includes(".osd-fetch-old-")) throw new Error("cleanup failed");
       remove(path, options);
     }}, () => fetchPack(pack, {force: true, log: (line) => logs.push(line)}));
     expect(answer.fetched).to.equal(true);
     expect(unfetched(root, {})).to.deep.equal([]);
-    const leftovers = readdirSync(dir).filter((p) => p.endsWith(".old"));
+    const leftovers = readdirSync(dir).filter((p) => p.startsWith(".osd-fetch-old-"));
     expect(leftovers).to.have.length(1);
     expect(leftovers[0]).to.match(/^\.osd-fetch-/);
     expect(readFileSync(".gitignore", "utf8").split("\n")).to.include("packs/*/.osd-fetch-*");
@@ -336,21 +339,112 @@ describe("tools/osd-fetch: an OCI pack source", function () {
     expect(existsSync(join(dir, MARKER))).to.equal(false);
   });
 
-  it("hardening 7: marker rename failure rolls back only this process's install", async () => {
+  it("round2: summary failure warns after a successful folder commit", async () => {
+    const pack = declare(r.publish([bytes], {})), logs = [];
+    const answer = await withFsFaults({renameSync(rename, from, to) {
+      if (to === join(dir, MARKER)) throw new Error("summary failed");
+      rename(from, to);
+    }}, () => fetchPack(pack, {log: line => logs.push(line)}));
+    expect(answer.fetched).to.equal(true);
+    expect(unfetched(root, {})).to.deep.equal([]);
+    expect(logs.join(" ")).to.contain("summary failed");
+  });
+
+  it("round2: rollback preserves the original error and attaches restoration failure", async () => {
     const pack = declare(r.publish([bytes], {}));
     await fetchPack(pack);
-    write("packs/theirs/upstream/sentinel", "old bytes");
-    const marker = readFileSync(join(dir, MARKER));
     let error;
     try {
       await withFsFaults({renameSync(rename, from, to) {
-        if (to === join(dir, MARKER)) throw new Error("marker rename failed");
+        if (to === pack.sources[0].dir) throw new Error(from.includes(".osd-fetch-old-") ? "restore failed" : "original failure");
         rename(from, to);
       }}, () => fetchPack(pack, {force: true}));
     } catch (e) { error = e; }
-    expect(error?.message).to.contain("marker rename failed");
-    expect(readFileSync(join(dir, "upstream/sentinel"), "utf8")).to.equal("old bytes");
-    expect(readFileSync(join(dir, MARKER))).to.deep.equal(marker);
+    expect(error?.message).to.contain("original failure");
+    expect(error?.cause?.message).to.equal("restore failed");
+    expect(unfetched(root, {})).to.have.length(1);
+  });
+
+  it("round2: legacy folders refetch and a read-only current pack is a no-op", async () => {
+    const pack = declare(r.publish([bytes], {}));
+    await fetchPack(pack);
+    rmSync(join(pack.sources[0].dir, SOURCE));
+    expect(unfetched(root, {})).to.have.length(1);
+    expect((await fetchPack(pack)).fetched).to.equal(true);
+    chmodSync(dir, 0o555);
+    try {
+      await withFsFaults({mkdirSync() { throw new Error("read-only directory"); }},
+        async () => expect((await fetchPack(pack)).fetched).to.equal(false));
+    } finally { chmodSync(dir, 0o755); }
+  });
+
+  it("round2: forced fetch timestamps do not change the generation or ABAP objects", async () => {
+    const pack = declare(r.publish([bytes], {}));
+    await fetchPack(pack);
+    const before = hashOf(root);
+    await new Promise(done => setTimeout(done, 5));
+    await fetchPack(pack, {force: true});
+    expect(hashOf(root)).to.equal(before);
+    expect(objectOf(SOURCE)).to.equal(undefined);
+    expect(filesIn(root, "packs/theirs/upstream").map(f => f.name)).not.to.include(SOURCE);
+  });
+
+  it("round2: readiness ignores the informational summary and leak scanning skips identity metadata", async () => {
+    const pack = declare(r.publish([bytes], {}));
+    await fetchPack(pack);
+    writeFileSync(join(dir, MARKER), "{}");
+    expect(unfetched(root, {})).to.deep.equal([]);
+    const identity = join(pack.sources[0].dir, SOURCE);
+    const entry = sourceOf(pack.sources[0].dir);
+    entry.repo = ["192", "168", "1", "10"].join(".");
+    writeFileSync(identity, JSON.stringify(entry));
+    const scan = execFileSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", identity], {encoding: "utf8"});
+    expect(scan).to.be.a("string");
+    rmSync(identity);
+    // Even a matching legacy summary cannot make this folder ready.
+    writeFileSync(join(dir, MARKER), JSON.stringify({upstream: {...entry, repo: undefined}}));
+    expect(unfetched(root, {})).to.have.length(1);
+  });
+
+  it("round2: concurrent fetches of the same folder stay self-consistent", async () => {
+    const pack = declare(r.publish([bytes], {}));
+    await Promise.all([fetchPack(pack), fetchPack(pack)]);
+    expect(sourceOf(pack.sources[0].dir)).to.include({oci: pack.sources[0].oci, files: 3});
+    expect(readFileSync(join(pack.sources[0].dir, "sub/zcl_two.clas.abap"), "utf8")).to.equal("* nested\r\n");
+    expect(unfetched(root, {})).to.deep.equal([]);
+  });
+
+  it("round2: a killed publisher carries B identity with B bytes through A-B-A", async () => {
+    const a = r.publish([bytes], {}), pack = declare(a);
+    await fetchPack(pack);
+    write("payload/src/zcl_one.clas.abap", "* B bytes");
+    const b = r.publish([zipInProcess(join(root, "payload"))], {});
+    declare(b);
+    const child = spawn(process.execPath, ["tools/osd-fetch.mjs"], {
+      env: {...process.env, OSD_ROOT: root, OSD_PACKS: "theirs", OSD_FETCH_TEST_PAUSE: "after-swap"},
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const exited = new Promise(done => child.once("exit", done));
+    try {
+      await new Promise((done, fail) => {
+        let output = "";
+        const timer = setTimeout(() => fail(new Error("publisher did not pause")), 5000);
+        child.stdout.on("data", chunk => {
+          output += chunk;
+          if (output.includes("OSD_FETCH_TEST_PAUSE=after-swap")) { clearTimeout(timer); done(); }
+        });
+        child.once("exit", () => { clearTimeout(timer); fail(new Error("publisher exited before pause")); });
+      });
+      child.kill("SIGKILL");
+      await exited;
+      expect(unfetched(root, {})).to.deep.equal([]);
+      expect(sourceOf(pack.sources[0].dir).oci).to.equal(`${host}/osd/pack@${b}`);
+      expect(readFileSync(join(pack.sources[0].dir, "zcl_one.clas.abap"), "utf8")).to.equal("* B bytes");
+      declare(a);
+      expect(unfetched(root, {})).to.have.length(1);
+      expect((await fetchPack(packsOf(root, {})[0])).fetched).to.equal(true);
+      expect(unfetched(root, {})).to.deep.equal([]);
+    } finally { child.kill("SIGKILL"); await exited; }
   });
 
   it("hardening 9: diagnostics preserve OCI error codes and name the reference once", async () => {

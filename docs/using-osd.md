@@ -328,19 +328,23 @@ A realm may have a different host (for example Docker Hub's auth service).
 `OSD_OCI_TOKEN`, set `OSD_OCI_REGISTRY` to the exact registry host (including
 its port, if any); these credentials are never used for other registries.
 
-Git and OCI fetches hold an exclusive pack lock, stage the replacement, and
-commit by renaming the marker. Concurrent sources retain both marker entries.
-Locks expire after ten minutes without a heartbeat. Stages, old folders and
-locks use ignored `.osd-fetch-*` names. Cleanup failure after commit logs a
-warning and leaves the old folder for later removal.
+Git and OCI fetches stage a complete replacement with its identity in
+`.osd-source.json` inside the folder, then publish with one rename. There is
+no pack lock. An existing folder is renamed to a unique ignored
+`.osd-fetch-old-*` name first; cleanup after publication is best effort.
+A crash may leave a missing folder, but never new bytes with an old identity.
 
-Readiness requires both the folder and a matching `.osd-fetched.json` entry:
-git compares `repo`, `ref`, `path`, `exclude`; OCI compares `oci`, `path`,
-`exclude`. A changed declaration or a folder without a marker needs fetching.
+Readiness reads the folder's `.osd-source.json`: git compares `repo`,
+`ref`, `path`, `exclude`; OCI compares `oci`, `path`, `exclude`.
+Legacy fetched folders without this file are missing and the next
+`osd-fetch` refetches them. The pack-level `.osd-fetched.json` is only an
+informational summary, written best effort. CI artifacts carry both files.
+The identity file is metadata, excluded from content scans and generation
+hashes; its timestamp does not change the generation.
 
-The fetched folder is not tracked (`packs/*/upstream/` is ignored); a marker
-beside the manifest says which commit it holds, a second run at the same
-commit does nothing, and `--force` fetches again. Pin `ref` to a commit: a
+The fetched folder is not tracked (`packs/*/upstream/` is ignored).
+A second run at the same identity needs no write access; `--force` fetches
+again. Pin `ref` to a commit: a
 generation is the hash of its inputs, and an input that moves under a branch
 name is a generation that changes with nobody changing anything. **A build
 refuses a pack whose declared source is not fetched**, naming the

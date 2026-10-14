@@ -42,6 +42,13 @@ import {TMP_FOLDER, tmpDisabled} from "./osd-tmp.mjs";
 export const MANIFEST = "osd-pack.json";
 export const PACKS_DIR = "packs";
 
+export const SOURCE = ".osd-source.json";
+
+export function sourceOf(folder) {
+  try { return JSON.parse(readFileSync(join(folder, SOURCE), "utf8")); }
+  catch { return undefined; }
+}
+
 export const MARKER = ".osd-fetched.json";
 
 export function markerOf(packDir) {
@@ -160,13 +167,12 @@ export function packAt(root, dir) {
       exclude: [s.exclude ?? []].flat().map((e) => String(e)),
     };
   });
-  const marker = markerOf(dir);
   return {
     root,
     sources,
     // absent folders and stale identities: an unfetched pack is a
     // different system, and it is said rather than built smaller
-    missing: sources.filter((s) => !isDir(s.dir) || !sourceMatches(s, marker[s.folder])),
+    missing: sources.filter((s) => !isDir(s.dir) || !sourceMatches(s, sourceOf(s.dir))),
     name,
     description: declared.description === undefined ? undefined : String(declared.description),
     dir,

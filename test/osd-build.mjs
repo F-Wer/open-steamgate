@@ -57,6 +57,7 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     write("packs/test/upstream/ztest.prog.abap", "REPORT ztest.");
     const marker = JSON.stringify({upstream: {oci, path: "src", exclude: [], files: 1}});
     write("packs/test/.osd-fetched.json", marker);
+    write("packs/test/upstream/.osd-source.json", JSON.stringify(JSON.parse(marker).upstream));
     for (const path of ["gen", "output", "build", ".local/lars", ".local/ci-artifact/transpiler"]) mkdirSync(join(root, path), {recursive: true});
     const archive = join(root, "artifact.tar");
     const packed = spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root, encoding: "utf8"});
@@ -65,6 +66,7 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     rmSync(join(root, "packs/test/.osd-fetched.json"));
     execFileSync("tar", ["-xf", archive], {cwd: root});
     expect(existsSync(join(root, "packs/test/.osd-fetched.json"))).to.equal(true);
+    expect(JSON.parse(readFileSync(join(root, "packs/test/upstream/.osd-source.json")))).to.deep.equal(JSON.parse(marker).upstream);
     expect(readFileSync(join(root, "packs/test/.osd-fetched.json"), "utf8")).to.equal(marker);
     expect(packsOf(root, {})[0].missing).to.deep.equal([]);
     // A pack without a marker remains archivable for compatibility.

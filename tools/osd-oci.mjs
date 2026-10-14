@@ -119,7 +119,8 @@ const JSON_LIMIT = 4 * 1024 * 1024;
 /** Check headers before reading, and cancel before retaining an oversized chunk. */
 async function boundedBody(res, cap) {
   const length = res.headers.get("content-length");
-  if (length !== null && Number(length) > cap) {
+  const encoding = res.headers.get("content-encoding");
+  if ((!encoding || encoding.toLowerCase() === "identity") && length !== null && Number(length) > cap) {
     await res.body?.cancel();
     throw new OciError("SIZE_MISMATCH", `body exceeds ${cap} bytes`);
   }

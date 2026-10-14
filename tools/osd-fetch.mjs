@@ -21,10 +21,10 @@
 // GitHub answers a fetch of any reachable commit; a server that does not
 // gets a full clone and a checkout instead, which is slower and the same.
 import {execFileSync} from "node:child_process";
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
-import {MARKER, markerOf, sourceMatches, packsOf} from "./osd-packs.mjs";
+import {MARKER, SOURCE, markerOf, sourceOf, sourceMatches, packsOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 import {pull, treeDigest} from "./osd-oci.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
@@ -98,93 +98,50 @@ function copyTree(from, to, exclude) {
   return files;
 }
 
-/** Serialize the folder swap and marker read/modify/write for every source. */
-async function packLock(pack) {
-  mkdirSync(pack.dir, {recursive: true});
-  const lock = join(pack.dir, ".osd-fetch-lock");
-  while (true) {
-    try {
-      mkdirSync(lock);
-      const owner = JSON.stringify({pid: process.pid, at: Date.now()});
-      try { writeFileSync(join(lock, "owner.json"), owner); }
-      catch (error) { rmSync(lock, {recursive: true, force: true}); throw error; }
-      const heartbeat = setInterval(() => {
-        try {
-          if (readFileSync(join(lock, "owner.json"), "utf8") === owner) {
-            const now = new Date();
-            utimesSync(lock, now, now);
-          }
-        } catch { /* A lost lock must not touch its successor. */ }
-      }, 60 * 1000);
-      heartbeat.unref();
-      return () => {
-        clearInterval(heartbeat);
-        if (existsSync(lock) && readFileSync(join(lock, "owner.json"), "utf8") === owner) {
-          rmSync(lock, {recursive: true, force: true});
-        }
-      };
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > 10 * 60 * 1000) {
-          // Rename stale locks out of the namespace before deleting them.
-          const stale = `${lock}-${process.pid}-${Date.now()}`;
-          renameSync(lock, stale);
-          rmSync(stale, {recursive: true, force: true});
-          continue;
-        }
-      } catch (error) {
-        if (error.code !== "ENOENT") throw error;
-      }
-      await new Promise((done) => setTimeout(done, 25));
-    }
+/** The staged folder carries its identity; its rename commits the install. */
+async function publish(pack, source, stage, entry, log) {
+  writeFileSync(join(stage, SOURCE), JSON.stringify(entry, null, 2) + "\n");
+  const old = stage.replace(".osd-fetch-stage-", ".osd-fetch-old-");
+  let movedOld = false;
+  if (existsSync(source.dir)) {
+    renameSync(source.dir, old);
+    movedOld = true;
   }
-}
-
-/** Marker rename commits the install. Cleanup after it is best effort. */
-function publish(pack, source, stage, entry, log) {
-  const marker = markerOf(pack.dir);
-  marker[source.folder] = entry;
-  const markerTemp = `${stage}.json`, old = `${stage}.old`;
-  let movedOld = false, installed = false;
   try {
-    writeFileSync(markerTemp, JSON.stringify(marker, null, 2) + "\n");
-    if (existsSync(source.dir)) {
-      renameSync(source.dir, old);
-      movedOld = true;
+    renameSync(stage, source.dir);
+  } catch (error) {
+    if (movedOld && !existsSync(source.dir)) {
+      try { renameSync(old, source.dir); }
+      catch (restoreError) { error.cause = restoreError; }
     }
-    try {
-      renameSync(stage, source.dir);
-      installed = true;
-      renameSync(markerTemp, join(pack.dir, MARKER));
-    } catch (error) {
-      // A failed stage rename never gives us ownership of the destination.
-      if (installed) rmSync(source.dir, {recursive: true, force: true});
-      if (movedOld) renameSync(old, source.dir);
-      throw error;
-    }
+    throw error;
+  }
+  if (process.env.OSD_FETCH_TEST_PAUSE === "after-swap") {
+    log("OSD_FETCH_TEST_PAUSE=after-swap");
+    await new Promise(() => { setInterval(() => {}, 1000); });
+  }
+  if (movedOld) {
     try { rmSync(old, {recursive: true, force: true}); }
     catch (error) { log(`warning: installed ${pack.name}/${source.folder}; cleanup left ${old}: ${error.message}`); }
+  }
+  const markerTemp = `${stage}.json`;
+  try {
+    const marker = markerOf(pack.dir);
+    marker[source.folder] = entry;
+    writeFileSync(markerTemp, JSON.stringify(marker, null, 2) + "\n");
+    renameSync(markerTemp, join(pack.dir, MARKER));
+  } catch (error) {
+    log(`warning: installed ${pack.name}/${source.folder}; summary failed: ${error.message}`);
   } finally {
     try { rmSync(markerTemp, {force: true}); }
     catch (error) { log(`warning: cleanup left ${markerTemp}: ${error.message}`); }
   }
 }
 
-/** fetch one source of one pack; a no-op when the marker already says this ref */
+/** Fetch one source; matching folder identity needs no write access. */
 export async function fetchSource(pack, source, options = {}) {
-  const release = await packLock(pack);
-  try { return await fetchLocked(pack, source, options); }
-  finally {
-    try { release(); }
-    catch (error) { (options.log ?? (() => {}))(`warning: lock cleanup failed: ${error.message}`); }
-  }
-}
-
-async function fetchLocked(pack, source, options) {
   const log = options.log ?? (() => {});
-  const marker = markerOf(pack.dir);
-  const before = marker[source.folder];
+  const before = sourceOf(source.dir);
   if (options.force !== true && existsSync(source.dir) && statSync(source.dir).isDirectory() && sourceMatches(source, before)) {
     log(`${pack.name}/${source.folder}: already at ${before.digest ? before.digest.slice(0, 19) : before.commit.slice(0, 12)}`);
     return {pack: pack.name, folder: source.folder, commit: before.commit, digest: before.digest, treeDigest: before.treeDigest, files: before.files, fetched: false};
@@ -200,7 +157,7 @@ async function fetchLocked(pack, source, options) {
     }
     stage = mkdtempSync(join(pack.dir, ".osd-fetch-stage-"));
     const files = copyTree(from, stage, source.exclude);
-    publish(pack, source, stage, {
+    await publish(pack, source, stage, {
       repo: source.repo, ref: source.ref, commit, path: source.path, exclude: source.exclude,
       files: files.length, at: new Date().toISOString(),
     }, log);
@@ -241,12 +198,14 @@ async function fetchOci(pack, source, log) {
       writeFileSync(join(stage, path), bytes);
       files++;
     }
-    publish(pack, source, stage, {oci: source.oci, digest: layer.manifest.digest, treeDigest: digest,
+    await publish(pack, source, stage, {oci: source.oci, digest: layer.manifest.digest, treeDigest: digest,
       path: source.path, exclude: source.exclude, files, at: new Date().toISOString()}, log);
     log(`${pack.name}/${source.folder}: ${files} files from ${source.oci.split("@")[1].slice(0, 19)} tree ${digest.slice(0, 19)}`);
     return {pack: pack.name, folder: source.folder, digest: layer.manifest.digest, treeDigest: digest, files, fetched: true};
   } catch (error) {
-    throw new FetchFailed(source.oci, undefined, error.message, error.code);
+    const failure = new FetchFailed(source.oci, undefined, error.message, error.code);
+    if (error.cause) failure.cause = error.cause;
+    throw failure;
   } finally {
     if (stage) {
       try { rmSync(stage, {recursive: true, force: true}); }

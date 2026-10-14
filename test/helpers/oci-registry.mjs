@@ -1,7 +1,8 @@
+import {gzipSync} from "node:zlib";
 import {createServer} from "node:http";
 import {MEDIA, sha256} from "../../tools/osd-oci.mjs";
 
-export function registry({token = "t0k", tamper = false} = {}) {
+export function registry({token = "t0k", tamper = false, gzip = false} = {}) {
   const blobs = new Map(), manifests = new Map(), tags = new Map();
   const put = (bytes) => { const d = sha256(bytes); blobs.set(d, bytes); return {digest: d, size: bytes.length}; };
   let tamperBlob, tamperManifest;
@@ -23,6 +24,11 @@ export function registry({token = "t0k", tamper = false} = {}) {
     if (m?.[1] === "blobs") blobRequests++;
     const body = m && (m[1] === "manifests" ? manifests.get(key) : blobs.get(key));
     if (!body) { res.writeHead(404); return res.end(); }
+    if (gzip && m[1] === "blobs") {
+      const encoded = gzipSync(body);
+      res.writeHead(200, {"content-encoding": "gzip", "content-length": encoded.length});
+      return res.end(encoded);
+    }
     res.writeHead(200, {"content-type": m[1] === "manifests" ? MEDIA.manifest : "application/octet-stream"});
     if (m[1] === "manifests" && key === tamperManifest) return res.end(Buffer.concat([body, Buffer.from(" ")]));
     res.end((tamper || key === tamperBlob) && m[1] === "blobs" ? Buffer.concat([body, Buffer.from("x")]).subarray(1) : body);
