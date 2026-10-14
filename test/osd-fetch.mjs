@@ -4,7 +4,13 @@ import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync}
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {MARKER, FetchFailed, describeUnfetched, fetchAll, fetchSource, unfetched} from "../tools/osd-fetch.mjs";
-import {packsOf} from "../tools/osd-packs.mjs";
+import {BadPack, packsOf} from "../tools/osd-packs.mjs";
+
+import {registry, listening} from "./helpers/oci-registry.mjs";
+import {treeDigest} from "../tools/osd-oci.mjs";
+import {archiveFiles} from "../tools/osd-source-zip.mjs";
+import {zipInProcess} from "../tools/osd-abapgit-zip.mjs";
+import {prepare} from "../tools/osd-build.mjs";
 
 // A pack may fetch a folder instead of carrying it: a repository, a commit
 // and a path in it, declared in the manifest, copied by tools/osd-fetch.mjs.
@@ -49,7 +55,7 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
     rmSync(repo, {recursive: true, force: true});
   });
 
-  it("reads the declaration and says the folder is not there yet", () => {
+  it("reads the declaration and says the folder is not there yet", async () => {
     const [pack] = packsOf(root, {});
     expect(pack.sources.map((s) => [s.folder, s.ref, s.path, s.exclude])).to.deep.equal([["upstream", commit, "src", ["\\.testclasses\\.abap$", "^zgui\\."]]]);
     expect(pack.missing.map((s) => s.folder)).to.deep.equal(["upstream"]);
@@ -59,9 +65,9 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
     expect(describeUnfetched(unfetched(root, {}))).to.contain("pack theirs fetches upstream from").and.to.contain("node tools/osd-fetch.mjs");
   });
 
-  it("fetches the path at the commit, minus what is excluded, and the pack is whole", () => {
+  it("fetches the path at the commit, minus what is excluded, and the pack is whole", async () => {
     const [pack] = packsOf(root, {});
-    const answer = fetchSource(pack, pack.sources[0]);
+    const answer = await fetchSource(pack, pack.sources[0]);
     expect(answer.fetched).to.equal(true);
     expect(answer.commit).to.equal(commit);
     expect(answer.files).to.equal(3);
@@ -82,11 +88,11 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
     expect(marker.upstream.files).to.equal(3);
   });
 
-  it("does nothing the second time at the same commit, and fetches again when the declaration moves", () => {
-    fetchAll(root, {env: {}});
+  it("does nothing the second time at the same commit, and fetches again when the declaration moves", async () => {
+    await fetchAll(root, {env: {}});
     const [pack] = packsOf(root, {});
-    expect(fetchSource(pack, pack.sources[0]).fetched).to.equal(false);
-    expect(fetchSource(pack, pack.sources[0], {force: true}).fetched).to.equal(true);
+    expect((await fetchSource(pack, pack.sources[0])).fetched).to.equal(false);
+    expect((await fetchSource(pack, pack.sources[0], {force: true})).fetched).to.equal(true);
     // the repository moves on, and the manifest is re-pinned to a branch
     write(repo, "src/zcl_new.clas.abap", "CLASS zcl_new DEFINITION PUBLIC.\nENDCLASS.\nCLASS zcl_new IMPLEMENTATION.\nENDCLASS.\n");
     rmSync(join(repo, "src/sub"), {recursive: true});
@@ -98,7 +104,7 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
       sources: [{folder: "upstream", repo: repo, ref: "main", path: "src"}],
     }));
     const [moved] = packsOf(root, {});
-    const answer = fetchSource(moved, moved.sources[0]);
+    const answer = await fetchSource(moved, moved.sources[0]);
     expect(answer.fetched).to.equal(true);
     expect(answer.commit).to.equal(second);
     // replaced whole: what the repository dropped is gone, what it added is there
@@ -107,12 +113,153 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
     expect(existsSync(join(root, "packs/theirs/upstream/zgui.prog.abap"))).to.equal(true);
   });
 
-  it("refuses a path the repository does not have, and leaves nothing behind", () => {
+  it("requires a marker and refetches when only the git repo changes", async () => {
+    const up = join(root, "packs/theirs/upstream");
+    mkdirSync(up);
+    expect(unfetched(root, {})).to.have.length(1);
+    await fetchAll(root, {env: {}});
+    const file = join(root, "packs/theirs/osd-pack.json");
+    const declared = JSON.parse(readFileSync(file));
+    // The same commit from another URL is a different declared source.
+    declared.sources[0].repo = `file://${repo}`;
+    writeFileSync(file, JSON.stringify(declared));
+    expect(unfetched(root, {})).to.have.length(1);
+    const [pack] = packsOf(root, {});
+    expect((await fetchSource(pack, pack.sources[0])).fetched).to.equal(true);
+    expect(unfetched(root, {})).to.deep.equal([]);
+  });
+
+  it("refuses a path the repository does not have, and leaves nothing behind", async () => {
     write(root, "packs/theirs/osd-pack.json", JSON.stringify({
       sources: [{folder: "upstream", repo: repo, ref: commit, path: "nowhere"}],
     }));
     const [pack] = packsOf(root, {});
-    expect(() => fetchSource(pack, pack.sources[0])).to.throw(FetchFailed, "no /nowhere in it");
+    let error;
+    try { await fetchSource(pack, pack.sources[0]); } catch (e) { error = e; }
+    expect(error).to.be.instanceOf(FetchFailed);
+    expect(error.message).to.contain("no /nowhere in it");
     expect(existsSync(join(root, "packs/theirs", MARKER))).to.equal(false);
+  });
+});
+
+describe("tools/osd-fetch: an OCI pack source", function () {
+  this.timeout(30000);
+  let root, r, host, dir, bytes;
+  const write = (file, content) => {
+    mkdirSync(join(root, file, ".."), {recursive: true});
+    writeFileSync(join(root, file), content);
+  };
+  const declare = (digest, extra = {}) => {
+    write("packs/theirs/osd-pack.json", JSON.stringify({abap: ["upstream"], sources: [
+      {folder: "upstream", oci: `${host}/osd/pack@${digest}`, ...extra},
+    ]}));
+    return packsOf(root, {})[0];
+  };
+  const fetchPack = (pack, options) => fetchSource(pack, pack.sources[0], options);
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), "osd-fetch-oci-"));
+    r = registry();
+    host = await listening(r);
+    dir = join(root, "packs/theirs");
+    write("abap_transpile.json", JSON.stringify({input_folder: ["src"], libs: []}));
+    write("payload/src/zcl_one.clas.abap", "CLASS zcl_one DEFINITION PUBLIC.\nENDCLASS.\nCLASS zcl_one IMPLEMENTATION.\nENDCLASS.\n");
+    write("payload/src/sub/zcl_two.clas.abap", "* nested\r\n");
+    write("payload/src/skip/zcl_skip.clas.abap", "* excluded");
+    write("payload/.abapgit.xml", "<abapGit/>");
+    bytes = zipInProcess(join(root, "payload"));
+  });
+  afterEach(async () => {
+    await new Promise((done) => r.server.close(done));
+    rmSync(root, {recursive: true, force: true});
+  });
+
+  it("selects path and exclusions, records identity, caches blobs and passes build readiness", async () => {
+    const digest = r.publish([bytes], {treeDigest: treeDigest(archiveFiles(bytes))});
+    const pack = declare(digest, {exclude: ["^SKIP$"]});
+    const logs = [];
+    const answer = await fetchPack(pack, {log: (line) => logs.push(line)});
+    expect(answer.files).to.equal(2);
+    expect(readFileSync(join(dir, "upstream/sub/zcl_two.clas.abap"), "utf8")).to.equal("* nested\r\n");
+    expect(existsSync(join(dir, "upstream/skip"))).to.equal(false);
+    expect(existsSync(join(dir, "upstream/.abapgit.xml"))).to.equal(false);
+    const marker = JSON.parse(readFileSync(join(dir, MARKER))).upstream;
+    expect(marker).to.include({oci: pack.sources[0].oci, digest, treeDigest: answer.treeDigest, path: "src", files: 2});
+    expect(marker.exclude).to.deep.equal(["^SKIP$"]);
+    expect(marker.at).to.be.a("string");
+    expect(logs[0]).to.contain("theirs/upstream: 2 files from sha256:").and.to.contain(" tree sha256:");
+    const before = r.blobRequests;
+    expect((await fetchPack(pack)).fetched).to.equal(false);
+    expect(r.blobRequests).to.equal(before);
+    expect((await fetchPack(pack, {force: true})).fetched).to.equal(true);
+    expect(r.blobRequests).to.equal(before);
+    expect(unfetched(root, {})).to.deep.equal([]);
+    expect(() => prepare(root)).not.to.throw();
+    declare(r.publish([bytes], {changed: true}));
+    expect(unfetched(root, {})).to.have.length(1);
+    expect(describeUnfetched(unfetched(root, {}))).to.contain(host);
+    let error;
+    try { prepare(root); } catch (e) { error = e; }
+    expect(error?.code).to.equal("UNFETCHED");
+  });
+
+  it("selects a nested path and requires every declared identity field to match", async () => {
+    const digest = r.publish([bytes], {});
+    const pack = declare(digest, {path: "src/sub"});
+    expect(pack.sources[0].exclude).to.deep.equal([]);
+    expect((await fetchPack(pack)).files).to.equal(1);
+    expect(existsSync(join(dir, "upstream/zcl_two.clas.abap"))).to.equal(true);
+    for (const change of [{path: "src"}, {path: "src/sub", exclude: ["two"]}]) {
+      declare(digest, change);
+      expect(unfetched(root, {})).to.have.length(1);
+    }
+    declare(digest, {path: "src/sub"});
+    expect(unfetched(root, {})).to.deep.equal([]);
+  });
+
+  it("accepts a single oras zip layer with an empty config", async () => {
+    const digest = r.publish([bytes], {}, {mediaType: "application/zip", title: "pack.zip", empty: true});
+    expect((await fetchPack(declare(digest))).files).to.equal(3);
+  });
+
+  for (const failure of ["TREE_MISMATCH", "DIGEST_MISMATCH", "unsafe ZIP", "media types"]) {
+    it(`preserves the previous folder and marker on ${failure}`, async () => {
+      const good = declare(r.publish([bytes], {}));
+      await fetchPack(good);
+      const marker = readFileSync(join(dir, MARKER));
+      const old = readFileSync(join(dir, "upstream/zcl_one.clas.abap"));
+      let config = {}, options = {}, payload = bytes;
+      if (failure === "TREE_MISMATCH") config = {treeDigest: "sha256:" + "0".repeat(64)};
+      if (failure === "DIGEST_MISMATCH") {
+        // Tamper only the layer, keeping its descriptor and size unchanged.
+        const blobDigest = r.put(bytes).digest;
+        r.tamperBlob = blobDigest;
+        // Drop the cached layer so this forced fetch checks registry bytes.
+        rmSync(join(root, ".local/oci/blobs/sha256", blobDigest.slice(7)));
+      }
+      if (failure === "unsafe ZIP") {
+        payload = Buffer.from(bytes);
+        const name = Buffer.from("src/zcl_one.clas.abap");
+        const bad = Buffer.from("../x".padEnd(name.length, "x"));
+        for (let at = payload.indexOf(name); at >= 0; at = payload.indexOf(name, at + name.length)) bad.copy(payload, at);
+      }
+      if (failure === "media types") options = {mediaType: "application/octet-stream"};
+      const pack = declare(r.publish([failure === "DIGEST_MISMATCH" ? bytes : payload], config, options));
+      let error;
+      try { await fetchPack(pack, {force: true}); } catch (e) { error = e; }
+      expect(error).to.be.instanceOf(FetchFailed);
+      const message = failure === "unsafe ZIP" ? "unsafe or unsupported source ZIP" : failure;
+      expect(error.message).to.contain(message);
+      if (failure === "media types") expect(error.message).to.contain("application/octet-stream");
+      expect(readFileSync(join(dir, MARKER))).to.deep.equal(marker);
+      expect(readFileSync(join(dir, "upstream/zcl_one.clas.abap"))).to.deep.equal(old);
+    });
+  }
+
+  it("refuses tags and mixed OCI/git declarations", () => {
+    const digest = "sha256:" + "a".repeat(64);
+    for (const extra of [{oci: `${host}/osd/pack:v1`}, {repo: "x"}, {ref: "main"}, {lock: "core"}]) {
+      expect(() => declare(digest, extra)).to.throw(BadPack);
+    }
   });
 });

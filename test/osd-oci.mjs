@@ -1,63 +1,27 @@
 // tools/osd-oci.mjs against a registry in this process: the v2 subset a
 // pull uses, with a Bearer challenge, so the token dance, digest checks and
 // the blob cache are exercised without the network.
-import {createServer} from "node:http";
 import {mkdtempSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {expect} from "chai";
-import {MEDIA, blob, manifest, parseRef, pull, sha256} from "../tools/osd-oci.mjs";
+import {blob, manifest, parseRef, pull, sha256, treeDigest} from "../tools/osd-oci.mjs";
 
-function registry({token = "t0k", tamper = false} = {}) {
-  const blobs = new Map(), manifests = new Map(), tags = new Map();
-  const put = (bytes) => { const d = sha256(bytes); blobs.set(d, bytes); return {digest: d, size: bytes.length}; };
-  let requests = 0, tokens = 0;
-  const server = createServer((req, res) => {
-    requests++;
-    const url = new URL(req.url, "http://x");
-    if (url.pathname === "/token") {
-      tokens++;
-      res.writeHead(200, {"content-type": "application/json"});
-      return res.end(JSON.stringify({token, scope: url.searchParams.get("scope")}));
-    }
-    if (req.headers.authorization !== `Bearer ${token}`) {
-      res.writeHead(401, {"www-authenticate": `Bearer realm="http://${req.headers.host}/token",service="test",scope="repository:osd/pack:pull"`});
-      return res.end();
-    }
-    const m = /^\/v2\/osd\/pack\/(manifests|blobs)\/(.+)$/.exec(url.pathname);
-    const key = m && (m[1] === "manifests" && tags.has(m[2]) ? tags.get(m[2]) : m[2]);
-    const body = m && (m[1] === "manifests" ? manifests.get(key) : blobs.get(key));
-    if (!body) { res.writeHead(404); return res.end(); }
-    res.writeHead(200, {"content-type": m[1] === "manifests" ? MEDIA.manifest : "application/octet-stream"});
-    res.end(tamper && m[1] === "blobs" ? Buffer.concat([body, Buffer.from("x")]).subarray(1) : body);
-  });
-  return {
-    server, put,
-    publish(layers, config) {
-      const cfg = put(Buffer.from(JSON.stringify(config)));
-      const json = {schemaVersion: 2, mediaType: MEDIA.manifest, artifactType: "application/vnd.osd.layer.v1",
-        config: {mediaType: "application/vnd.osd.layer.config.v1+json", ...cfg},
-        layers: layers.map((bytes) => ({mediaType: "application/vnd.osd.abapgit.zip", ...put(bytes)}))};
-      const bytes = Buffer.from(JSON.stringify(json));
-      const digest = sha256(bytes);
-      manifests.set(digest, bytes);
-      tags.set("v1", digest);
-      return digest;
-    },
-    get requests() { return requests; },
-    get tokens() { return tokens; },
-  };
-}
-
-async function listening(r) {
-  await new Promise((done) => r.server.listen(0, "127.0.0.1", done));
-  return `127.0.0.1:${r.server.address().port}`;
-}
+import {registry, listening} from "./helpers/oci-registry.mjs";
 
 describe("osd-oci: pulling a layer by digest", function () {
   let cache;
   beforeEach(() => { cache = mkdtempSync(join(tmpdir(), "osd-oci-")); });
   afterEach(() => rmSync(cache, {recursive: true, force: true}));
+
+  it("hashes every file in UTF-8 byte order without normalising content", () => {
+    const files = new Map([["é", Buffer.from("\ufeffx\r\n")], ["Z", Buffer.from("z")], ["a", Buffer.from("a")]]);
+    const lines = ["Z", "a", "é"].map((path) => `${sha256(files.get(path)).slice(7)}  ${path}\n`).join("");
+    expect(treeDigest(files)).to.equal(sha256(Buffer.from(lines)));
+    expect(treeDigest(new Map([...files].reverse()))).to.equal(treeDigest(files));
+    files.set("é", Buffer.from("x\n"));
+    expect(treeDigest(files)).not.to.equal(sha256(Buffer.from(lines)));
+  });
 
   it("parses references and refuses a tag unless asked to resolve it", async () => {
     const d = "sha256:" + "a".repeat(64);

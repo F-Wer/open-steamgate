@@ -37,6 +37,13 @@ export class OciError extends Error {
 
 export const sha256 = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 
+/** Every archive file, sorted by UTF-8 bytes; content is hashed as raw bytes. */
+export function treeDigest(files) {
+  const lines = [...files].sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+    .map(([path, bytes]) => `${sha256(bytes).slice(7)}  ${path}\n`).join("");
+  return sha256(Buffer.from(lines));
+}
+
 /** host/repository[:tag][@sha256:hex] as its parts; the host is required */
 export function parseRef(ref) {
   const m = /^([a-z0-9.-]+(?::\d+)?)\/([a-z0-9._\/-]+?)(?::([\w][\w.-]{0,127}))?(?:@(sha256:[0-9a-f]{64}))?$/.exec(ref);
