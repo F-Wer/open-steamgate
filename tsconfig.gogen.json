@@ -1,6 +1,8 @@
 {
   "compilerOptions": {
     "strict": true,
+    "types": ["node"],
+    "verbatimModuleSyntax": true,
     "noEmit": true,
     "erasableSyntaxOnly": true,
     "allowImportingTsExtensions": true,
@@ -15,6 +17,7 @@
   "include": [
     "tools/gogen/ir.ts",
     "tools/gogen/symbols.ts",
+    "tools/gogen/go-symbols.ts",
     "tools/gogen/emit-constructors.ts",
     "tools/gogen/frontend-find-results.ts"
   ]

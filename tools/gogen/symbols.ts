@@ -5,11 +5,8 @@ import {readFileSync, readdirSync, writeFileSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {emitGo} from "./emit-go.mjs";
 
-export const typeName = (s: string): string => {
-  const name = String(s).toUpperCase().replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
-  return name.startsWith("_") ? `N${name}` : name;
-};
-export const funcName = (cls: string, method: string): string => `${typeName(cls)}${cls.includes(":") ? "__OSD_METHOD__" : "_"}${typeName(method)}`;
+// Compatibility exports for callers that also collect symbol provenance.
+export {typeName, funcName} from "./go-symbols.ts";
 
 export function buildCommit(): string {
   try {
