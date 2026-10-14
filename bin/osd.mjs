@@ -107,6 +107,8 @@ if (typeof Bun !== "undefined") {
 setHostModules({identity: toolchainIdentity, Transpiler, Chunk, core, CallFunctionTranspiler, validationConfig, guiConverter: embeddedSeed ? guiConverter : undefined, plugin: undefined, where: "bundled", version: "bundled"});
 
 const GENERATORS = {
+  "osd-layer.mjs": () => import("../tools/osd-layer.mjs"),
+  "osd-leak-scan.mjs": () => import("../tools/osd-leak-scan.mjs"),
   "gogen-unit.mjs": () => import(pathToFileURL(resolve(process.cwd(), "tools/gogen/unit.mjs")).href),
   "osd-transpiler.mjs": () => import("../tools/osd-transpiler.mjs"),
   "osd-inputs.mjs": () => import("../tools/osd-inputs.mjs"),

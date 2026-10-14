@@ -1,0 +1,66 @@
+name: OCI layers smoke
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OSD_LEAK_REDACT: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: install the identifier list
+        env:
+          LEAK_IDENTIFIERS: '${{ secrets.OSD_LEAK_IDENTIFIERS }}'
+        run: |
+          test -n "$LEAK_IDENTIFIERS" || { echo '::error::OSD_LEAK_IDENTIFIERS is required for publishing'; exit 1; }
+          umask 077
+          mkdir -p .local
+          printf '%s' "$LEAK_IDENTIFIERS" > .local/leak-identifiers.json
+          node tools/osd-leak-scan.mjs --print-masks
+      - name: publish two layers and a system, inspect and fetch
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          GITHUB_ACTOR: '${{ github.actor }}'
+          OWNER: '${{ github.repository_owner }}'
+          RUN_ID: '${{ github.run_id }}'
+        run: |
+          registry_repo="ghcr.io/${OWNER,,}/open-steamgate"
+          smoke_ref=$(node tools/osd-layer.mjs push "$registry_repo/osd-layer-smoke:run-$RUN_ID" test/fixtures/oci-smoke --name smoke --kind pack)
+          upper_ref=$(node tools/osd-layer.mjs push "$registry_repo/osd-layer-smoke:upper-$RUN_ID" test/fixtures/oci-smoke --name upper --kind input)
+          system_ref=$(node tools/osd-layer.mjs system push "$registry_repo/osd-system-smoke:run-$RUN_ID" "$smoke_ref" "$upper_ref")
+          node tools/osd-layer.mjs inspect "$system_ref"
+          smoke_root=$(mktemp -d)
+          trap 'rm -rf "$smoke_root"' EXIT
+          export SMOKE_ROOT="$smoke_root" SMOKE_REF="$smoke_ref"
+          node --input-type=module <<'JS'
+          import {mkdirSync, writeFileSync} from 'node:fs';
+          import {join} from 'node:path';
+          const root = process.env.SMOKE_ROOT;
+          mkdirSync(join(root, 'packs/smoke'), {recursive: true});
+          writeFileSync(join(root, 'packs/smoke/osd-pack.json'), JSON.stringify({
+            name: 'smoke', abap: ['upstream'], sources: [{folder: 'upstream', oci: process.env.SMOKE_REF}]
+          }));
+          JS
+          OSD_ROOT="$smoke_root" node tools/osd-fetch.mjs smoke
+          cmp test/fixtures/oci-smoke/zcl_osd_smoke.clas.abap "$smoke_root/packs/smoke/upstream/zcl_osd_smoke.clas.abap"
+      - name: remove the identifier list
+        if: always()
+        run: rm -f .local/leak-identifiers.json
