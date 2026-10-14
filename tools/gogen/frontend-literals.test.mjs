@@ -25,9 +25,25 @@ test("the literal operator joins literals of one kind (inbox 049)", () => {
   assert.deepEqual(literals(p), ['"e":"str","value":"abcde`f"', '"e":"chars","value":"xyz"']);
 });
 
-test("a text literal with trailing blanks before & is refused, not guessed", () => {
+test("blanks inside joined text literals are kept, as SAP documents", () => {
   const p = compile("CASE p. WHEN 'ab ' & 'c'. r = 1. ENDCASE.");
-  assert.match(p.partial.join("\n"), /ZCL_LIT=>PICK .*trailing blanks before &/);
+  assert.deepEqual(p.partial, []);
+  assert.match(JSON.stringify(p.classes), /"e":"chars","value":"ab c","type":\{"k":"c","len":4\}/);
+});
+
+test("DATA(x) = 'ab' & 'cd' takes the joined length, not the first literal's", () => {
+  const p = compile("DATA(s) = 'ab' & 'cd'. r = strlen( s ).");
+  assert.deepEqual(p.partial, []);
+  assert.match(JSON.stringify(p.classes), /"s":"assign","target":\{[^}]*"name":"S"[^}]*"type":\{"k":"c","len":4\}/);
+});
+
+test("a DEFAULT joined by & is one literal", async () => {
+  const {literalText} = await import("./frontend-literals.mjs");
+  assert.deepEqual(literalText("`ab` & `c``d`"), {quote: "`", value: "abc`d"});
+  assert.deepEqual(literalText("'it''s' &\n 'x'"), {quote: "'", value: "it'sx"});
+  assert.equal(literalText("`ab` & 'cd'"), null);
+  assert.equal(literalText("`ab` & c_x"), null);
+  assert.deepEqual(literalText("`a`"), {quote: "`", value: "a"});
 });
 
 test("single literals keep their values", () => {

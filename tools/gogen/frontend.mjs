@@ -20,7 +20,7 @@ import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
 import {lowerBoolx} from "./frontend-boolx.mjs";
 import {builtin} from "./frontend-builtins.mjs";
-import {textLiteral} from "./frontend-literals.mjs";
+import {literalText, textLiteral} from "./frontend-literals.mjs";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
@@ -2543,10 +2543,12 @@ function statement(node, ctx) {
       // gives the argument's type: frac( f ) is an f (A4H: pulse 0.25, not 0)
       const name = upper(inline.findFirstExpression(Expressions.TargetField).concatTokens());
       const declared = ctx.locals.get(name);
-      if (declared && numeric(declared)) {
+      // abaplint types DATA(x) = 'ab' & 'cd' as the first literal, c LENGTH 2
+      const joined = declared?.k === "c" && src.findFirstExpression(Expressions.ConcatenatedConstant);
+      if (declared && (numeric(declared) || joined)) {
         let t;
         try { t = source(src, ctx).type; } catch (e) { if (!(e instanceof Unsupported)) throw e; }
-        if (t && numeric(t) && declared.k !== t.k) ctx.locals.set(name, t);
+        if (t && ((numeric(t) && declared.k !== t.k) || (joined && t.k === "c" && t.len !== declared.len))) ctx.locals.set(name, t);
       }
     }
     const target = lvalue(targets[0], ctx);
@@ -6432,8 +6434,8 @@ function defaultValue(p, ctx) {
     }
   }
   if (/^-?\d+$/.test(t)) return convert({e: "int", value: Number(t), type: I}, p.type);
-  if (/^'.*'$/s.test(t)) return convert({e: "chars", value: t.slice(1, -1), type: C(Math.max(1, t.length - 2))}, p.type);
-  if (/^`.*`$/s.test(t)) return convert({e: "str", value: t.slice(1, -1).replace(/``/g, "`"), type: S}, p.type);
+  const lit = literalText(t); // 'a', `b`, or `a` & `b`
+  if (lit) return convert(lit.quote === "`" ? {e: "str", value: lit.value, type: S} : {e: "chars", value: lit.value, type: C(Math.max(1, lit.value.length))}, p.type);
   if (/^abap_true$/i.test(t)) return convert({e: "chars", value: "X", type: C(1)}, p.type);
   if (/^abap_false$/i.test(t)) return convert({e: "chars", value: "", type: C(1)}, p.type);
   // a constant: CLS=>C, or C of the class or interface the method is declared in
