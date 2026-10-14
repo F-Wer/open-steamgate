@@ -56,25 +56,25 @@ describe("fresh checkout bootstrap", () => {
     });
   });
 
-  it("refuses Node releases missing required open-rfc or unflagged node:sqlite support", () => {
-    for (const version of ["22.14.0", "22.99.0", "23.4.0", "24.0.0", "24.99.99", "26.9.0"]) {
+  it("refuses Node releases missing unflagged type stripping, open-rfc or node:sqlite support", () => {
+    for (const version of ["22.18.0", "22.99.0", "23.6.0", "24.0.0", "24.99.99", "26.9.0"]) {
       expect(nodeVersionProblem(version), version).to.equal(undefined);
     }
-    for (const version of ["20.0.0", "22.9.0", "22.13.99", "23.0.0", "23.3.99", "not-a-version"]) {
+    for (const version of ["20.0.0", "22.9.0", "22.14.0", "22.17.99", "23.0.0", "23.5.99", "not-a-version"]) {
       expect(nodeVersionProblem(version), version).to.be.a("string");
     }
   });
 
   it("warns once and continues for Node versions outside open-rfc's tested engines", () => {
     const warnings = [];
-    for (const version of ["22.14.0", "24.0.0"]) {
+    for (const version of ["22.18.0", "24.0.0"]) {
       expect(() => requireSupportedNode(version, "bootstrap: ", (line) => warnings.push(line))).not.to.throw();
     }
     expect(warnings).to.deep.equal([]);
-    for (const version of ["23.4.0", "25.0.0", "26.9.0"]) {
+    for (const version of ["23.6.0", "25.0.0", "26.9.0"]) {
       expect(() => requireSupportedNode(version, "bootstrap: ", (line) => warnings.push(line))).not.to.throw();
     }
-    expect(warnings).to.deep.equal(["23.4.0", "25.0.0", "26.9.0"].map(
+    expect(warnings).to.deep.equal(["23.6.0", "25.0.0", "26.9.0"].map(
       (version) => `bootstrap: Node ${version} is untested with open-rfc engines ^22.14||^24`,
     ));
     expect(() => requireSupportedNode("22.9.0", "build-vsix: ", (line) => warnings.push(line)))

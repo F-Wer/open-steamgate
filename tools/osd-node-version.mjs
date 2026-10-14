@@ -1,4 +1,4 @@
-const REQUIREMENTS = "Node 22 needs >=22.14 (open-rfc); Node 23 needs >=23.4 (node:sqlite); .nvmrc selects Node 24.";
+const REQUIREMENTS = "Node 22 needs >=22.18 (unflagged TypeScript type stripping for tools/**/*.ts); Node 23 needs >=23.6 (type stripping; node:sqlite since 23.4); .nvmrc selects Node 24.";
 const UNTESTED = "untested with open-rfc engines ^22.14||^24";
 
 function parsedVersion(version) {
@@ -10,7 +10,7 @@ export function nodeVersionProblem(version) {
   const parsed = parsedVersion(version);
   if (parsed === undefined) return `Cannot read Node version ${JSON.stringify(version)}. ${REQUIREMENTS}`;
   const {major, minor} = parsed;
-  if (major < 22 || (major === 22 && minor < 14) || (major === 23 && minor < 4)) {
+  if (major < 22 || (major === 22 && minor < 18) || (major === 23 && minor < 6)) {
     return `Node ${version} is unsupported. ${REQUIREMENTS}`;
   }
   return undefined;

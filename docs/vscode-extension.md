@@ -1270,7 +1270,7 @@ not `vsce` -- as a plain zip of `[Content_Types].xml`, `extension.vsixmanifest`
 an `extension/` folder holding the extension's own files plus the compressed
 system seed at `extension/osd/seed.tar.br`.
 
-Build it from a fresh checkout with Node 22.14+ or Node 24 (the repository's
+Build it from a fresh checkout with Node 22.18+ or Node 24 (the repository's
 `.nvmrc` selects 24):
 
 ```sh

@@ -11,7 +11,7 @@
 | **Portainer** | Stacks → Add stack → Web editor, paste one YAML block from [`docs/spin.md`](docs/spin.md) (SQLite, DuckDB, PostgreSQL or HANA Express) | `http://<host>:8011/app/flp.html` |
 | **One binary (Bun)** | download `osd-linux-x64` / `osd-linux-arm64` / `osd-darwin-arm64` / `osd-darwin-x64` / `osd-windows-x64.exe` / `osd-windows-arm64.exe` from [Releases](https://github.com/oisee/open-steamgate/releases), then `mv osd-linux-x64 osd && chmod +x osd && ./osd up` | `http://localhost:3030/` |
 | **VS Code** | install [open-steamgate: local ABAP server](https://marketplace.visualstudio.com/items?itemName=oisee.open-steamgate), or the `.vsix` from [Releases](https://github.com/oisee/open-steamgate/releases) via *Extensions: Install from VSIX…*; then run **osd: Start** | the OSD tree in VS Code |
-| **Node, from source** | `npm ci && npm run bootstrap && npm start` (Node 22.14+ or 24) | `http://localhost:3030/` |
+| **Node, from source** | `npm ci && npm run bootstrap && npm start` (Node 22.18+ or 24) | `http://localhost:3030/` |
 | **Your report as a CLI tool** | `node tools/gogen/osabap.mjs zmy_report.prog.abap`, then `tools/gogen/.out/osabap` (needs Go 1.26) | a native binary, no server ([below](#abap-as-a-language-for-command-line-tools)) |
 
 Each release also carries `sqlite.yml`, `duckdb.yml` and `postgres.yml`; start one with `docker compose -f sqlite.yml up -d`. `./osd doctor` checks a downloaded binary.
@@ -434,7 +434,7 @@ worker. More: [`docs/generations.md`](docs/generations.md),
 
 ## Run it
 
-Node 22.14+ (major 22) or Node 24.
+Node 22.18+ (major 22) or Node 24. 22.18 is the first Node 22 that strips TypeScript types without a flag; the gogen typing work moves tools to `.ts`.
 
 ```sh
 git clone https://github.com/oisee/open-steamgate && cd open-steamgate
