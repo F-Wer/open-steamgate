@@ -17,7 +17,7 @@ describe("gogen typing byte proof", function () {
   it("records and compares both sink modes and all three cache modes", () => {
     const target = join(scratch, "parent");
     for (const action of ["--record", "--compare"]) {
-      const run = spawnSync(process.execPath, ["tools/gogen/typing-proof.mjs", action, target],
+      const run = spawnSync(process.execPath, [...process.execArgv, "tools/gogen/typing-proof.mjs", action, target],
         {encoding: "utf8", timeout: 290000, maxBuffer: 4e6});
       assert.equal(run.error, undefined);
       assert.equal(run.status, 0, run.stdout + run.stderr);
