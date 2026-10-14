@@ -21,7 +21,7 @@
 // GitHub answers a fetch of any reachable commit; a server that does not
 // gets a full clone and a checkout instead, which is slower and the same.
 import {execFileSync} from "node:child_process";
-import {cpSync, existsSync, mkdirSync, lstatSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {chmodSync, cpSync, existsSync, mkdirSync, lstatSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {MARKER, SOURCE, markerOf, sourceOf, sourceMatches, packsOf} from "./osd-packs.mjs";
@@ -176,6 +176,8 @@ export async function fetchSource(pack, source, options = {}) {
       throw new FetchFailed(source.repo, source.ref, `no /${source.path} in it`);
     }
     stage = mkdtempSync(join(pack.dir, ".osd-fetch-stage-"));
+    // mkdtemp makes it 0700; the published folder keeps the mode a plain mkdir gave it
+    chmodSync(stage, 0o777 & ~process.umask());
     const files = copyTree(from, stage, source);
     await publish(pack, source, stage, {
       repo: source.repo, ref: source.ref, commit, path: source.path, exclude: source.exclude,
@@ -209,6 +211,8 @@ async function fetchOci(pack, source, log) {
     const selected = [...archive].filter(([path]) => path.startsWith(prefix)).map(([path, bytes]) => [path.slice(prefix.length), bytes]);
     if (!selected.length) throw new Error(`no /${source.path} in it`);
     stage = mkdtempSync(join(pack.dir, ".osd-fetch-stage-"));
+    // mkdtemp makes it 0700; the published folder keeps the mode a plain mkdir gave it
+    chmodSync(stage, 0o777 & ~process.umask());
     let files = 0;
     for (const [path, bytes] of selected) {
       // copyTree skips excluded directories as well as individual files.
