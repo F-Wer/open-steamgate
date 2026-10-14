@@ -16,7 +16,10 @@ module.exports = class SuiteTimingReporter extends Mocha.reporters.Spec {
     const fileTests = {};
     const tests = {};
     const records = new Map();
-    const fileOf = (test) => test.file && (isAbsolute(test.file) ? relative(process.cwd(), test.file) : test.file).replace(/^\.\//, "");
+    // relative to where the run started: a test that chdirs (into a scratch
+    // root) must not move its own results to another file name
+    const base = process.cwd();
+    const fileOf = (test) => test.file && (isAbsolute(test.file) ? relative(base, test.file) : test.file).replace(/^\.\//, "");
     runner.suite.eachTest((test) => {
       const file = fileOf(test);
       if (file) {
