@@ -1,3 +1,4 @@
+import {activeSystem} from "./osd-system.mjs";
 // Explicit user layers: folders retain their write policy; ZIPs are immutable
 // content-named sources with a persistent writable overlay immediately above.
 import {createHash} from 'node:crypto';
@@ -58,6 +59,7 @@ function materialize(root, archive) {
   return {dir: target, id};
 }
 export function userLayersOf(root, env = process.env) {
+  if (activeSystem(root, env)) return [];
   const layers = [], mounts = {};
   for (const input of (env.OSD_LAYERS ?? '').split(delimiter).filter(Boolean)) {
     const archive = resolve(root, input);

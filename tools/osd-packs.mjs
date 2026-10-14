@@ -1,3 +1,4 @@
+import {activeSystem, layerDir, layerSource, systemFile} from "./osd-system.mjs";
 import {userLayersOf} from "./osd-source-layers.mjs";
 import {cockpitAppsOf} from "./osd-cockpit-apps.mjs";
 // A pack is a directory, not a rebuild (backlog E.2).
@@ -91,6 +92,7 @@ const isDir = (p) => {
 
 /** the directories to look in: <root>/packs, then what OSD_PACKS names */
 export function placesOf(root, env = process.env) {
+  if (activeSystem(root, env)) return [join(root, ".local/system/packs")];
   const places = [join(root, PACKS_DIR)];
   for (const entry of (env.OSD_PACKS ?? "").split(delimiter).map((s) => s.trim()).filter((s) => s !== "")) {
     places.push(isAbsolute(entry) ? entry : join(root, entry));
@@ -242,6 +244,12 @@ export function packsOf(root, env = process.env) {
   const packs = selected === undefined || selected === "all"
     ? [...found.values()]
     : [...found.values()].filter((pack) => names.includes(pack.name));
+  const system = activeSystem(root, env);
+  if (system) return system.layers.filter(l => l.kind === "pack").map(l => {
+    const pack = found.get(l.name);
+    if (!pack || resolve(pack.dir) !== resolve(layerDir(root, l))) throw new BadPack(layerDir(root, l), "installed pack is absent or renamed");
+    return pack;
+  });
   return packs.sort((a, b) => a.order - b.order || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
@@ -260,6 +268,14 @@ export function folderOf(root, dir) {
  * SQLScript to the ABAP transpiler. Insert packs immediately before `gen/`;
  * configs without a generated layer keep the original append behaviour. */
 export function inputFoldersOf(root, config, env = process.env) {
+  const active = activeSystem(root, env);
+  if (active) {
+    const packs = packsOf(root, env);
+    const folders = active.layers.flatMap(l => l.kind === "input" || l.kind === "customer"
+      ? [folderOf(root, layerSource(root, l))]
+      : l.kind === "pack" ? packs.find(p => p.name === l.name).abap.map(f => folderOf(root, f)) : []);
+    return [...folders, "gen"];
+  }
   const listed = config?.input_folder === undefined ? [] : [config.input_folder].flat();
   const packs = packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f)));
   const added = packs.filter((f) => listed.includes(f) === false);
@@ -297,7 +313,9 @@ export function packRootsOf(root, env = process.env) {
 export function generatorFoldersOf(root, env = process.env) {
   const file = join(root, "abap_transpile.json");
   const config = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : {input_folder: ["src"]};
-  return inputFoldersOf(root, config, env).filter((folder) => folder !== "test");
+  const system = activeSystem(root, env);
+  const tests = system?.layers.filter(l => l.kind === "input" && l.name === "test").map(l => folderOf(root, layerSource(root, l))) ?? [];
+  return inputFoldersOf(root, config, env).filter((folder) => folder !== "test" && !tests.includes(folder));
 }
 
 /** Content-only projection for generators that produce gen/. */
@@ -307,13 +325,13 @@ export function contentFoldersOf(root, env = process.env) {
 
 /** every folder of seed rows: the tree's own, then each pack's */
 export function dataDirsOf(root, env = process.env) {
-  const own = join(root, "data");
+  const own = systemFile(root, "data", env);
   return [...(isDir(own) ? [own] : []), ...packsOf(root, env).map((p) => p.data).filter((d) => d !== undefined)];
 }
 
 /** every folder holding table definitions a seed row may need */
 export function ddicDirsOf(root, env = process.env) {
-  const own = ["src/ddic", "src/segw/ddic", "src/zosd_test/ddic"].map((d) => join(root, d));
+  const own = activeSystem(root, env) ? [] : ["src/ddic", "src/segw/ddic", "src/zosd_test/ddic"].map((d) => join(root, d));
   const folders = new Set([...own, ...packsOf(root, env).map((p) => p.ddic).filter((d) => d !== undefined)]);
   // Definitions can live beside a generated set or an imported layer, not
   // just in ddic/. The seed reader needs them to convert DATS and pad CHAR.

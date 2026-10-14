@@ -1,3 +1,4 @@
+import {validatePack} from "./osd-layer-pack.mjs";
 // Reproducible abapGit layers and ordered OCI systems (docs/oci-layers.md).
 import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
@@ -33,7 +34,7 @@ function folderFiles(folder) {
       return;
     }
     const full = join(folder, path), st = lstatSync(full);
-    if (path.split("/").includes(".osd-source.json")) fail("RESERVED_NAME", ".osd-source.json cannot be published");
+    if (path.split("/").some(p => [".osd-source.json", ".osd-layer.json", ".osd-system.json"].includes(p))) fail("RESERVED_NAME", ".osd-source.json cannot be published");
     if (st.isDirectory()) {
       for (const name of readdirSync(full).sort()) walk(path ? `${path}/${name}` : name);
     } else if (st.isFile()) files.push({path, bytes: readFileSync(full)});
@@ -48,8 +49,9 @@ export function build(folder, {name, kind, source} = {}) {
   if (!["lib", "input", "pack", "customer"].includes(kind)) fail("BAD_KIND", "--kind must be lib, input, pack or customer");
   if (!lstatSync(resolve(folder)).isDirectory()) fail("UNSAFE_ENTRY", "input must be a folder");
   let files = folderFiles(resolve(folder));
+  if (kind === "pack") validatePack(files, name);
   if (!files.some((f) => f.path === ".abapgit.xml")) {
-    files = [{path: ".abapgit.xml", bytes: Buffer.from(abapgitXml())}, ...files.map((f) => ({...f, path: `src/${f.path}`}))];
+    files = [{path: ".abapgit.xml", bytes: Buffer.from(abapgitXml())}, ...(["pack", "lib"].includes(kind) ? files : files.map((f) => ({...f, path: `src/${f.path}`})))];
   }
   const config = {schema: 1, name, kind, treeDigest: treeDigest(files.map(({path, bytes}) => [path, bytes]))};
   const annotations = {[NAME]: name, [KIND]: kind};
@@ -111,16 +113,18 @@ export function leakGate(trees, metadata, documents = []) {
   } finally { rmSync(temp, {recursive: true, force: true}); }
 }
 
-function validateLayer(layer) {
+export function validateLayer(layer) {
   const m = layer.manifest.json, c = layer.config;
   if (m.schemaVersion !== 2 || m.mediaType !== MEDIA.manifest || m.artifactType !== LAYER || m.config?.mediaType !== CONFIG
     || m.layers?.length !== 1 || m.layers[0].mediaType !== ZIP || c?.schema !== 1
-    || !["lib", "input", "pack", "customer"].includes(c.kind) || typeof c.name !== "string"
+    || !["lib", "input", "pack", "customer"].includes(c.kind) || typeof c.name !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(c.name)
     || m.annotations?.[NAME] !== c.name || m.annotations?.[KIND] !== c.kind
     || m.layers[0].annotations?.["org.opencontainers.image.title"] !== `${c.name}.zip`) fail("BAD_LAYER", "invalid OSD layer");
   const files = [...archiveFiles(layer.layers[0].bytes)].map(([path, bytes]) => ({path, bytes}));
+  if (!files.some(f => f.path === ".abapgit.xml")) fail("BAD_LAYER", "a layer needs root .abapgit.xml");
+  if (c.kind === "pack") validatePack(files, c.name);
   if (!layerZip(files).equals(layer.layers[0].bytes)) fail("NOT_CANONICAL", "layer ZIP is not canonical");
-  if (files.some(({path}) => path.split("/").some((part) => part === ".git" || part === "node_modules"))) fail("RESERVED_NAME", ".git and node_modules cannot be published");
+  if (files.some(({path}) => path.split("/").some((part) => part === ".git" || part === "node_modules" || part === ".osd-layer.json" || part === ".osd-system.json"))) fail("RESERVED_NAME", ".git and node_modules cannot be published");
   if (files.some(({path}) => path.split("/").includes(".osd-source.json"))) fail("RESERVED_NAME", ".osd-source.json cannot be published");
   if (treeDigest(files.map(({path, bytes}) => [path, bytes])) !== c.treeDigest) fail("TREE_MISMATCH", "layer treeDigest does not match its ZIP");
   return files;
@@ -131,7 +135,8 @@ export function systemLayers(index) {
   if (index.schemaVersion !== 2 || index.mediaType !== MEDIA.index || index.artifactType !== SYSTEM || !Array.isArray(index.manifests)) fail("BAD_SYSTEM", "expected an OSD system index");
   const layers = [...index.manifests].sort((a, b) => Number(a.annotations?.[ORDER]) - Number(b.annotations?.[ORDER]));
   layers.forEach((d, i) => {
-    if (d.annotations?.[ORDER] !== String(i) || d.mediaType !== MEDIA.manifest || !d.annotations?.[NAME] || !d.annotations?.[KIND]) fail("BAD_ORDER", "system layer orders must be contiguous starting at 0");
+    if (d.annotations?.[ORDER] !== String(i) || d.mediaType !== MEDIA.manifest || !d.annotations?.[NAME] || !d.annotations?.[KIND]
+      || !/^sha256:[0-9a-f]{64}$/.test(d.digest ?? "") || !Number.isSafeInteger(d.size) || d.size <= 0) fail("BAD_ORDER", "system layer orders must be contiguous starting at 0");
   });
   return layers;
 }

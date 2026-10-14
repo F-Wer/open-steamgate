@@ -29,6 +29,8 @@ import {runsAs} from "./osd-main.mjs";
 import {pull, treeDigest} from "./osd-oci.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
 export {MARKER, markerOf};
+import {fetchSystem} from "./osd-system-fetch.mjs";
+export {fetchSystem};
 
 
 function git(args, cwd) {
@@ -271,6 +273,11 @@ export class FetchFailed extends Error {
 
 export async function main(args) {
   const root = resolve(process.env.OSD_ROOT ?? process.cwd());
+  if (args[0] === "--system") {
+    if (args.length !== 2) throw new Error("usage: osd-fetch --system <ref@digest | index.json>");
+    await fetchSystem(root, args[1], {log: console.log});
+    return 0;
+  }
   if (args.includes("--check")) {
     const missing = unfetched(root);
     for (const m of missing) {

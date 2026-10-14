@@ -1,3 +1,7 @@
+import {missingLibraries, describeMissingLibraries} from "./osd-build-libraries.mjs";
+export {missingLibraries, describeMissingLibraries};
+import {activeSystem, systemFile} from "./osd-system.mjs";
+import {warnSystemToolchain} from "./osd-system-toolchain.mjs";
 import {userLayersOf} from "./osd-source-layers.mjs";
 // A generation: the transpiled system, built to the side, named by what
 // went into it, made live by renaming a link.
@@ -126,7 +130,7 @@ function walk(dir, out = [], seen = new Set()) {
     return out;
   }
   for (const e of entries) {
-    if (e.name === ".git" || e.name === "node_modules" || e.name === ".osd-source.json") {
+    if (e.name === ".git" || e.name === "node_modules" || [".osd-source.json", ".osd-layer.json", ".osd-system.json"].includes(e.name)) {
       continue;
     }
     const p = join(dir, e.name);
@@ -155,12 +159,12 @@ function walk(dir, out = [], seen = new Set()) {
 export function inputsOf(root, config = loadConfig(root)) {
   const folders = inputFoldersOf(root, config).map((f) => join(root, f)).filter(existsSync);
   const libs = (config.libs ?? []).map((l) => l.folder).filter((f) => f !== undefined && f !== "")
-    .map((f) => existsSync(join(root, "libs.lock.json")) ? libraryPath(root, basename(f)) : join(root, f));
+    .map((f) => (activeSystem(root) || existsSync(join(root, "libs.lock.json"))) ? libraryPath(root, basename(f)) : join(root, f));
   // BSP pages are generator inputs too. In particular, Component.js lives
   // outside the ABAP input folders and the ABAP-only filter below excludes
   // JavaScript. Omitting it reused a generation whose registry named a page
   // but whose Web Repository object was not in the transpiled runtime.
-  const bspFolders = [join(root, "webapp"), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
+  const bspFolders = [systemFile(root, "webapp"), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
   // **A pack that brings nothing is not an input.** The VS Code extension
   // always hands the build an empty notebook-scratch pack in its own storage
   // (editors/vscode/launcher.js ensureWorkspacePacks), so its manifest's path,
@@ -176,31 +180,6 @@ export function inputsOf(root, config = loadConfig(root)) {
   const packFolders = packs.flatMap((pack) => [pack.data, pack.ddic].filter(Boolean));
   const sourceLayers = userLayersOf(root);
   return {folders, libs, bspFolders, packFiles, packFolders, sourceLayers, config: layout(root).config};
-}
-
-/**
- * Libraries named by the transpiler config are mandatory build inputs, not
- * optional search paths. The transpiler tolerates an absent folder and then
- * builds a smaller system; that is useful for a generic CLI and fatal for an
- * addressed OSD generation. Refuse before taking the lock (and, especially,
- * before switching `live`) when a checkout/worktree has not inherited its
- * pinned library closure.
- */
-export function missingLibraries(root, config = loadConfig(root)) {
-  return (config.libs ?? [])
-    .filter((lib) => typeof lib.folder === "string" && lib.folder !== "")
-    .map((lib) => ({...lib, path: process.env[`OSD_LIB_${basename(lib.folder).toUpperCase().replace(/[^A-Z0-9]/g, "_")}`] || join(root, lib.folder)}))
-    .filter((lib) => !existsSync(lib.path) || readdirSync(lib.path).length === 0)
-    .map(({url, folder, ref}) => ({url, folder, ...(ref === undefined ? {} : {ref})}));
-}
-
-export function describeMissingLibraries(missing) {
-  const names = missing
-    .map((lib) => `${lib.folder}${lib.ref ? ` at ${lib.ref.slice(0, 12)}` : ""}`)
-    .join(", ");
-  return `configured ABAP libraries are absent or empty: ${names}. ` +
-    "For a development worktree create or repair it with `npm run osd:worktree -- <name>`; " +
-    "for a standalone checkout fetch the pinned libraries before building";
 }
 
 // What the transpiler and the generators read, and nothing else: a mocha
@@ -375,6 +354,8 @@ export function hashOf(root, inputs = inputsOf(root), options = {}) {
   // the rule that decides a name held by two inputs is part of what the
   // output is: a generation built under another rule is another generation
   h.update("layers\0later-wins\0");
+  const system = activeSystem(root);
+  if (system) h.update("system\0").update(system.digest).update("\0");
   for (const layer of inputs.sourceLayers ?? []) {
     h.update("source-layer\0").update(JSON.stringify(layer)).update("\0");
   }
@@ -640,6 +621,7 @@ export function switchTo(root, hash, log = () => {}, options = {}) {
 // (tools/osd-warm.mjs), so the two cannot disagree about what a tree is
 export function prepare(root, log = () => {}) {
   const config = loadConfig(root);
+  warnSystemToolchain(root, activeSystem(root), log);
   checkLayerVersions(root, packsOf(root), userFoldersOf(root), log);
   const missingLibs = missingLibraries(root, config);
   if (missingLibs.length > 0) {

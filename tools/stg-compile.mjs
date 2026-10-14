@@ -58,7 +58,7 @@ import yaml from "js-yaml";
 import {generate} from "./segw-gen.mjs";
 import {AnnotationWriter} from "./stg-compile-annotations.mjs";
 import {loadFunctionGroups} from "./segw-gen-mapping.mjs";
-import SPEC from "../src/segw/segw-tables.json" with {type: "json"};
+import SPEC from "./segw-tables.json" with {type: "json"};
 
 // ------------------------------------------------------------- the model
 
@@ -504,8 +504,7 @@ const esc = (s) => String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").re
 // is a mistake here, not something to write
 let spec;
 function fieldsOf(tag) {
-  // the spec travels with the code, not beside it: a static import bundles
-  // into a binary, where the module has no folder to read a file from
+  // Toolchain schema is bundled even when no source checkout is present.
   spec ??= SPEC;
   if (!spec[tag]) {
     throw new Error(`${tag}: not a table of the SEGW project tree`);

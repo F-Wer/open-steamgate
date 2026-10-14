@@ -619,8 +619,10 @@ E.10 OCI layers and a system index                                      [M]
      ├─ step 2: reproducible abapGit layer build/push, ordered system index,
      │  cross-repository mounts with upload fallback, inspection and a
      │  fail-closed leak gate; manual GHCR smoke workflow (not run locally)
-     └─ formats and commands: docs/oci-layers.md; installing an entire system
-        from its index remains future work
+     ├─ step 3: whole-system install by verified index digest, staged identity,
+     │  strict complete library/input/pack resolution and customer precedence;
+     │  dev proof: scripts/system-roundtrip.mjs compares complete output trees
+     └─ formats, installation and toolchain annotations: docs/oci-layers.md
 
 E.5  The launchpad sandbox asks for a config we do not serve   [S]  DONE 2026-09-19
      ├─ Alice, 2026-09-16, from the browser console on the second machine:

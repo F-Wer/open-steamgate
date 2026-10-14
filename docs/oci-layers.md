@@ -38,8 +38,9 @@ descriptors contain the SHA-256 digest and byte size of their exact bytes.
 
 The ZIP is an abapGit offline repository. When the folder contains a root
 `.abapgit.xml`, its files retain their relative paths, including its
-STARTING_FOLDER layout. Otherwise all files are placed under `src/` and the
-builder generates `.abapgit.xml` with STARTING_FOLDER `/src/`. Symlinks and
+STARTING_FOLDER layout. Otherwise input/customer files are placed under
+`src/`, while lib/pack files keep their paths; the builder generates
+`.abapgit.xml` with STARTING_FOLDER `/src/`. Symlinks and
 other nonregular entries are refused, as is `.osd-source.json` at any depth;
 build from the original source tree rather than a fetched tree's identity file.
 The builder skips `.git` (directories and files) and `node_modules` at any
@@ -132,3 +133,99 @@ redacted. The gate does not change or weaken scanner rules.
 layers and a system to GHCR, inspects the system and fetches a pinned layer
 through an OSD pack. It needs the `OSD_LEAK_IDENTIFIERS` Actions secret and
 package write permission; it fails closed when the secret is absent.
+
+## Install one complete system (E.10 step 3)
+
+```sh
+node tools/osd-fetch.mjs --system ghcr.io/owner/osd/system@sha256:<64-hex>
+npm run transpile
+```
+
+The reference must be pinned by digest, without a tag. Alternatively pass a
+local OCI layout's `index.json`: its layer manifests, configs and ZIPs must
+be present beside it under `blobs/sha256/<hex>`. The local index's exact bytes
+are hashed to obtain its identity; every referenced blob is checked against
+its descriptor's digest and size. Registry indexes are verified against the
+requested digest. Both forms verify contiguous orders, layer identities,
+canonical ZIPs and tree digests before installation.
+
+The installer extracts into a sibling staging directory, writes every layer's
+`.osd-layer.json` and the system's `.osd-system.json` there, then renames the
+complete directory to `.local/system/`. An existing installation is moved
+aside only after validation; a failed final rename restores it. Validation
+failures leave the previous installation untouched. The system identity holds
+`digest`, toolchain `annotations`, and `layers`, each with `order`, `name`,
+`kind`, manifest `digest`, `treeDigest` and a system-relative `path`.
+
+`tools/osd-system.mjs` supplies the shared `activeSystem(root, env)` resolver:
+
+- `lib` layers live in `libs/<name>/`. The name is the library's
+  `libs.lock.json` folder. Libraries retain repository paths even when they
+  have no `.abapgit.xml` (one is generated without wrapping the tree). They
+  remain transpiler dependencies with the configured `files` and
+  `exclude_filter` selection rules. Installed layer identity replaces the
+  Git checkout gate; a missing configured library is an error naming it.
+- `input` and `customer` layers live in `inputs/<name>/`; their abapGit
+  STARTING_FOLDER supplies the input folder. Inputs, packs and customers
+  follow index order, with `gen/` appended last. Put customer layers after
+  the tree's own inputs. Later objects win and override reports name both
+  paths. The checkout's own `src/` and `test/` are ignored in system mode.
+- `pack` layers live in `packs/<name>/`; only these packs are discovered.
+  Their index order supplies ABAP, whole-table TABU seed precedence, DDIC,
+  tiles and webapps, regardless of the manifests' development `order` values.
+  Pack files retain their paths at the ZIP root. A missing `.abapgit.xml`
+  is generated with STARTING_FOLDER `/src/`; a web-only pack needs no src.
+
+The proof includes `test/` as an input layer named `test`: its ABAP Unit
+objects are part of today's transpiled system. Generator inputs exclude
+this layer, just as they exclude the development tree's incomplete fixtures.
+`gen/` is always regenerated and never published as a layer. The `src` input
+can be built from a staged repository root containing `.abapgit.xml`, `src/`,
+`data/` and `webapp/`, so the tree's seed captures and static pages also belong
+to the digest. Logical source paths preserve configuration exclusions and
+source maps after installation. The SEGW schema now lives at
+`tools/segw-tables.json`, as part of the toolchain rather than an ABAP input.
+
+For a pack with fetched sources, fetch first, stage a copy of the complete
+pack, remove `.osd-source.json` and `.osd-fetched.json`, and strip `sources`
+from its staged `osd-pack.json`. Preserve its `abap` folder list and the
+resolved folders at their original paths. Build that copy with `--kind pack`.
+Unresolved `sources`, names differing from `--name`, escaping folder paths and
+fetch identities are refused. `scripts/system-roundtrip.mjs` implements this
+staging recipe. No later source fetch is needed by an installed pack.
+
+System mode refuses `OSD_PACKS`, `OSD_WEB_PACKS`, `OSD_LAYERS`, every
+`OSD_LIB_*` override (including empty settings), and an existing `local/tmp`
+layer even with `OSD_TMP=off`. Removing `.local/system/` returns to ordinary
+checkout resolution. With no active system, development resolution retains
+its existing behavior. The generation hash adds the system digest to its
+existing content and toolchain hashing.
+
+“System = digest” covers the ABAP, fresh seed data and pages, with the OSG
+commit and transpiler pin recorded by `org.osd.osg.commit` and
+`org.osd.transpiler`. A different running OSG commit prints a warning and is
+allowed; reproducing the original toolchain uses those annotations. No live
+database state is included or restored.
+
+### Local roundtrip proof
+
+```sh
+OSD_HEAVY_RANGE=50-59 GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  tools/osd-heavy.sh node scripts/system-roundtrip.mjs
+```
+
+This dev tool is outside CI. It syncs absent libraries, fetches pack sources,
+builds all locked libraries plus src, test and every pack, and uploads them to
+the in-process loopback registry from the test helper. It creates a scratch
+checkout without src, packs, data, webapp or gen, installs by digest, builds
+both roots and compares SHA-256 hashes of every output file and both file sets.
+It reports the index digest, per-layer file counts and byte sizes, total size,
+object counts, differing paths and elapsed time. `OSD_ROUNDTRIP_DIR` can name
+a directory outside the heavy wrapper's temporary directory to keep its
+scratch tree, build logs and `report.json` after the wrapper exits.
+
+The proof uses the registry fixture's low-level upload functions, so it can
+include the repository-allowed pack vectors that the public publication leak
+gate refuses. Its registry binds only loopback and is closed on completion;
+it never publishes to a network registry. Real publication continues through
+`osd-layer push` / `system push` and their unchanged fail-closed leak gate.

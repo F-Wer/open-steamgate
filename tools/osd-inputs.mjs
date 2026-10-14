@@ -1,3 +1,4 @@
+import {activeSystem, layerDir} from "./osd-system.mjs";
 // The layers of the system: what the transpiler is given, in what order,
 // and who wins when two folders hold the same object.
 //
@@ -24,7 +25,7 @@
 // Neither is an error; both are said out loud, here and in the builder's
 // log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
-import {resolve} from "node:path";
+import {basename, resolve} from "node:path";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -56,7 +57,7 @@ const treeRoot = () => {
 /** the abapGit object a file belongs to: zcl_x.clas.abap and zcl_x.clas.xml are one object */
 export function objectOf(filename) {
   // <name>.<type>[.<member>].<ext>; the type is the four-character abapGit kind
-  if (filename === ".osd-source.json") return undefined;
+  if ([".osd-source.json", ".osd-layer.json", ".osd-system.json"].includes(filename)) return undefined;
   const parts = filename.split(".");
   if (parts.length < 3) {
     return undefined;
@@ -236,9 +237,12 @@ export function libraryFiles(root = process.cwd(), config = undefined) {
     cfg = JSON.parse(readFileSync(file, "utf8"));
   }
   const out = [];
+  const system = activeSystem(root);
   for (const lib of cfg.libs ?? []) {
     if (lib.folder === undefined || lib.folder === "") continue;
-    const dir = resolve(root, "." + lib.folder);
+    const layer = system?.layers.find(l => l.kind === "lib" && l.name === lib.folder.replaceAll("\\", "/").split("/").at(-1));
+    if (system && !layer) throw new Error(`system does not provide library ${lib.folder}`);
+    const dir = system ? layerDir(root, layer) : resolve(root, "." + lib.folder);
     if (existsSync(dir) === false) continue;
     const patterns = typeof lib.files === "string" && lib.files !== ""
       ? [lib.files]
@@ -247,6 +251,7 @@ export function libraryFiles(root = process.cwd(), config = undefined) {
     const base = dir.split("/").join("/");
     const rules = patterns.map((p) => globToRegExp(base + p));
     const files = walkFiles(dir)
+      .filter(f => !system || ![".osd-layer.json", ".abapgit.xml"].includes(basename(f)))
       .filter((f) => rules.some((r) => r.test(f)))
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
       .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);

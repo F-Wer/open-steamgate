@@ -39,6 +39,7 @@ import {readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, statSync} f
 import {basename, join, resolve} from "node:path";
 import {contentFoldersOf, winningByLayer} from "./osd-packs.mjs";
 import {hostModules} from "./osd-host.mjs";
+import {systemFile} from "./osd-system.mjs";
 import {libraryPath} from "./osd-lib-path.mjs";
 import {stripLiterals} from "./abap-additions.mjs";
 
@@ -714,7 +715,7 @@ if (basename(process.argv[1] ?? "") === "osd-gui-convert.mjs") {
   const out = args.includes("--out") ? args[args.indexOf("--out") + 1] : DEFAULT_OUT;
   // Local integration reports are an input to this generator when present.
   // The VSIX seed omits those reports, so its generation has no demo entries.
-  const folders = [...contentFoldersOf(process.cwd()), join(process.cwd(), "test/integration")];
+  const folders = [...contentFoldersOf(process.cwd()), systemFile(process.cwd(), "test/integration")];
   const {reports} = await generate(folders, out);
   if (reports.length === 0) {
     console.log("osd-gui-convert: no *.prog.abap found");

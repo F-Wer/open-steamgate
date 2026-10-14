@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {systemFile, logicalSystemPath} from "./osd-system.mjs";
 // BSP applications in the tree -> a registry the ABAP handler reads.
 //
 // A `*.wapa.xml` and its pages under an input folder are a BSP application,
@@ -94,11 +95,10 @@ function walk(dir, hit = []) {
 // `src/bsp/apps.json`: `{"ZOSD_STATUS_APP": {"folder": "webapp/status",
 // "text": "..."}}`. The object is generated from the folder, the same way
 // gen/stg is generated from a YAML, and there is one source for each app.
-export function declared(file = "src/bsp/apps.json") {
+export function declared(file = "src/bsp/apps.json", root = dirname(dirname(dirname(resolve(file))))) {
   if (existsSync(file) === false) {
     return [];
   }
-  const root = dirname(dirname(dirname(resolve(file))));
   const decl = {...JSON.parse(readFileSync(file, "utf8")),
     ...Object.fromEntries(cockpitAppsOf(root, generatorFoldersOf(root)).map((c) => [c.app.toUpperCase(), {folder: c.dir, text: c.title, service: c.service}]))};
   return Object.entries(decl).map(([app, d]) => {
@@ -110,7 +110,7 @@ export function declared(file = "src/bsp/apps.json") {
     // be refused by the system with "WAPA - error from create_new: 4". The
     // first three declarations included a 16-character name.
     checkAppName(app);
-    const at = d.folder;
+    const at = systemFile(root, d.folder);
     // **An application is a list of files, and a folder is the common case
     // rather than the definition.** webapp/'s top level holds two of them --
     // the travel app (index.html, Component.js, manifest.json, i18n/) and
@@ -401,8 +401,8 @@ export function generate(folders, out = "gen/bsp", root = process.cwd()) {
   const usedPacks = new Set();
   for (const folder of folders) {
     sources.push({kind: "folder", folder});
-    if (!declaredAdded && relative(resolve(root, "src"), resolve(root, folder)) === "") {
-      sources.push({kind: "apps", apps: declared(join(root, "src/bsp/apps.json"))});
+    if (!declaredAdded && relative(resolve(root, "src"), logicalSystemPath(root, resolve(root, folder))) === "") {
+      sources.push({kind: "apps", apps: declared(systemFile(root, "src/bsp/apps.json"), root)});
       declaredAdded = true;
     }
     for (const app of packs) {
@@ -414,7 +414,7 @@ export function generate(folders, out = "gen/bsp", root = process.cwd()) {
       }
     }
   }
-  if (!declaredAdded) sources.unshift({kind: "apps", apps: declared(join(root, "src/bsp/apps.json"))});
+  if (!declaredAdded) sources.unshift({kind: "apps", apps: declared(systemFile(root, "src/bsp/apps.json"), root)});
   // A web-only pack has no ABAP folder; it still precedes explicit user layers.
   const orphanPacks = packs.filter((app) => !usedPacks.has(app.file));
   if (orphanPacks.length) {

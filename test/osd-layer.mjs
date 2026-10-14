@@ -11,7 +11,7 @@ import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {fetchAll} from "../tools/osd-fetch.mjs";
 import {registry, listening} from "./helpers/oci-registry.mjs";
 
-const options = {name: "smoke", kind: "pack"};
+const options = {name: "smoke", kind: "input"};
 const refusal = async (run, code) => {
   let error;
   try { await run(); } catch (e) { error = e; }
@@ -56,7 +56,7 @@ describe("osd-layer: reproducible publishing", function () {
     const c = build(existing, options);
     expect(c.zip).to.deep.equal(a.zip);
     expect(archiveFiles(c.zip).get(".abapgit.xml").toString()).to.equal(abapgitXml());
-    await main(["build", folder, "--name", "smoke", "--kind", "pack", "--out", join(root, "out")]);
+    await main(["build", folder, "--name", "smoke", "--kind", "input", "--out", join(root, "out")]);
     expect(readFileSync(join(root, "out/smoke.zip"))).to.deep.equal(a.zip);
     expect(sha256(readFileSync(join(root, "out/manifest.json")))).to.equal(a.digest);
   });
@@ -90,7 +90,7 @@ describe("osd-layer: reproducible publishing", function () {
   it("pushes through the CLI, pulls exact bytes and fetches a real OSD pack with verified treeDigest", async () => {
     const r = registry(), host = await listening(r), target = `${host}/osd/pack:v2`;
     try {
-      await main(["push", target, folder, "--name", "smoke", "--kind", "pack"]);
+      await main(["push", target, folder, "--name", "smoke", "--kind", "input"]);
       const a = build(folder, options), ref = `${host}/osd/pack@${a.digest}`;
       const result = await pull(ref);
       expect(result.layers[0].bytes).to.deep.equal(a.zip);
@@ -138,13 +138,13 @@ describe("osd-layer: reproducible publishing", function () {
     const r = registry(), host = await listening(r);
     try {
       write(join(folder, "secret.txt"), "forbidden_publish_identifier");
-      await refusal(() => main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "pack"]), "LEAK");
-      const result = spawnSync(process.execPath, [join(oldCwd, "tools/osd-layer.mjs"), "push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "pack"], {encoding: "utf8"});
+      await refusal(() => main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "input"]), "LEAK");
+      const result = spawnSync(process.execPath, [join(oldCwd, "tools/osd-layer.mjs"), "push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "input"], {encoding: "utf8"});
       expect(result.status).to.equal(2);
       expect(result.stderr).to.include("LEAK");
       expect(r.requests).to.equal(0);
       rmSync(join(folder, "secret.txt"));
-      await refusal(() => main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "pack", "--source", "forbidden_publish_identifier@abc:src"]), "LEAK");
+      await refusal(() => main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "input", "--source", "forbidden_publish_identifier@abc:src"]), "LEAK");
       expect(r.requests).to.equal(0);
     } finally { await new Promise((done) => r.server.close(done)); }
   });
@@ -190,7 +190,7 @@ describe("osd-layer: reproducible publishing", function () {
     write(join(folder, "varied.txt"), Array.from({length: 3000}, (_, i) => `line ${i % 71}: ${i * 17}\n`).join(""));
     const script = join(oldCwd, "tools/osd-layer.mjs");
     const run = (command, out) => {
-      const result = spawnSync(command, [script, "build", folder, "--name", "smoke", "--kind", "pack", "--out", out], {encoding: "utf8"});
+      const result = spawnSync(command, [script, "build", folder, "--name", "smoke", "--kind", "input", "--out", out], {encoding: "utf8"});
       expect(result.status, result.stderr).to.equal(0);
       return [sha256(readFileSync(join(out, "smoke.zip"))), sha256(readFileSync(join(out, "manifest.json")))];
     };
@@ -273,7 +273,7 @@ describe("osd-layer: reproducible publishing", function () {
         expect(r.uploads).to.equal(uploads);
         expect(r.mounts).to.equal(0);
       } else {
-        await refusal(() => main(["push", `${host}/forbidden_publish_identifier/pack:v1`, folder, "--name", "smoke", "--kind", "pack"]), "LEAK");
+        await refusal(() => main(["push", `${host}/forbidden_publish_identifier/pack:v1`, folder, "--name", "smoke", "--kind", "input"]), "LEAK");
         expect(r.requests).to.equal(0);
       }
     } finally { await new Promise((done) => r.server.close(done)); }
@@ -286,7 +286,7 @@ describe("osd-layer: reproducible publishing", function () {
       write(join(folder, ".git/config"), "forbidden_publish_identifier");
       write(join(folder, "nested/.git"), "forbidden_publish_identifier");
       write(join(folder, "node_modules/pkg/index.js"), "forbidden_publish_identifier");
-      await main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "pack"]);
+      await main(["push", `${host}/osd/pack:v1`, folder, "--name", "smoke", "--kind", "input"]);
       const layer = await pull(`${host}/osd/pack@${build(folder, options).digest}`);
       expect([...archiveFiles(layer.layers[0].bytes).keys()]).to.deep.equal([".abapgit.xml", "src/zcl_smoke.clas.abap"]);
       expect(logs.join("\n")).to.include(".git").and.include("node_modules");
