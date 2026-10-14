@@ -4,7 +4,7 @@ import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 import {createHash, randomUUID} from "node:crypto";
 import {execFileSync} from "node:child_process";
 import {createRequire} from "node:module";
-import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
@@ -110,6 +110,34 @@ export function cacheSession(session, registry, cacheDir) {
   return session;
 }
 
+// Every registry edit names a new version directory, so old ones pile up (a
+// one-class edit doubled a 386 MiB cache). Keep the newest few, by the time a
+// compile last opened them, and never one opened within the last hour: two
+// shards with different registries may share a root and run side by side.
+// A directory removed under a running compile is a miss for it, not an error:
+// reads fall back to lowering and writes recreate the directory. Each victim
+// is stat'ed again and renamed away before the recursive delete, so one that
+// another compile touched meanwhile survives; the window left is that rename.
+const KEEP_VERSIONS = Math.max(1, Number(process.env.GOGEN_CACHE_KEEP_VERSIONS) || 4);
+const RECENT_MS = 60 * 60 * 1000, TOUCH_MS = 10 * 60 * 1000;
+const touch = (dir) => { try { const now = new Date(); utimesSync(dir, now, now); } catch { /* Not written yet. */ } };
+function pruneVersions(root, current) {
+  try {
+    const versions = readdirSync(root, {withFileTypes: true})
+      .filter((e) => e.isDirectory() && /^[0-9a-f]{64}$/.test(e.name) && e.name !== current)
+      .map((e) => ({name: e.name, used: statSync(join(root, e.name)).mtimeMs}))
+      .sort((a, b) => b.used - a.used);
+    for (const {name} of versions.slice(KEEP_VERSIONS - 1)) try {
+      const dir = join(root, name);
+      if (Date.now() - statSync(dir).mtimeMs <= RECENT_MS) continue;
+      const trash = join(root, `.pruned-${randomUUID()}`);
+      renameSync(dir, trash);
+      rmSync(trash, {recursive: true, force: true});
+    } catch { /* Gone already, or in use again. */ }
+    for (const e of readdirSync(root)) if (e.startsWith(".pruned-")) rmSync(join(root, e), {recursive: true, force: true});
+  } catch { /* Cache housekeeping must not change compilation. */ }
+}
+
 export function objectCache(registry, root) {
   if (!root) return;
   const objects = new Map(), byName = new Map();
@@ -129,6 +157,11 @@ export function objectCache(registry, root) {
   const semanticInputs = [...objects].map(([k, v]) => [k, v.hash]);
   const version = digest(JSON.stringify([toolIdentity(), registry.getConfig().get(), semanticInputs]));
   const sourceKey = sourceKeys(objects, byName, version);
+  // Opening marks the version used, and so does a hit every few minutes, so
+  // a long warm run that writes nothing is not taken for an abandoned one.
+  let touched = Date.now();
+  touch(join(root, version));
+  pruneVersions(root, version);
   const location = (owner, name, selection = "") => join(root, version, digest(`${owner}:${name}:${selection}`) + ".bin");
   const selection = (program) => digest(JSON.stringify([...program.wanted]));
   const wholeSelection = (value) => value.replay?.ops.some((op) => op.key === "wanted"
@@ -142,7 +175,10 @@ export function objectCache(registry, root) {
         const payload = bytes.subarray(65);
         if (bytes.subarray(0, 64).toString() !== digest(payload)) continue;
         const entry = deserialize(inflateRawSync(payload));
-        if (entry.key === sourceKey(owner, entry.reads) && portable(entry.value)) return entry.value;
+        if (entry.key === sourceKey(owner, entry.reads) && portable(entry.value)) {
+          if (Date.now() - touched > TOUCH_MS) { touched = Date.now(); touch(join(root, version)); }
+          return entry.value;
+        }
       } catch { /* Missing, partial or incompatible cache: lower normally. */ }
     },
     record(lower) {
