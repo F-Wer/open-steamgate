@@ -45,8 +45,8 @@ export function frontendInputs({home, folders, owners, fixture, unlayered, env =
   const ddicDirs = ddicDirsOf(seedRoot, env);
   const selected = new Set([
     join(home, "abap_transpile.json"), join(home, "package-lock.json"), join(home, "libs.lock.json"),
-    ...walk(join(home, "tools", "gogen")).filter((file) => file.endsWith(".mjs") || file.endsWith(".go") || file.endsWith("go.mod") || file.endsWith("go.sum")),
-    ...walk(join(home, "tools")).filter((file) => file.endsWith(".mjs")),
+    ...walk(join(home, "tools", "gogen")).filter((file) => file.endsWith(".mjs") || file.endsWith(".ts") || file.endsWith(".go") || file.endsWith("go.mod") || file.endsWith("go.sum")),
+    ...walk(join(home, "tools")).filter((file) => file.endsWith(".mjs") || file.endsWith(".ts")),
     ...walk(join(home, "test")).filter((file) => file.endsWith("seed.mjs")),
     ...dataDirs.flatMap(walk),
     ...ddicDirs.flatMap(walk),
