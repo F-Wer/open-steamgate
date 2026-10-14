@@ -30,6 +30,7 @@ import {lowerNarrowSubmit} from "../osd-narrow-submit.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync, existsSync} from "node:fs";
 import {join} from "node:path";
+import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
 
 const require = createRequire(import.meta.url);
 // The transpiler's database setup and rearranger use its own @abaplint/core.
@@ -1994,11 +1995,7 @@ function upcastable(reg, from, to) {
 }
 
 function isSubclass(reg, cls, ancestor) {
-  for (let c = cls, guard = 0; c && guard < 20; guard += 1) {
-    if (c === ancestor) return true;
-    c = clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c];
-  }
-  return false;
+  return chainHas(PROGRAM ?? reg, reg, cls, ancestor, (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
 }
 
 function leaves(stmts, inLoop = false) {
@@ -5905,9 +5902,7 @@ function exceptionSupers(reg, program) {
  * abaplint knows, so an ancestor outside the program still counts).
  */
 function caughtClasses(ctx, names) {
-  const own = [];
-  for (const w of ctx.program.wanted) if (names.some((n) => isSubclass(ctx.reg, w, n))) own.push(w);
-  return own.sort();
+  return caughtOnce(ctx.program, names, () => [...ctx.program.wanted].filter((w) => names.some((n) => isSubclass(ctx.reg, w, n))).sort());
 }
 
 /** the importing parameters of a class's constructor, read off its definition */
