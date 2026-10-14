@@ -20,6 +20,7 @@ import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
 import {lowerBoolx} from "./frontend-boolx.mjs";
 import {builtin} from "./frontend-builtins.mjs";
+import {textLiteral} from "./frontend-literals.mjs";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
@@ -4169,13 +4170,9 @@ function sourceOperand(n, ctx, hint) {
       if (!Number.isSafeInteger(value)) throw new Unsupported(`integer literal ${value}`);
       return {e: "int", value, type: I};
     }
-    const text = n.concatTokens();
-    if (text.startsWith("'")) {
-      const v = text.slice(1, -1).replaceAll("''", "'");
-      return {e: "chars", value: v.replace(/ +$/, ""), type: C(Math.max(1, v.length))};
-    }
-    if (text.startsWith("`")) return {e: "str", value: text.slice(1, -1).replaceAll("``", "`"), type: S};
-    throw new Unsupported(`literal ${text}`);
+    const lit = textLiteral(n, Expressions);
+    if (lit.refusal !== undefined) throw new Unsupported(`literal ${n.concatTokens()}${lit.refusal}`);
+    return lit.quote === "`" ? {e: "str", value: lit.value, type: S} : {e: "chars", value: lit.value.replace(/ +$/, ""), type: C(Math.max(1, lit.value.length))};
   }
   if (isExpr(n, Expressions.MethodCallChain)) return call(n, ctx, false, hint);
   if (isExpr(n, Expressions.StringTemplate)) return template(n, ctx);
