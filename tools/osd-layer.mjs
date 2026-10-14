@@ -100,7 +100,9 @@ export function leakGate(trees, metadata, documents = []) {
       paths.push(file);
     }
     const [command, ...args] = toolCommand(join(moduleDir, "osd-leak-scan.mjs"), ["--redact", "--paths", ...paths]);
-    const result = spawnSync(command, args, {encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
+    // run from the scan directory, which is in no checkout: the list is then
+    // OSD_LEAK_IDENTIFIERS or this tool's own checkout's, never the caller's cwd
+    const result = spawnSync(command, args, {cwd: temp, encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
     const reason = result.error?.message ?? result.stderr?.trim() ?? result.stdout?.trim();
     if (result.error || result.status !== 0 && result.status !== 1) fail("SCAN_FAILED", `SCAN_FAILED: ${reason || `scanner exit ${result.status}, signal ${result.signal}`}`);
     // name what leaked by its archive path, not by the neutral file it was scanned as

@@ -29,15 +29,14 @@ describe("osd-layer: reproducible publishing", function () {
     oldList = process.env.OSD_LEAK_IDENTIFIERS;
     oldSelf = process.env.OSD_SELF;
     oldCwd = process.cwd();
-    // The scanner prefers a checkout-local list. Run from an isolated root
-    // so these tests always exercise this test list, never private config.
-    process.chdir(root);
+    // No chdir: the gate runs the scanner from its own scan directory, so the
+    // test list below wins over a checkout's private one (and the timing
+    // reporter, which maps tests to files by the cwd, keeps working).
     write(join(root, "identifiers.json"), JSON.stringify({test: ["forbidden_publish_identifier"]}));
     process.env.OSD_LEAK_IDENTIFIERS = join(root, "identifiers.json");
     process.env.OSD_SELF = JSON.stringify([process.execPath, join(oldCwd, "test/helpers/osd-layer-host.mjs")]);
   });
   afterEach(() => {
-    process.chdir(oldCwd);
     if (oldSelf === undefined) delete process.env.OSD_SELF;
     else process.env.OSD_SELF = oldSelf;
     if (oldList === undefined) delete process.env.OSD_LEAK_IDENTIFIERS;
