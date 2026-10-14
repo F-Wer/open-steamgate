@@ -10,6 +10,8 @@ import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
+import {captureInChild, syntheticCorpus} from "./cache-oracle.mjs";
+import {orderedRegistry} from "./cache-oracle-capture.mjs";
 
 const source = (name, body) => `CLASS ${name} DEFINITION PUBLIC.
 PUBLIC SECTION. CLASS-METHODS run RETURNING VALUE(rv) TYPE i.
@@ -17,6 +19,66 @@ ENDCLASS.
 CLASS ${name} IMPLEMENTATION.
 METHOD run. ${body} ENDMETHOD.
 ENDCLASS.`;
+
+test("implicit pool types invalidate: prefix resolution precedes lowering-time reads", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-pool-regression-"));
+  try {
+    const input = join(dir, "input"), cacheDir = join(dir, "cache"); mkdirSync(input);
+    const pool = join(input, "zorc.type.abap");
+    writeFileSync(pool, "TYPE-POOL zorc. TYPES zorc_value TYPE i.");
+    writeFileSync(join(input, "zcl_pool.clas.abap"), source("zcl_pool", "rv = 7.").replace("TYPE i", "TYPE zorc_value"));
+    const args = {folders: [input], objects: ["ZCL_POOL"]};
+    const before = captureInChild({...args, cacheDir}, dir);
+    assert.deepEqual(captureInChild({...args, cacheDir}, dir).counts.reusedClasses, ["ZCL_POOL"]);
+    writeFileSync(pool, readFileSync(pool, "utf8").replace("TYPE i", "TYPE int8"));
+    const warm = captureInChild({...args, cacheDir}, dir), cold = captureInChild(args, dir);
+    assert.equal(warm.artifacts.emitGo, cold.artifacts.emitGo);
+    assert.notEqual(cold.artifacts.emitGo, before.artifacts.emitGo);
+    assert.deepEqual(warm.counts.reusedClasses, []); // Today's global guard.
+    assert.match(cold.artifacts.emitGo, /int64/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("changed same-position local definitions cannot replay across the global version", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-definition-regression-"));
+  try {
+    const corpus = syntheticCorpus({classes: 4}), input = join(dir, "input"), cacheDir = join(dir, "cache");
+    mkdirSync(input);
+    for (const file of ["zcl_control_0000.clas.abap", "zcl_control_0000.clas.testclasses.abap"]) writeFileSync(join(input, file), corpus.files[file]);
+    const args = {folders: [input], objects: ["ZCL_CONTROL_0000"]};
+    const before = captureInChild({...args, cacheDir}, dir);
+    const unchanged = captureInChild({...args, cacheDir}, dir);
+    assert.ok(unchanged.counts.reusedClasses.includes("ZCL_CONTROL_0000:LCL_SAME"));
+    const file = join(input, "zcl_control_0000.clas.testclasses.abap");
+    // Same filename, definition name, start row and column. Replay fingerprints
+    // alone accept this definition; the source version is the semantic guard.
+    writeFileSync(file, readFileSync(file, "utf8").replace("VALUE 1", "VALUE 9"));
+    const warm = captureInChild({...args, cacheDir}, dir), cold = captureInChild(args, dir);
+    assert.equal(warm.artifacts.emitGo, cold.artifacts.emitGo);
+    assert.notEqual(warm.artifacts.emitGo, before.artifacts.emitGo);
+    assert.deepEqual(warm.counts.reusedClasses, []);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("within-object file order changes first-wins macro expansion and the cache key", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-order-regression-"));
+  try {
+    const corpus = syntheticCorpus({classes: 4}), input = join(dir, "input"), cacheDir = join(dir, "cache");
+    mkdirSync(input);
+    for (const [file, raw] of Object.entries(corpus.files).filter(([f]) => f.startsWith("zcl_order_macro."))) writeFileSync(join(input, file), raw);
+    const args = {folders: [input], objects: ["ZCL_ORDER_MACRO"]};
+    const before = captureInChild({...args, cacheDir}, dir);
+    assert.deepEqual(captureInChild({...args, cacheDir}, dir).counts.reusedClasses, ["ZCL_ORDER_MACRO"]);
+    const order = ["zcl_order_macro.clas.macros.abap", "zcl_order_macro.clas.locals_def.abap"];
+    const registry = orderedRegistry([input], order);
+    assert.deepEqual(registry.getObject("CLAS", "ZCL_ORDER_MACRO").getFiles().map((f) => f.getFilename()),
+      ["zcl_order_macro.clas.abap", ...order]);
+    const warm = captureInChild({...args, cacheDir, order}, dir), cold = captureInChild({...args, order}, dir);
+    assert.notEqual(cold.artifacts.emitGo, before.artifacts.emitGo, "the cold macro expansion must actually change");
+    assert.equal(warm.artifacts.emitGo, cold.artifacts.emitGo);
+    assert.deepEqual(warm.counts.reusedClasses, []);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
 
 test("session without cacheDir preserves main's scalar entries and fast path", () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-memory-session-"));

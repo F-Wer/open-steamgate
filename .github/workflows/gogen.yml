@@ -125,7 +125,7 @@ jobs:
       - name: Byte ownership and frontend emission
         run: node --test tools/gogen/emit-large.test.mjs tools/gogen/frontend-owned.test.mjs tools/gogen/frontend-bytes.test.mjs tools/gogen/emit-go.test.mjs tools/gogen/emit-sink-locals.test.mjs tools/gogen/symbols.test.mjs tools/gogen/local-constants.test.mjs tools/gogen/cfit.test.mjs tools/gogen/session-statics.test.mjs tools/gogen/frontend-supplied.test.mjs tools/gogen/sink-locals.test.mjs
       - name: Frontend cache validation and replay
-        run: node --test tools/gogen/frontend-cache.test.mjs tools/gogen/frontend-object-cache.test.mjs tools/gogen/frontend-replay.test.mjs tools/gogen/frontend-portable.test.mjs
+        run: node --test tools/gogen/frontend-cache.test.mjs tools/gogen/frontend-object-cache.test.mjs tools/gogen/frontend-replay.test.mjs tools/gogen/frontend-portable.test.mjs tools/gogen/cache-oracle.test.mjs
       - name: Go byte fixtures and ABAPiti repros
         run: node tools/gogen/unit.mjs --fixture tools/gogen/testdata --jobs 4
       # osabap: a report built into a native command (open-abap-gui's
