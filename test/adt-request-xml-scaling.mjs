@@ -26,14 +26,21 @@ describe("ADT XML legal-count scaling", function () {
         const body=Buffer.from(make(n));
         await read(body); // warm this shape and size, outside the measured samples
         const samples=[];
-        for (let i=0;i<3;i++) {
-          const start=performance.now(), result=await read(body);
-          samples.push(performance.now()-start);
-          expect(result.length).to.equal(shape === "attributes" ? 1 : n+1);
-          if (shape === "attributes") {
-            const attrs=front === "node" ? result[0].attributes : result[0].get().attributes.array();
-            expect(attrs.length).to.equal(n);
-          }
+        // Fast Node reads need batches to amortize GC and scheduling noise.
+        // Keep every result check and the same ratios and absolute ceilings.
+        for (let i=0;i<(front === "node" ? 5 : 3);i++) {
+          let elapsed=0, reads=0;
+          do {
+            const start=performance.now(), result=await read(body);
+            elapsed+=performance.now()-start;
+            reads++;
+            expect(result.length).to.equal(shape === "attributes" ? 1 : n+1);
+            if (shape === "attributes") {
+              const attrs=front === "node" ? result[0].attributes : result[0].get().attributes.array();
+              expect(attrs.length).to.equal(n);
+            }
+          } while (front === "node" && elapsed<200 && reads<1000);
+          samples.push(elapsed/reads);
         }
         times.push(median(samples));
       }

@@ -696,7 +696,7 @@ describe('DSL L3 5e: autonomous doctor', function () {
       const peak=await cappedRun(20,3);expect(peak.jobs).to.be.greaterThan(3);
     });
     await reset();
-    await mutant('no-first-pass','zcl_l3_fleet2',t=>t.replace('          await this.start_daemon();\n          await this.watcher_pass();','          await this.start_daemon();'),()=>fails(stoppingRace));
+    await mutant('no-first-pass','zcl_l3_fleet2',t=>t.replace(/^([ \t]*)await this\.start_daemon\(\);\n\1await this\.watcher_pass\(\);/m,'$1await this.start_daemon();'),()=>fails(stoppingRace));
     await reset();
     await mutant('no-tail-release','zcl_osd_gui_l3_fleet2',t=>t.replace("this.#lt_released.set((await abap.Classes['ZCL_L3_FLEET2'].release_claim({rt_claimed: 1})));",';'),()=>fails(stoppingRace));
     await reset();

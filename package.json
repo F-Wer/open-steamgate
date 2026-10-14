@@ -118,13 +118,13 @@
     "bsp": "node tools/osd-bsp-registry.mjs"
   },
   "devDependencies": {
-    "@abaplint/cli": "2.120.59",
-    "@abaplint/core": "2.120.59",
+    "@abaplint/cli": "2.120.73",
+    "@abaplint/core": "2.120.73",
     "@abaplint/database-pg": "^2.11.83",
     "@abaplint/database-sqlite": "^2.13.83",
-    "@abaplint/runtime": "^2.13.96",
-    "@abaplint/transpiler": "^2.13.96",
-    "@abaplint/transpiler-cli": "^2.13.96",
+    "@abaplint/runtime": "2.14.3",
+    "@abaplint/transpiler": "2.14.3",
+    "@abaplint/transpiler-cli": "2.14.3",
     "@duckdb/node-api": "^1.5.5-r.4",
     "@playwright/test": "^1.62.1",
     "acorn": "^8.18.0",

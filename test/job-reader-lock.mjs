@@ -12,6 +12,7 @@ import {setAsideDatabase, forkDatabase} from '../tools/sqlite-file-client.mjs';
 
 const schema = `CREATE TABLE batch_runs(source_db TEXT, source_client TEXT,
   source_sysid TEXT, job_name TEXT, job_count TEXT, state TEXT)`;
+const activeChildren = new Set();
 function startChild(code, path) {
   const child = fork(process.execPath, [], {execPath:process.execPath,
     execArgv:['--input-type=module','-e',code],
@@ -24,7 +25,10 @@ function startChild(code, path) {
     child.once('message', resolve);
     exit.then(() => reject(new Error('lock holder exited before readiness')), reject);
   });
-  return {child,ready,exit};
+  const holder = {child,ready,exit};
+  activeChildren.add(holder);
+  exit.then(() => activeChildren.delete(holder), () => activeChildren.delete(holder));
+  return holder;
 }
 
 describe('JOB_OPEN operations reader waits for SQLite locks', function () {
@@ -33,7 +37,15 @@ describe('JOB_OPEN operations reader waits for SQLite locks', function () {
   beforeEach(() => {
     root=mkdtempSync('.local/job-reader-lock-'); path=resolve(root,'operations.sqlite');
   });
-  afterEach(() => { prepareOperationsFileChange(path); rmSync(root,{recursive:true,force:true}); });
+  afterEach(async () => {
+    // Mocha timeouts do not cancel the test's pending await. Stop its writer
+    // before checkpointing or removing files, even on a timed-out assertion.
+    const holders = [...activeChildren];
+    for (const holder of holders) holder.child.kill();
+    await Promise.all(holders.map(holder => holder.exit.catch(() => {})));
+    try { prepareOperationsFileChange(path); }
+    finally { rmSync(root,{recursive:true,force:true}); }
+  });
   const read = () => legacyCountUsed('.', {OSD_OPERATIONS_DB:path, OSD_SID:'ABC'}, 'source','123','DEMO','12000000');
 
   it('waits for a startup lock released in another process, then reads the committed key', async () => {
@@ -252,7 +264,9 @@ describe('JOB_OPEN operations reader waits for SQLite locks', function () {
     assert.equal(existsSync(path),false);
   });
 
-  it('survives WAL recovery as a worker repeatedly opens, writes and closes the ledger', async () => {
+  it('survives WAL recovery as a worker repeatedly opens, writes and closes the ledger', async function () {
+    // Preserve all 1,500 open/write/close cycles on slower CI filesystems.
+    this.timeout(120000);
     const db=new DatabaseSync(path); db.exec(`PRAGMA journal_mode=WAL; ${schema}`); db.close();
     const holder=startChild(`import {DatabaseSync} from 'node:sqlite';
       process.send('ready');
@@ -262,10 +276,11 @@ describe('JOB_OPEN operations reader waits for SQLite locks', function () {
         db.close();
       }
       process.disconnect();`,path);
+    const watchdog = setTimeout(() => holder.child.kill('SIGKILL'), 110000);
     try {
       await holder.ready;
       for(let i=0;i<1500;i++) assert.equal(read(),false);
       await holder.exit;
-    } finally { holder.child.kill(); await holder.exit.catch(()=>{}); }
+    } finally { clearTimeout(watchdog); holder.child.kill(); await holder.exit.catch(()=>{}); }
   });
 });

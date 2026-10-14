@@ -8,9 +8,9 @@
 > moves to a published version plus what remains (core pin, MOD).
 
 
-The transpiler and the runtime this tree builds with are a local build of
-`~/dev/transpiler` (branch `local/osd-build`), which is `@abaplint/transpiler`
-plus fixes that are not released yet. Every one of those fixes has an entry
+The current transpiler and runtime build is `local/osd-build-3b` at `f34e9bf4947daaf6464566b42b1e3ef1eaeb369c`
+(2.14.3, parser 2.120.73). [The pin move report](transpiler-pin-2.md) lists
+the retained and dropped fork commits. The dossier below is the historical snapshot. Every one of those fixes has an entry
 in `ANORMALIES.md` and a branch in that clone, and `npm run parked` prints the
 two side by side and complains where they disagree. This is the dossier for
 sending them: what each is, what proves it, where the fix lives, and what to

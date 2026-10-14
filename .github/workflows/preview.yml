@@ -43,22 +43,11 @@ jobs:
       - run: npm ci
       - name: Load the tracked source pins
         run: node tools/osd-lock.mjs github-env >> "$GITHUB_ENV"
-      # The public build needs a transpiler that is not on npm yet.
-      #
-      # Two of the fixes the media path rests on are still open pull
-      # requests: #1845, a binary file surviving the copy to output, and
-      # #1846, a W3MI object keyed on its name rather than its file name.
-      # On a published transpiler a runner writes no *.w3mi.data.* files at
-      # all, so the bundle it builds is not the bundle this repository
-      # tests, and the first thing that notices is an ENOENT on a PNG.
-      # The third is the runtime's: a float compared with a character
-      # literal (abaplint/transpiler#1859), which is what made the demo
-      # label its bars on the second frame; APPEND of a raw number keeping
-      # its fraction (a sine table was zeros); MOD with a float operand;
-      # a negative half rounding away from zero; and core 2.120.54, whose
-      # #4293 stops an inline DATA from an expression with a character
-      # literal being a character. The pinned commit carries all of them
-      # on top of the published 2.13.87.
+      # The integration build is based on upstream 2.14.3 and keeps the
+      # fork's builtin, incremental-build, packed and overflow fixes.
+      # Parser 2.120.73 is shared with OSG and checked by the build gate.
+      # The W3MI, binary output and float fixes are now upstream.
+      # See docs/transpiler-pin-2.md for the reviewed pin set.
       #
       # So the deployment is pinned to a commit of an integration branch,
       # built here and linked the same way a developer links it. Pinned to a
@@ -108,6 +97,9 @@ jobs:
         run: |
           node tools/osd-libs.mjs
           node tools/osd-libs.mjs --check
+      # Review the three source pin sets together: transpiler, core library,
+      # and pack manifests. This move keeps the already-pinned pack refs;
+      # osd-fetch verifies them alongside the new library and compiler refs.
       # The packs: the demo and Zork are not in this repository, they are
       # fetched from theirs at the commit each pack's manifest pins
       # (tools/osd-fetch.mjs), and the pack's own folder layers over that.
