@@ -25,7 +25,7 @@ test("the literal operator joins literals of one kind (inbox 049)", () => {
   assert.deepEqual(literals(p), ['"e":"str","value":"abcde`f"', '"e":"chars","value":"xyz"']);
 });
 
-test("blanks inside joined text literals are kept, as SAP documents", () => {
+test("blanks inside joined text literals are kept (A4H: 'ab ' & 'c' is 'ab c')", () => {
   const p = compile("CASE p. WHEN 'ab ' & 'c'. r = 1. ENDCASE.");
   assert.deepEqual(p.partial, []);
   assert.match(JSON.stringify(p.classes), /"e":"chars","value":"ab c","type":\{"k":"c","len":4\}/);
