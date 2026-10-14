@@ -29,6 +29,7 @@ import {emitJs} from "./emit-js.mjs";
 import {symbolCollector, writeSymbols} from "./symbols.ts";
 import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
+import {unitInputs} from "./unit-inputs.mjs";
 
 const here = relative(process.cwd(), import.meta.dirname);
 const scratch = join(".local", "gogen-typing-proof");
@@ -91,24 +92,60 @@ CONSTANTS: BEGIN OF r${i}, ascii${i} TYPE c VALUE 'a', unicode${i} TYPE ${type} 
       `METHODS run. ${definition} PRIVATE SECTION. ${staticMemory ? "CLASS-DATA" : "DATA"} mv_mem TYPE xstring.`,
       `METHOD run. DATA mem TYPE xstring. DATA b TYPE xstring. ${body} ENDMETHOD. ${methods}`));
   }
+  // Keep added captures separate: the original parent artifacts stay comparable.
+  for (const [name, body, definition, methods] of [
+    ["boxed", "mem = '1234'.", "", ""],
+    ["substring-call", "b = comb( iv_a = mv_mem iv_b = grow( ) ).",
+      "METHODS grow RETURNING VALUE(r) TYPE xstring. METHODS comb IMPORTING VALUE(iv_a) TYPE xstring VALUE(iv_b) TYPE xstring RETURNING VALUE(r) TYPE xstring.",
+      "METHOD grow. DATA ff TYPE x LENGTH 1 VALUE 'FF'. CONCATENATE mv_mem ff INTO mv_mem IN BYTE MODE. r = 'EE'. ENDMETHOD. METHOD comb. CONCATENATE iv_a iv_b INTO r IN BYTE MODE. ENDMETHOD."],
+  ]) {
+    const dir = join(scratch, name);
+    mkdirSync(dir);
+    writeFileSync(join(dir, "zcl_owned.clas.abap"), source("zcl_owned",
+      `METHODS run. ${definition} PRIVATE SECTION. DATA mv_mem TYPE xstring.`,
+      `METHOD run. DATA mem TYPE xstring. DATA b TYPE xstring. ${body} ENDMETHOD. ${methods}`));
+  }
 }
 
 function capture(out, cache) {
   const core = join(libraryPath(process.cwd(), "open-abap-core"), "src");
   const ajson = join(libraryPath(process.cwd(), "ajson"), "src/core");
+  // Checkout-relative paths keep source positions byte-stable across worktrees.
+  const config = JSON.parse(readFileSync("abap_transpile.json", "utf8"));
+  const {folders: adtFolders} = unitInputs({home: ".", config});
   const fixtures = [
     {name: "semantics", folders: [corpus, core, ajson], objects: [...classNames(corpus), ...coreObjects]},
     {name: "constructors-constants-owned", folders: [inputs], objects: classNames(inputs)},
     {name: "constructor-refused", folders: [inputs], objects: ["ZCL_CTOR_DEFAULT"]},
     {name: "layers", folders: [join(here, "fixtures/session-statics")], objects: ["ZCL_RACE_INIT", "ZCL_RACE_COUNTER", "ZCL_RACE_READER", "ZCL_RACE_CHILD", "ZCL_RACE_BASE"]},
+    // The owned test exercises Go; JS currently refuses the session's enqueue.
+    {name: "owned-adt-session", folders: adtFolders, objects: ["ZCL_OSD_ADT_SESSION", "CL_ABAP_TSTMP"], tolerant: true,
+      jsRefusal: "no JS for statement call_enq"},
+    ...[true, false].map((length) => ({
+      name: length ? "owned-boxed-length" : "owned-boxed-value", folders: [join(scratch, "boxed")], objects: ["ZCL_OWNED"],
+      mutate(program) {
+        const mem = {e: "var", name: "MEM", type: {k: "xstring"}};
+        const boxed = {e: "wrap", x: length ? {e: "xstrlen", x: mem, type: {k: "i"}} : mem, type: {k: "data"}};
+        program.classes[0].methods[0].body.push({s: "call", call: {e: "call", method: "OTHER", static: true,
+          args: [{dir: "importing", byValue: false, type: {k: "data"}, value: boxed}], type: {k: "void"}}});
+      },
+    })),
+    {name: "owned-substring-call", folders: [join(scratch, "substring-call")], objects: ["ZCL_OWNED"],
+      mutate(program) {
+        const call = program.classes[0].methods.find((m) => m.name === "RUN").body.at(-1).value;
+        const arg = call.args[0];
+        arg.value = {e: "substr", x: arg.value, base: arg.value.type, off: {e: "int", value: 0}, len: {e: "int", value: 1}, type: {k: "xstring"}};
+      },
+    },
     // Preserve the separate selection/diagnostic ordering used by semantics.
     ...[["zcl_gogen_t_rf", "zcl_gogen_t_rf_obj", "zcl_gogen_t_rf_own"], ["zcl_gogen_t_rf_sort"], ["zcl_gogen_t_rf_delfrom"], ["zcl_gogen_t_rf_seckeyh"], ["zcl_gogen_t_rf_wherei8"], ["zcl_gogen_t_rf_resume", "CX_SY_ZERODIVIDE"]]
       .map((objects, i) => ({name: `refused-${i}`, folders: [join(here, "testdata-refused"), core], objects, tolerant: true})),
   ];
   let reused = 0, lowered = 0;
   for (const fixture of fixtures) {
-    const {name, ...options} = fixture;
+    const {name, mutate, jsRefusal, ...options} = fixture;
     const program = compileProgram({...options, ...(cache ? {cacheDir: join(cache, name)} : {})});
+    mutate?.(program);
     reused += program.frontendCounts.reusedClasses.length;
     lowered += program.frontendCounts.loweredClasses.length;
     if (name === "constructor-refused") program.classes[0].constructor.params[0].default = "ZCL_CTOR_DEFAULT=>NO_SUCH";
@@ -116,7 +153,12 @@ function capture(out, cache) {
     mkdirSync(dir, {recursive: true});
     const symbols = new Map();
     writeFileSync(join(dir, "raw.go"), emitGo(program, "main", null, false, symbolCollector(program, "main", symbols)));
-    writeFileSync(join(dir, "raw.mjs"), emitJs(program));
+    if (jsRefusal) {
+      let message;
+      try { emitJs(program); } catch (error) { message = error.message; }
+      assert.equal(message, jsRefusal, `${name}: expected JS refusal`);
+      writeFileSync(join(dir, "js-refusal.txt"), message);
+    } else writeFileSync(join(dir, "raw.mjs"), emitJs(program));
     writeFileSync(join(dir, "refusals.json"), JSON.stringify({broken: program.broken, skipped: program.skipped, partial: program.partial, diagnostics: program.diagnostics}, null, 2) + "\n");
     if (name === "layers") {
       const base = program.classes.filter((c) => c.name === "ZCL_RACE_BASE");
