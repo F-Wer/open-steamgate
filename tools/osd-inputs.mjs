@@ -1,4 +1,4 @@
-import {activeSystem, layerDir} from "./osd-system.mjs";
+import {activeSystem, layerDir, logicalSystemPath, matchesSourcePath} from "./osd-system.mjs";
 // The layers of the system: what the transpiler is given, in what order,
 // and who wins when two folders hold the same object.
 //
@@ -106,10 +106,14 @@ export function filesIn(base, folder) {
 
 // the layers as the config lists them, resolved: which folder owns each
 // object, which files an earlier layer hides, and where nothing decides
-export function layers(base, config = JSON.parse(readFileSync(resolve(base, "abap_transpile.json"), "utf8")), env = process.env) {
+export function layers(base, config = JSON.parse(readFileSync(resolve(base, "abap_transpile.json"), "utf8")), env = process.env, {discoveryOnly = false} = {}) {
   // the config lists the tree's own folders; a pack is a directory found
   // at start and layered after them (tools/osd-packs.mjs, backlog E.2)
-  const folders = inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config, env);
+  // The store already resolved its roots. Validate user settings, then use
+  // exactly those roots without rediscovering packs, overlays or $TMP.
+  if (discoveryOnly) activeSystem(base, env);
+  const folders = discoveryOnly ? [config.input_folder ?? config.input_folders ?? []].flat()
+    : inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config, env);
   const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder)}));
   // the same file name twice inside one folder: no order decides, so nothing does
   const duplicates = [];
@@ -237,7 +241,7 @@ export function libraryFiles(root = process.cwd(), config = undefined) {
     cfg = JSON.parse(readFileSync(file, "utf8"));
   }
   const out = [];
-  const system = activeSystem(root);
+  const system = activeSystem(root) ?? null;
   for (const lib of cfg.libs ?? []) {
     if (lib.folder === undefined || lib.folder === "") continue;
     const layer = system?.layers.find(l => l.kind === "lib" && l.name === lib.folder.replaceAll("\\", "/").split("/").at(-1));
@@ -248,13 +252,13 @@ export function libraryFiles(root = process.cwd(), config = undefined) {
       ? [lib.files]
       : Array.isArray(lib.files) ? lib.files : ["/src/**"];
     const exclude = (lib.exclude_filter ?? []).map((p) => new RegExp(p, "i"));
-    const base = dir.split("/").join("/");
+    const base = logicalSystemPath(root, dir, system).split("/").join("/");
     const rules = patterns.map((p) => globToRegExp(base + p));
     const files = walkFiles(dir)
       .filter(f => !system || ![".osd-layer.json", ".abapgit.xml"].includes(basename(f)))
-      .filter((f) => rules.some((r) => r.test(f)))
+      .filter((f) => matchesSourcePath(root, f, rules, system))
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
-      .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);
+      .filter((f) => exclude.length === 0 || matchesSourcePath(root, f, exclude, system) === false);
     out.push({folder: lib.folder, dir, files});
   }
   return out;

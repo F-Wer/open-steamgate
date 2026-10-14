@@ -42,7 +42,7 @@ export function main(args = process.argv.slice(2)) {
     const manifest = readJSON(join(root, ".github/ci/kernel-corpus.json"));
     const known = readJSON(join(root, ".github/ci/kernel-known-failures.json"));
     if (known.abapiti !== pin()) throw new Error("known failures pin differs");
-    const env = {...goEnv(work), NODE_OPTIONS: "--max-old-space-size=12288", OSD_PACKS: "", OSD_WEB_PACKS: ""};
+    const env = {...goEnv(work), NODE_OPTIONS: "--max-old-space-size=12288"};
     for (const runtime of profile === "heavy" ? ["osgjs", "osgo"] : ["osgjs"]) for (const folder of publicFolders) {
       // Public required inputs remain strict; unavailable optional inputs are report lines above.
       try { verifyCorpus(corpus, manifest, [folder]); }

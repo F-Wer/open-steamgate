@@ -1,6 +1,6 @@
 // One installed index supplies the complete source closure. No Git or network here.
 import {existsSync, readFileSync} from "node:fs";
-import {isAbsolute, join, relative, resolve} from "node:path";
+import {dirname, isAbsolute, join, relative, resolve} from "node:path";
 import {repositoryConfig, sourceFolder} from "./osd-abapgit-config.mjs";
 
 export const SYSTEM_ID = ".osd-system.json";
@@ -37,7 +37,7 @@ export const layerDir = (root, layer) => join(root, ".local/system", layer.path)
 export const layerSource = (root, layer) => sourceFolder(layerDir(root, layer), repositoryConfig(layerDir(root, layer)));
 
 // Logical paths preserve source-map paths and existing config selection rules.
-export function logicalSystemPath(root, file, system = activeSystem(root)) {
+export function logicalSystemPath(root, file, system = activeSystem(root) ?? null) {
   if (!system) return file;
   for (const layer of system.layers) {
     const dir = layerDir(root, layer);
@@ -64,12 +64,35 @@ export function systemFile(root, logical, env = process.env) {
   }
   if (logical.split("/").includes("..") || logical.includes("\\")) fail(`unsafe content path: ${logical}`);
   for (const layer of [...system.layers].reverse()) {
+    const prefix = layer.kind === "pack" ? `packs/${layer.name}/`
+      : layer.kind === "lib" ? `.local/lars/${layer.name}/` : undefined;
+    if (prefix && logical.startsWith(prefix)) return join(layerDir(root, layer), logical.slice(prefix.length));
+  }
+  for (const layer of [...system.layers].reverse()) {
     if (!["input", "customer"].includes(layer.kind)) continue;
     const prefix = `${layer.name}/`;
     const file = logical.startsWith(prefix) ? join(layerSource(root, layer), logical.slice(prefix.length))
-      : layer.name === "src" ? join(layerDir(root, layer), logical) : undefined;
+      : layer.kind === "input" && layer.name === "src" ? join(layerDir(root, layer), logical) : undefined;
     if (file && existsSync(file)) return file;
   }
   return join(root, ".local/system/.absent", logical);
 }
 
+
+// Pass the build's resolved system (null for a checkout), never probe per file.
+export function matchesSourcePath(root, file, patterns, system = null) {
+  const logical = logicalSystemPath(root, file, system);
+  return patterns.some(rule => rule.test(logical));
+}
+
+/** Resolve a source-map's logical checkout path beside its generated module. */
+export function sourceMapFile(generated, source) {
+  const logical = resolve(dirname(generated), source);
+  for (let root = dirname(generated); ; root = dirname(root)) {
+    if (existsSync(join(root, ".local/system", SYSTEM_ID))) return systemFile(root, relative(root, logical));
+    if (dirname(root) === root) return logical;
+  }
+}
+
+/** The root launchpad belongs to the src input repository. */
+export const rootWebappOf = (root, env = process.env) => systemFile(root, "webapp", env);

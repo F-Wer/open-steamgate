@@ -2,6 +2,7 @@
 import {OciError} from "./osd-oci.mjs";
 export function validatePack(files, name) {
   const fail = message => { throw new OciError("BAD_PACK", message); };
+  if (name !== name.toLowerCase()) fail("pack layer name must be lowercase");
   const entry = files.find(f => f.path === "osd-pack.json");
   if (!entry) fail("a pack layer needs osd-pack.json at its root");
   const pack = JSON.parse(entry.bytes);

@@ -1,3 +1,4 @@
+import {rootWebappOf} from "../tools/osd-system.mjs";
 import {servingFront} from "../tools/osd-serving-front.mjs";
 import {randomUUID} from "node:crypto";
 import {requestXMLBodyError, XML_BODY_LIMIT} from "../tools/adt-request-xml.mjs";
@@ -160,7 +161,7 @@ export function startServer(quiet) {
   // every demo this system serves is a tile on it, which is what a person
   // opening a system expects to find rather than a paragraph of paths.
   hostNodes.root = (a, node) => a.get(node.path, function (req, res) {
-    if (existsSync(join(process.cwd(), "webapp", "flp.html"))) {
+    if (existsSync(join(rootWebappOf(process.cwd()), "flp.html"))) {
       res.redirect(302, "/app/flp.html");
       return;
     }
@@ -169,7 +170,7 @@ export function startServer(quiet) {
 
   // the Fiori Elements demo app, same origin as the service: no proxy, no CORS
   // the tree's webapp, not the module's: in a binary the module has no folder
-  hostNodes["app-static"] = (a, node) => a.use(node.path, express.static(join(process.cwd(), "webapp")));
+  hostNodes["app-static"] = (a, node) => a.use(node.path, express.static(rootWebappOf(process.cwd())));
   serveSandboxConfig(app);
   // what the launchpad asks for at start: the tiles the packs declare, so a
   // pack appears on it without anybody editing webapp/flp.html (backlog E.2)

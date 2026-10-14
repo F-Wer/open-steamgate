@@ -8,9 +8,9 @@ import {objectOf} from "../osd-inputs.mjs";
 const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((entry) => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]);
 
-export function unitInputs({home, config, fixture, extraInputs = [], env = process.env}) {
+export function unitInputs({home, config, fixture, extraInputs = [], env = process.env, extraPacks = true}) {
   for (const folder of extraInputs) if (!statSync(folder).isDirectory()) throw new Error(`--input is not a directory: ${folder}`);
-  const sourceFolders = [...(fixture ? [fixture] : inputFoldersOf(home, config, env).map((f) => join(home, f))), ...extraInputs];
+  const sourceFolders = [...(fixture ? [fixture] : inputFoldersOf(home, config, env, {extraPacks}).map((f) => join(home, f))), ...extraInputs];
   const libDirs = ["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src", "open-abap-gui/src", "open-abap-gui/framework", "open-abap-odata/src", "ajson/src/core"]
     .map((x) => join(existsSync(join(home, "libs.lock.json")) ? libraryPath(home, x.split("/")[0]) : join(home, ".local/lars", x.split("/")[0]), x.slice(x.indexOf("/") + 1))).filter(existsSync);
   const folders = (extraInputs.length ? [...libDirs, ...sourceFolders] : [...sourceFolders, ...libDirs]).filter(existsSync);

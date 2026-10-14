@@ -267,7 +267,7 @@ export function folderOf(root, dir) {
  * pack-local AMDP class hide its own runnable rewrite and handed raw
  * SQLScript to the ABAP transpiler. Insert packs immediately before `gen/`;
  * configs without a generated layer keep the original append behaviour. */
-export function inputFoldersOf(root, config, env = process.env) {
+export function inputFoldersOf(root, config, env = process.env, {extraPacks = true} = {}) {
   const active = activeSystem(root, env);
   if (active) {
     const packs = packsOf(root, env);
@@ -277,7 +277,7 @@ export function inputFoldersOf(root, config, env = process.env) {
     return [...folders, "gen"];
   }
   const listed = config?.input_folder === undefined ? [] : [config.input_folder].flat();
-  const packs = packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f)));
+  const packs = extraPacks ? packsOf(root, env).flatMap((p) => p.abap.map((f) => folderOf(root, f))) : [];
   const added = packs.filter((f) => listed.includes(f) === false);
   const generated = listed.lastIndexOf("gen");
   const system = generated === -1

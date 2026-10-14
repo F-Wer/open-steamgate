@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {execFileSync, spawnSync} from "node:child_process";
+import {execFileSync, spawn, spawnSync} from "node:child_process";
 import {mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
@@ -105,6 +105,29 @@ describe("osd-layer: reproducible publishing", function () {
       expect(readFileSync(join(root, "packs/smoke/upstream/zcl_smoke.clas.abap"))).to.deep.equal(readFileSync(join(folder, "zcl_smoke.clas.abap")));
       expect((await inspect(ref)).treeDigest).to.equal(a.config.treeDigest);
     } finally { await new Promise((done) => r.server.close(done)); }
+  });
+
+  it("regression 5: runs the workflow publish, inspect and pack fetch-back commands", async () => {
+    const r = registry(), host = await listening(r);
+    try {
+      const workflow = parseYaml(readFileSync(join(oldCwd, ".github/workflows/oci-layers.yml"), "utf8"));
+      const step = workflow.jobs.smoke.steps.find(s => s.name === "publish two layers and a system, inspect and fetch");
+      // Change only the registry destination. Execute the workflow's exact
+      // shell, including its generated pack manifest and final byte comparison.
+      const script = step.run.replace(/^registry_repo=.*$/m, `registry_repo="${host}/workflow"`);
+      expect(script).not.to.equal(step.run);
+      const result = await new Promise((done, reject) => {
+        const child = spawn("bash", ["-e", "-c", script], {cwd: oldCwd,
+          env: {...process.env, RUN_ID: "test", TMPDIR: root}, stdio: ["ignore", "pipe", "pipe"]});
+        let output = "";
+        child.stdout.on("data", b => { output += b; });
+        child.stderr.on("data", b => { output += b; });
+        child.on("error", reject);
+        child.on("close", code => done({code, output}));
+      });
+      expect(result.code, result.output).to.equal(0);
+      expect(r.uploads).to.be.greaterThan(0);
+    } finally { await new Promise(done => r.server.close(done)); }
   });
 
   for (const mount of [true, false]) it(`copies two repositories into a system with ${mount ? "mounts" : "upload fallback"}`, async () => {

@@ -1,4 +1,4 @@
-import {activeSystem, logicalSystemPath} from "./osd-system.mjs";
+import {activeSystem, logicalSystemPath, matchesSourcePath} from "./osd-system.mjs";
 // The transpile as a library call: what abap_transpile does, done in this
 // process (backlog N3).
 //
@@ -176,7 +176,7 @@ export async function loadFiles(root, config, core, onRead = undefined) {
   const {wanted, skipped} = listFiles(root, config);
   const files = await readAll(wanted, resolve(root, config.output_folder),
     (source, filename) => lowerNarrowSubmit(source, filename, core), onRead);
-  const system = activeSystem(root);
+  const system = activeSystem(root) ?? null;
   if (system) for (const file of files) file.relative = relative(resolve(root, config.output_folder), dirname(logicalSystemPath(root, file.path, system)));
   return {files, skipped};
 }
@@ -186,7 +186,7 @@ export async function loadFiles(root, config, core, onRead = undefined) {
 export function listFiles(root, config) {
   const include = regexps(config.input_filter);
   const exclude = regexps(config.exclude_filter);
-  const system = activeSystem(root);
+  const system = activeSystem(root) ?? null;
   const folders = system ? inputFoldersOf(root, config) : Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder];
   const wanted = [];
   let skipped = 0;
@@ -194,9 +194,9 @@ export function listFiles(root, config) {
     for (const filename of walk(resolve(root, folder))) {
       if (isSourceIdentity(filename) || system && [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
         skipped++;
-      } else if (include.length > 0 && include.some((r) => r.test(logicalSystemPath(root, filename, system))) === false) {
+      } else if (include.length > 0 && matchesSourcePath(root, filename, include, system) === false) {
         skipped++;
-      } else if (exclude.length > 0 && exclude.some((r) => r.test(logicalSystemPath(root, filename, system)) || r.test(filename))) {
+      } else if (exclude.length > 0 && (matchesSourcePath(root, filename, exclude, system) || exclude.some(r => r.test(filename)))) {
         skipped++;
       } else {
         wanted.push(filename);
@@ -210,7 +210,7 @@ export function listFiles(root, config) {
 // clone into a temporary folder when there is only a URL, gone after
 export async function loadLibs(root, config, log = () => {}, onRead = undefined) {
   const files = [];
-  const system = activeSystem(root);
+  const system = activeSystem(root) ?? null;
   for (const lib of config.libs ?? []) {
     let dir;
     let cleanup = false;
@@ -237,7 +237,7 @@ export async function loadLibs(root, config, log = () => {}, onRead = undefined)
     const found = matching(dir, patterns)
       .filter(f => !system || ![".osd-layer.json", ".abapgit.xml"].includes(basename(f)))
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
-      .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(logicalSystemPath(root, f, system))) === false);
+      .filter((f) => exclude.length === 0 || matchesSourcePath(root, f, exclude, system) === false);
     files.push(...await readAll(found, root, undefined, onRead, cleanup));
     log(`\t${found.length} files added from lib`);
     if (cleanup) {

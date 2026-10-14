@@ -1,6 +1,7 @@
 import {missingLibraries, describeMissingLibraries} from "./osd-build-libraries.mjs";
 export {missingLibraries, describeMissingLibraries};
-import {activeSystem, systemFile} from "./osd-system.mjs";
+import {activeSystem, systemFile, rootWebappOf} from "./osd-system.mjs";
+import {verifySystem} from "./osd-system-verify.mjs";
 import {warnSystemToolchain} from "./osd-system-toolchain.mjs";
 import {userLayersOf} from "./osd-source-layers.mjs";
 // A generation: the transpiled system, built to the side, named by what
@@ -164,7 +165,7 @@ export function inputsOf(root, config = loadConfig(root)) {
   // outside the ABAP input folders and the ABAP-only filter below excludes
   // JavaScript. Omitting it reused a generation whose registry named a page
   // but whose Web Repository object was not in the transpiled runtime.
-  const bspFolders = [systemFile(root, "webapp"), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
+  const bspFolders = [rootWebappOf(root), ...webappsOf(root).map((app) => app.dir)].filter(existsSync);
   // **A pack that brings nothing is not an input.** The VS Code extension
   // always hands the build an empty notebook-scratch pack in its own storage
   // (editors/vscode/launcher.js ensureWorkspacePacks), so its manifest's path,
@@ -620,8 +621,10 @@ export function switchTo(root, hash, log = () => {}, options = {}) {
 // the layers it builds from: shared by the cold build below and the warm one
 // (tools/osd-warm.mjs), so the two cannot disagree about what a tree is
 export function prepare(root, log = () => {}) {
+  const system = activeSystem(root);
+  verifySystem(root, system, log);
   const config = loadConfig(root);
-  warnSystemToolchain(root, activeSystem(root), log);
+  warnSystemToolchain(root, system, log);
   checkLayerVersions(root, packsOf(root), userFoldersOf(root), log);
   const missingLibs = missingLibraries(root, config);
   if (missingLibs.length > 0) {

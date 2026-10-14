@@ -9,8 +9,8 @@ import {unitInputs} from "./gogen/unit-inputs.mjs";
 import {stageInput, summarize, printResult, run, kernelWarnings, applyKernelWarnings} from "./osd-unit-ci.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-// Unit CI uses checkout layers only, regardless of installed or external packs.
-const unitEnv = {OSD_PACKS: "", OSD_WEB_PACKS: ""};
+// The private child uses the already selected inputs and no external overrides.
+const unitEnv = {OSD_PACKS: undefined, OSD_WEB_PACKS: undefined, OSD_LAYERS: undefined};
 import {unitProvenance} from "./osd-unit-provenance.mjs";
 
 const help = `Usage: npm run osgjs:unit -- <dir> [--json] [--kernel-strict] [--db sqlite|file] [--class NAME...]
@@ -27,7 +27,7 @@ function isolatedSystem(staging, input) {
   const home = join(staging, "checkout");
   mkdirSync(home);
   const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
-  const folders = inputFoldersOf(root, config, {...process.env, ...unitEnv});
+  const folders = inputFoldersOf(root, config, process.env, {extraPacks: false});
   for (const entry of readdirSync(root, {withFileTypes: true})) {
     if (entry.isFile() && !entry.name.startsWith(".")) cpSync(join(root, entry.name), join(home, entry.name));
   }
@@ -90,11 +90,11 @@ export async function main(args = process.argv.slice(2)) {
     result = staged.result;
     if (!result) {
       const config = JSON.parse(readFileSync(join(root, "abap_transpile.json"), "utf8"));
-      const {overrides} = unitInputs({home: root, config, extraInputs: [staged.input], env: {...process.env, ...unitEnv}});
+      const {overrides} = unitInputs({home: root, config, extraInputs: [staged.input], extraPacks: false});
       for (const o of overrides) console.error(`Override ${o.object}: ${o.hidden} hidden by ${o.input}`);
       const home = await phase("checkout", () => isolatedSystem(staging, staged.input));
       const child = await run([process.execPath, ...process.execArgv, join(home, "tools/osgjs-unit-run.mjs"), staged.input, ...staged.chosen], home, {
-        ...unitEnv, OSD_LAYERS: "", STG_DB: database,
+        ...unitEnv, STG_DB: database,
         STG_DB_PATH: database === "file" ? join(staging, "unit.sqlite") : "",
       }, {onStderr: process.env.OSGJS_TRACE === "1" ? (data) => process.stderr.write(data) : undefined});
       if (child.stderr && process.env.OSGJS_TRACE !== "1") process.stderr.write(child.stderr);

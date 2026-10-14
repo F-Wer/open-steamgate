@@ -15,9 +15,10 @@
 // It is deliberately not in the runtime: `node:module` does not exist in a
 // browser, and an exception that costs a source-map lookup every time it is
 // raised is a worse trade than a log line that asks for one when it needs it.
+import {sourceMapFile} from "./osd-system.mjs";
 import {SourceMap} from "node:module";
 import {existsSync, readFileSync} from "node:fs";
-import {basename, dirname, join} from "node:path";
+import {basename} from "node:path";
 
 const maps = new Map();
 const sources = new Map();
@@ -93,7 +94,7 @@ export function resolveFrame(file, row, column) {
   if (entry?.originalSource === undefined) {
     return undefined;
   }
-  const path = join(dirname(file), entry.originalSource);
+  const path = sourceMapFile(file, entry.originalSource);
   const text = read(path);
   const at = statementAfter(text, entry.originalLine + 1, entry.originalColumn + 1);
   return {

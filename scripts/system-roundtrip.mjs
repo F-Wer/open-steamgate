@@ -86,14 +86,17 @@ try {
   log("building normal checkout");
   await run(root, ["tools/osd-build.mjs"]);
   log("building scratch from system digest");
-  await run(scratch, ["tools/osd-build.mjs"]);
+  const scratchLog = await run(scratch, ["tools/osd-build.mjs"]);
+  const verified = /system layers verified: (\d+) layers, (\d+) files, (\d+) bytes in ([\d.]+) ms/.exec(scratchLog);
+  if (!verified) throw new Error("scratch build did not report installed layer verification");
+  const layerVerification = {layers: Number(verified[1]), files: Number(verified[2]), bytes: Number(verified[3]), ms: Number(verified[4])};
   const normal = tree(join(root, "output")), installed = tree(join(scratch, "output"));
   const differences = [...new Set([...normal.keys(), ...installed.keys()])].sort().filter(p => normal.get(p) !== installed.get(p));
   const objects = cwd => JSON.parse(readFileSync(join(cwd, "build/live/manifest.json"))).objects;
   const sameObjects = objects(root) === objects(scratch);
   const report = {digest, layers: layers.length, zipBytes: layers.reduce((n,l) => n + l.zipBytes, 0), layerSizes: layers,
     objects: {normal: objects(root), system: objects(scratch)}, outputFiles: {normal: normal.size, system: installed.size},
-    identical: differences.length === 0 && sameObjects, differences, ms: Date.now() - started, scratch};
+    identical: differences.length === 0 && sameObjects, differences, layerVerification, ms: Date.now() - started, scratch};
   writeFileSync(join(temp, "report.json"), JSON.stringify(report, null, 2) + "\n");
   log(JSON.stringify(report, null, 2));
   if (!report.identical) process.exitCode = 1;

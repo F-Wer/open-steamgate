@@ -142,9 +142,11 @@ npm run transpile
 ```
 
 The reference must be pinned by digest, without a tag. Alternatively pass a
-local OCI layout's `index.json`: its layer manifests, configs and ZIPs must
-be present beside it under `blobs/sha256/<hex>`. The local index's exact bytes
-are hashed to obtain its identity; every referenced blob is checked against
+local system index JSON, or an OCI layout's `index.json` containing one
+system-index descriptor. The layout wrapper is followed one level, verifying
+the descriptor's digest and size. Layer manifests, configs and ZIPs must be
+present under `blobs/sha256/<hex>` beside the supplied file. The system index's
+exact bytes are hashed to obtain its identity; every referenced blob is checked against
 its descriptor's digest and size. Registry indexes are verified against the
 requested digest. Both forms verify contiguous orders, layer identities,
 canonical ZIPs and tree digests before installation.
@@ -173,6 +175,7 @@ failures leave the previous installation untouched. The system identity holds
 - `pack` layers live in `packs/<name>/`; only these packs are discovered.
   Their index order supplies ABAP, whole-table TABU seed precedence, DDIC,
   tiles and webapps, regardless of the manifests' development `order` values.
+  Pack names must be lowercase, matching pack discovery.
   Pack files retain their paths at the ZIP root. A missing `.abapgit.xml`
   is generated with STARTING_FOLDER `/src/`; a web-only pack needs no src.
 
@@ -182,7 +185,11 @@ this layer, just as they exclude the development tree's incomplete fixtures.
 `gen/` is always regenerated and never published as a layer. The `src` input
 can be built from a staged repository root containing `.abapgit.xml`, `src/`,
 `data/` and `webapp/`, so the tree's seed captures and static pages also belong
-to the digest. Logical source paths preserve configuration exclusions and
+to the digest. Only the input layer named `src` supplies these root `data/`
+and `webapp/` directories. Other input layers and customer layers contribute
+ABAP from their STARTING_FOLDER; their repository-root `data/` and `webapp/`
+are not consumed. Use a pack layer for additional seed data and pages.
+Logical source paths preserve configuration exclusions and
 source maps after installation. The SEGW schema now lives at
 `tools/segw-tables.json`, as part of the toolchain rather than an ABAP input.
 
@@ -199,7 +206,18 @@ System mode refuses `OSD_PACKS`, `OSD_WEB_PACKS`, `OSD_LAYERS`, every
 layer even with `OSD_TMP=off`. Removing `.local/system/` returns to ordinary
 checkout resolution. With no active system, development resolution retains
 its existing behavior. The generation hash adds the system digest to its
-existing content and toolchain hashing.
+existing content and toolchain hashing. Internal registry discovery uses
+an explicit option to reuse already selected roots; unit discovery can omit
+extra checkout packs without setting environment overrides. An installed
+system always retains its complete index closure.
+
+Each build's `prepare()` re-reads and verifies every installed layer's complete
+treeDigest, including libraries, source, seeds and static pages, before using
+a cached generation or running generators. Only the installer's root identity
+file is excluded. Added, changed, missing or nonregular files refuse the build,
+name the layer and say `run osd-fetch --system again`. There is no development
+bypass: edit a checkout and rebuild/refetch the layer. Verification logs its
+file count, byte count and elapsed time; the roundtrip report records that cost.
 
 “System = digest” covers the ABAP, fresh seed data and pages, with the OSG
 commit and transpiler pin recorded by `org.osd.osg.commit` and
@@ -220,7 +238,7 @@ the in-process loopback registry from the test helper. It creates a scratch
 checkout without src, packs, data, webapp or gen, installs by digest, builds
 both roots and compares SHA-256 hashes of every output file and both file sets.
 It reports the index digest, per-layer file counts and byte sizes, total size,
-object counts, differing paths and elapsed time. `OSD_ROUNDTRIP_DIR` can name
+object counts, differing paths, layer-verification cost and elapsed time. `OSD_ROUNDTRIP_DIR` can name
 a directory outside the heavy wrapper's temporary directory to keep its
 scratch tree, build logs and `report.json` after the wrapper exits.
 

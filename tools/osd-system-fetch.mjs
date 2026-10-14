@@ -21,6 +21,15 @@ export async function fetchSystem(root, ref, options = {}) {
   if (existsSync(ref)) {
     const bytes = readFileSync(ref), base = dirname(resolve(ref));
     index = {json: JSON.parse(bytes), digest: sha256(bytes)};
+    // OCI layout indexes can wrap one system index descriptor. Verify that
+    // descriptor before following it; the installed identity is the system.
+    if (!index.json.artifactType && index.json.manifests?.length === 1) {
+      const d = index.json.manifests[0];
+      if (d.mediaType === index.json.mediaType) {
+        const bytes = localBlob(base, d);
+        index = {json: JSON.parse(bytes), digest: d.digest};
+      }
+    }
     load = async d => {
       const bytes = localBlob(base, d), json = JSON.parse(bytes);
       const configBytes = localBlob(base, json.config);

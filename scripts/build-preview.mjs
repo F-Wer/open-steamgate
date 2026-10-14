@@ -1,3 +1,4 @@
+import {rootWebappOf} from "../tools/osd-system.mjs";
 // Builds the static preview deployment into build/:
 //   sw.js        the transpiled gateway + sql.js in a service worker
 //   index.html   installs the worker, then goes to app/
@@ -301,7 +302,7 @@ async function copyTree(from, to) {
     }
   }
 }
-await copyTree(resolve(root, "webapp"), resolve(build, "app"));
+await copyTree(rootWebappOf(root), resolve(build, "app"));
 // the launchpad sandbox asks for this at an absolute path, so it is a file in
 // the build root rather than a route; the two express hosts serve the same
 // body from the same module (tools/osd-sandbox-config.mjs)
@@ -320,7 +321,7 @@ await writeFile(resolve(build, "app", "packs.json"), JSON.stringify({tiles: tile
 // the two entry pages: the Travels app alone, and the launchpad sandbox with
 // both apps; each boots UI5 only once the worker answers
 for (const page of ["index.html", "flp.html"]) {
-  await deferBootstrap(resolve(root, "webapp", page), resolve(build, "app", page), "../", true);
+  await deferBootstrap(resolve(rootWebappOf(root), page), resolve(build, "app", page), "../", true);
 }
 
 async function deferBootstrap(source, target, prefix, required) {
