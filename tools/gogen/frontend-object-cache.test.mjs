@@ -4,8 +4,12 @@ import {mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, uti
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawnSync} from "node:child_process";
+import {deserialize} from "node:v8";
+import {inflateRawSync} from "node:zlib";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
+import {home} from "./home.mjs";
+import {libraryPath} from "../osd-lib-path.mjs";
 
 const source = (name, body) => `CLASS ${name} DEFINITION PUBLIC.
 PUBLIC SECTION. CLASS-METHODS run RETURNING VALUE(rv) TYPE i.
@@ -115,6 +119,45 @@ test("old version directories are pruned, recent and foreign ones kept", () => {
     // that are kept as well, and the current one was marked used by opening it
     assert.deepEqual(readdirSync(cacheDir).sort(), [...recent, current, "notes"].sort());
     assert.ok(Date.now() - statSync(join(cacheDir, current)).mtimeMs < 60e3);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("a superclass edit changes what a cached CATCH takes, warm equal to cold", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-object-catch-")), cacheDir = join(dir, "cache");
+  const cx = (name, sup) => `CLASS ${name} DEFINITION PUBLIC INHERITING FROM ${sup} CREATE PUBLIC.
+ENDCLASS.
+CLASS ${name} IMPLEMENTATION.
+ENDCLASS.`;
+  const objects = ["ZCX_BASE", "ZCX_OTHER", "ZCX_LEAF", "ZCX_HIDDEN", "ZCL_CATCHER", "ZCL_CATCHER2", "CX_ROOT", "CX_STATIC_CHECK"];
+  const args = {folders: [dir, join(libraryPath(home, "open-abap-core"), "src")], objects, tolerant: true};
+  try {
+    writeFileSync(join(dir, "zcx_base.clas.abap"), cx("zcx_base", "cx_static_check"));
+    writeFileSync(join(dir, "zcx_other.clas.abap"), cx("zcx_other", "cx_static_check"));
+    // named by no catcher: only the hierarchy walk of each CATCH reads it
+    writeFileSync(join(dir, "zcx_hidden.clas.abap"), cx("zcx_hidden", "zcx_base"));
+    writeFileSync(join(dir, "zcl_catcher2.clas.abap"), source("zcl_catcher2", "TRY. rv = 1. CATCH zcx_base. rv = 2. ENDTRY."));
+    writeFileSync(join(dir, "zcl_catcher.clas.abap"), source("zcl_catcher",
+      "TRY. RAISE EXCEPTION TYPE zcx_leaf. CATCH zcx_base. rv = 1. CATCH zcx_other. rv = 2. ENDTRY. TRY. rv = rv + 1. CATCH zcx_base. rv = 3. ENDTRY."));
+    const outputs = [];
+    for (const sup of ["zcx_base", "zcx_other"]) {
+      writeFileSync(join(dir, "zcx_leaf.clas.abap"), cx("zcx_leaf", sup));
+      const cold = emitGo(compileProgram(args));
+      const first = compileProgram({...args, cacheDir}), warm = compileProgram({...args, cacheDir});
+      assert.equal(emitGo(first), cold);
+      assert.equal(emitGo(warm), cold);
+      assert.ok(warm.frontendCounts.reusedClasses.includes("ZCL_CATCHER"));
+      outputs.push(cold);
+    }
+    // the edit moved ZCX_LEAF from the first CATCH to the second
+    assert.notEqual(outputs[0], outputs[1]);
+    // and the entry's key names the hierarchy it read, not only the global version
+    const entries = readdirSync(cacheDir, {recursive: true}).filter((f) => f.endsWith(".bin"))
+      .map((f) => deserialize(inflateRawSync(readFileSync(join(cacheDir, f)).subarray(65))));
+    for (const name of ["ZCL_CATCHER", "ZCL_CATCHER2"]) {
+      const catcher = entries.filter((e) => e.value.name === name);
+      assert.ok(catcher.length > 0, name);
+      for (const e of catcher) assert.ok(e.reads.includes("CLAS ZCX_HIDDEN"), `${name} reads ZCX_HIDDEN`);
+    }
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
