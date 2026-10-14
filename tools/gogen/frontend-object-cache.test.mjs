@@ -1,6 +1,6 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {spawnSync} from "node:child_process";
@@ -91,6 +91,30 @@ test("disk lowerings survive a fresh process, match cold bytes and conservativel
     assert.deepEqual(edited.frontendCounts.reusedClasses, []);
     assert.equal(emitGo(edited), emitGo(compileProgram(args)));
     assert.notEqual(emitGo(edited), expected);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("old version directories are pruned, recent and foreign ones kept", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-object-prune-")), cacheDir = join(dir, "cache");
+  try {
+    writeFileSync(join(dir, "zcl_base.clas.abap"), source("zcl_base", "rv = 7."));
+    const args = {folders: [dir], objects: ["ZCL_BASE"], cacheDir};
+    compileProgram(args);
+    const [current] = readdirSync(cacheDir);
+    const version = (i) => String(i).padStart(64, "0"), hours = (h) => new Date(Date.now() - h * 3600e3);
+    // six stale versions (2..7 hours old), five opened within the hour, one foreign directory
+    const at = (name, h) => { mkdirSync(join(cacheDir, name)); utimesSync(join(cacheDir, name), hours(h), hours(h)); };
+    for (let i = 2; i <= 7; i++) at(version(i), i);
+    const recent = [11, 12, 13, 14, 15].map(version);
+    recent.forEach((name, i) => at(name, (i + 1) / 10));
+    mkdirSync(join(cacheDir, "notes"));
+    utimesSync(join(cacheDir, current), hours(9), hours(9));
+    const next = compileProgram(args);
+    assert.deepEqual(next.frontendCounts.reusedClasses, ["ZCL_BASE"]);
+    // keep 4 = the current one + three others by last use; more recent ones than
+    // that are kept as well, and the current one was marked used by opening it
+    assert.deepEqual(readdirSync(cacheDir).sort(), [...recent, current, "notes"].sort());
+    assert.ok(Date.now() - statSync(join(cacheDir, current)).mtimeMs < 60e3);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
