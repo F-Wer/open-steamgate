@@ -44,7 +44,10 @@ function toolIdentity() {
 // Bound cache validation well below V8's Set limit; oversized lowerings compile normally.
 const PORTABLE_NODE_BUDGET = 1 << 20;
 export function portable(value) {
-  const seen = new Set(), stack = [{values: [value].values()}];
+  return portableWithin(value, new Set());
+}
+function portableWithin(value, seen) {
+  const stack = [{values: [value].values()}];
   try {
     while (stack.length) {
       const frame = stack.at(-1), next = frame.values.next();
@@ -72,14 +75,20 @@ export function portable(value) {
   } catch { return false; } // An unreadable value must not break compilation either.
 }
 
+const primitiveArgument = (a) => a === null || ["undefined", "string", "number", "boolean"].includes(typeof a);
+
 // Rechecking the same input twice without an intervening write adds no guard.
-// Compact only portable transcripts; nested mutations already refuse replay.
+// Nested mutations already refuse replay; writes validate the compacted result.
 export function compactLowering(value) {
   if (!value.replay) return value;
-  const seen = new Map(), ops = [];
+  const seen = new Map(), ops = [], argumentsSeen = new Set();
   for (const op of value.replay.ops) {
     if (op.kind === "assign" || op.kind === "effect") seen.delete(op.key);
     else {
+      // Refuse registry instances before JSON can expand their shared graphs.
+      // Share the bounded walk across all reads, including discarded duplicates;
+      // all-primitive arguments are cheap to serialize and spend no budget.
+      if (!(op.args ?? []).every(primitiveArgument) && !portableWithin(op.args, argumentsSeen)) throw new TypeError("Non-portable replay arguments");
       if (!seen.has(op.key)) seen.set(op.key, new Map());
       const reads = seen.get(op.key), access = JSON.stringify([op.kind, op.method, op.args]);
       if (!reads.has(access)) reads.set(access, new Set());
@@ -147,8 +156,10 @@ export function objectCache(registry, root) {
       finally { registry.getObject = original; }
     },
     write(owner, value, reads, program) {
+      // Repeated reads can exceed the budget before compaction. A transcript
+      // with unserializable arguments must still fall back to ordinary lowering.
+      try { value = compactLowering(value); } catch { return; }
       if (!portable(value)) return;
-      value = compactLowering(value);
       const file = location(owner, value.name, wholeSelection(value) ? selection(program) : ""), temp = `${file}.${randomUUID()}.pending`;
       try {
         mkdirSync(join(root, version), {recursive: true});
