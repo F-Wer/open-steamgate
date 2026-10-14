@@ -22,10 +22,10 @@ function checkout(source, folder) {
 }
 checkout(lock.transpiler, "../transpiler");
 run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], resolve("../transpiler"));
-for (const name of ["runtime", "transpiler", "extras", "cli"]) {
+for (const name of ["runtime", "transpiler", "cli"]) {
   run("npm", ["install", "--no-audit", "--no-fund"], resolve(`../transpiler/packages/${name}`));
 }
-for (const name of ["runtime", "transpiler", "extras", "cli"]) {
+for (const name of ["runtime", "transpiler", "cli"]) {
   run("npm", ["run", "compile"], resolve(`../transpiler/packages/${name}`));
 }
 chmodSync("../transpiler/packages/cli/abap_transpile", 0o755);
