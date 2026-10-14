@@ -209,7 +209,12 @@ its existing behavior. The generation hash adds the system digest to its
 existing content and toolchain hashing. Internal registry discovery uses
 an explicit option to reuse already selected roots; unit discovery can omit
 extra checkout packs without setting environment overrides. An installed
-system always retains its complete index closure.
+system always retains its complete index closure. ADT exposes installed source
+roots as read-only and refuses saves, creates and deletes through its existing
+ReadOnly response before writing source or inactive versions. `$TMP` has no
+writable root in system mode; creating an object there is also refused.
+The VS Code debugger resolves logical source maps to the installed files,
+including breakpoint discovery and attach path overrides.
 
 Each build's `prepare()` re-reads and verifies every installed layer's complete
 treeDigest, including libraries, source, seeds and static pages, before using

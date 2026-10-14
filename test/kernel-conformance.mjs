@@ -5,7 +5,7 @@ import {join, resolve} from "node:path";
 import {compareFailures, compareDrift, identityDigest, failureSignature} from "../tools/osd-kernel-check.mjs";
 import {fingerprint, verifyCorpus, pin, repairFolder, generateWithRetry, cacheValid} from "../tools/osd-kernel-corpus.mjs";
 import {render} from "../tools/osg-support.mjs";
-import {regenerateEvidence, publicFolders, unmeasuredInputs} from "../tools/osd-kernel-conformance.mjs";
+import {regenerateEvidence, conformanceEnv, publicFolders, unmeasuredInputs} from "../tools/osd-kernel-conformance.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const row = {class: "ZCL_TEST", testclass: "LTCL_TEST", method: "EDGE", status: "FAILURE", message: "Expected '1', got '2'; Expected [1]; Actual [2]; Raised in edge"};
@@ -18,6 +18,15 @@ describe("kernel conformance gate", function () {
   let temp;
   before(() => { mkdirSync(join(root, ".local"), {recursive: true}); temp = mkdtempSync(join(root, ".local/kernel-check-")); });
   after(() => rmSync(temp, {recursive: true, force: true}));
+  it("round 2 item 1: conformance children receive no inherited pack or layer overrides", () => {
+    const saved = {...process.env};
+    try {
+      for (const key of ["OSD_PACKS", "OSD_WEB_PACKS", "OSD_LAYERS"]) process.env[key] = "/user/overrides";
+      const env = conformanceEnv(temp);
+      for (const key of ["OSD_PACKS", "OSD_WEB_PACKS", "OSD_LAYERS"]) assert.equal(env[key], undefined);
+    } finally { Object.assign(process.env, saved); for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; }
+  });
+
   it("unchanged known failures pass, with matching count and runner exit", () => {
     assert.deepEqual(compareFailures(result([row]), [known], {tests: 1, exitCode: 1}), []);
   });

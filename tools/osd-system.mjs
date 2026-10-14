@@ -89,7 +89,13 @@ export function matchesSourcePath(root, file, patterns, system = null) {
 export function sourceMapFile(generated, source) {
   const logical = resolve(dirname(generated), source);
   for (let root = dirname(generated); ; root = dirname(root)) {
-    if (existsSync(join(root, ".local/system", SYSTEM_ID))) return systemFile(root, relative(root, logical));
+    if (existsSync(join(root, ".local/system", SYSTEM_ID))) {
+      const path = relative(root, logical);
+      // A frame can name output/ through its symlink while the map is relative
+      // to the real generation. An unavailable source must not break a dump.
+      if (path === ".." || path.startsWith("../") || isAbsolute(path)) return undefined;
+      return systemFile(root, path);
+    }
     if (dirname(root) === root) return logical;
   }
 }

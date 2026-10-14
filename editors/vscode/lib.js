@@ -7,6 +7,7 @@
 const path = require("node:path");
 const fs = require("node:fs");
 const {pathToFileURL, fileURLToPath} = require("node:url");
+const {systemSourceMappings, installedSource} = require("./system-sources.js");
 const {packNameOf} = require("./launcher.js");
 const {customDescriptionGenerator, customPropertiesGenerator} = require("./abap-debug-view.js");
 
@@ -191,6 +192,15 @@ function debuggerConfiguration(port, {target = "system", restart = true, root, s
     sourceMapPathOverrides[`${relativeSource}/*`] = target;
     sourceMapPathOverrides[`${pathToFileURL(packSource).href}/*`] = target;
   }
+  for (const {logical, source} of systemSourceMappings(root) ?? []) {
+    const target = `${source.replaceAll("\\", "/")}/*`;
+    for (const output of [path.join(root, "output"), path.join(root, "build/by-input/generation/output"), outputRoot]) {
+      const relative = path.relative(output, logical).replaceAll("\\", "/");
+      sourceMapPathOverrides[`${relative}/*`] = target;
+    }
+    sourceMapPathOverrides[`${pathToFileURL(logical).href}/*`] = target;
+    sourceMapPathOverrides[`${logical.replaceAll("\\", "/")}/*`] = target;
+  }
   return {
     name: `OSD: ${target === "unit" ? "ABAP Unit" : "ABAP"} (${port})`,
     type: "node",
@@ -226,6 +236,7 @@ function runningAbapSources(root, {storageDir, layers = []} = {}) {
     return undefined;
   }
   const mappings = packSourceMappings({root, storageDir, layers});
+  const systemMappings = systemSourceMappings(root);
   const files = new Map();
   for (const name of fs.readdirSync(output).sort()) {
     if (!name.endsWith(".mjs.map")) continue;
@@ -243,6 +254,8 @@ function runningAbapSources(root, {storageDir, layers = []} = {}) {
         const base = isInside(file, pack.packSource) ? pack.packSource : realOrSelf(pack.packSource);
         file = path.join(pack.source, path.relative(base, file));
       }
+      file = installedSource(root, file, systemMappings);
+      if (file === undefined) continue;
       // a library's map names a bare file name, which resolves inside
       // output/ to nothing; a stale gen/ entry names a file since removed.
       // Neither is a copy a breakpoint could be moved to.

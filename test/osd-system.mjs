@@ -1,5 +1,5 @@
 import {expect} from "chai";
-import {mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {registry, listening} from "./helpers/oci-registry.mjs";
@@ -15,9 +15,9 @@ import {loadLibs, loadFiles} from "../tools/osd-transpile.mjs";
 import fs from "node:fs";
 import {syncBuiltinESMExports} from "node:module";
 import {unitInputs} from "../tools/gogen/unit-inputs.mjs";
-import {ObjectStore} from "../tools/osd-store.mjs";
+import {ObjectStore, ReadOnly} from "../tools/osd-store.mjs";
 import {appsOf} from "../tools/osd-status.mjs";
-import {resolveFrame} from "../tools/osd-where.mjs";
+import {resolveFrame, abapFrames, dumpOf} from "../tools/osd-where.mjs";
 import {seedStatements} from "./seed.mjs";
 import {abapgitXml, zipFiles} from "../tools/osd-abapgit-zip.mjs";
 const write = (file, bytes) => { mkdirSync(join(file, ".."), {recursive: true}); writeFileSync(file, bytes); };
@@ -167,6 +167,53 @@ describe("osd-system: one digest supplies the system", function () {
     const reg = new ObjectStore({root}).registry();
     expect(reg.getObject("PROG", "ZKEPT")).not.to.equal(undefined);
     expect(reg.getObject("PROG", "ZEXCLUDED")).to.equal(undefined);
+  });
+
+  it("round 2 item 2: unit discovery excludes installed fixtures by logical path", async () => {
+    const folder = join(source, "test");
+    write(join(folder, "fixtures/adt-editor/zcl_editor.clas.testclasses.abap"), "* excluded");
+    write(join(folder, "unit/zcl_kept.clas.testclasses.abap"), "* kept");
+    await appendLayer(folder, "test", "input");
+    const config = {...JSON.parse(readFileSync(join(root, "abap_transpile.json"))), exclude_filter: ["/test/fixtures/"]};
+    const file = join(root, ".local/system/inputs/test/src/fixtures/adt-editor/zcl_editor.clas.testclasses.abap");
+    const plan = unitInputs({home: root, config});
+    expect(plan.skip(file)).to.equal(true);
+    const kept = [join(root, ".local/system/inputs/test/src/unit/zcl_kept.clas.testclasses.abap")];
+    expect(plan.sources).to.deep.equal(kept);
+    expect(unitInputs({home: root, config: {...config, exclude_filter: []}}).sources).to.deep.equal(kept);
+    expect((await loadFiles(root, config, {})).files.map(f => f.filename)).not.to.include("zcl_editor.clas.testclasses.abap");
+  });
+
+  it("round 2 item 4: installed store roots refuse writes and TMP without changing source or inactive state", async () => {
+    await fetchSystem(root, ref);
+    const store = new ObjectStore({root});
+    const snapshot = dir => !fs.existsSync(dir) ? [] : fs.readdirSync(dir, {recursive: true}).sort()
+      .filter(f => fs.statSync(join(dir, f)).isFile()).map(f => [f, readFileSync(join(dir, f)).toString("base64")]);
+    const before = snapshot(join(root, ".local/system")), inactive = snapshot(join(root, "build/inactive"));
+    expect(() => store.write("PROG", "ZFOO", "REPORT zfoo. WRITE 'changed'.")).to.throw(ReadOnly);
+    expect(() => store.write("PROG", "ZNEW", "REPORT znew.")).to.throw(ReadOnly);
+    expect(() => store.create("PROG", "ZNEW", {package: "$TMP"})).to.throw(ReadOnly);
+    expect(store.roots.every(r => r.writable === false)).to.equal(true);
+    expect(store.roots.some(r => r.path === "local/tmp")).to.equal(false);
+    store.reroot();
+    expect(store.roots.every(r => r.writable === false)).to.equal(true);
+    expect(snapshot(join(root, ".local/system"))).to.deep.equal(before);
+    expect(snapshot(join(root, "build/inactive"))).to.deep.equal(inactive);
+    expect(fs.existsSync(join(root, "local/tmp"))).to.equal(false);
+    expect(() => prepare(root)).not.to.throw();
+  });
+
+  it("round 2 item 5: a symlink frame with a source above the installed root still yields a dump", async () => {
+    await fetchSystem(root, ref);
+    const generated = join(root, "build/by-input/g1/output/zfoo.prog.mjs");
+    write(generated, "throw new Error('boom');");
+    json(generated + ".map", {version: 3, sources: ["../../../../src/zfoo.prog.abap"], names: [], mappings: "AACA"});
+    symlinkSync(join(root, "build/by-input/g1/output"), join(root, "output"), "dir");
+    const file = join(root, "output/zfoo.prog.mjs"), error = new Error("boom");
+    error.stack = `Error: boom\n    at foo (${file}:1:1)`;
+    expect(resolveFrame(file, 1, 1)).to.include({file: "zfoo.prog.abap", text: undefined});
+    expect(() => abapFrames(error)).not.to.throw();
+    expect(dumpOf(error)).to.include({message: "boom"});
   });
 
   it("regression 4b: library discovery uses the transpiler's logical exclusion paths", async () => {

@@ -1,3 +1,4 @@
+import {activeSystem} from "./osd-system.mjs";
 import {writable} from "./osd-source-write-check.mjs";
 // The object store's side of $TMP (tools/osd-tmp.mjs): its root, the
 // package entry every system has, who made what, and the checked write a
@@ -21,7 +22,9 @@ export class InvalidName extends Error {
 // before, so that the first create has somewhere to go. Last, so that a
 // write that names no root never lands in it. OSD_TMP=off (a preview, any
 // published build) leaves it out altogether.
-export function withTmp(roots) {
+export function withTmp(roots, base) {
+  if (activeSystem(base)) return roots.filter(r => r.path !== TMP_FOLDER)
+    .map(({overlay, overlayOf, ...root}) => ({...root, writable: false}));
   if (tmpDisabled()) return roots.filter((r) => r.path !== TMP_FOLDER);
   return roots.some((r) => r.path === TMP_FOLDER) ? roots : [...roots, tmpRoot()];
 }
@@ -32,7 +35,7 @@ export function withTmp(roots) {
 export function indexTmp(index, root) {
   if (!index.has(`DEVC ${TMP_PACKAGE}`)) {
     index.set(`DEVC ${TMP_PACKAGE}`, {type: "DEVC", name: TMP_PACKAGE, file: join(TMP_FOLDER, "package.devc.xml"),
-      root: TMP_FOLDER, writable: true, library: false, imported: false, package: TMP_PACKAGE, packages: [TMP_PACKAGE],
+      root: TMP_FOLDER, writable: !activeSystem(root), library: false, imported: false, package: TMP_PACKAGE, packages: [TMP_PACKAGE],
       synthetic: true});
   }
   const authors = tmpAuthors(root) ?? {};

@@ -52,7 +52,7 @@ export async function main(args = process.argv.slice(2)) {
     if (!result) {
       provenance = unitProvenance("osgo");
       const command = toolCommand(join(root, "tools", "gogen", "unit.mjs"),
-        ["--input", input, "--jobs", String(jobs), "--out", join(staging, "out"), "--no-cache", ...chosen.flatMap((name) => ["--class", name])]);
+        ["--input", input, "--no-extra-packs", "--jobs", String(jobs), "--out", join(staging, "out"), "--no-cache", ...chosen.flatMap((name) => ["--class", name])]);
       // Hosted dispatch uses a unique name: gogen's unit.mjs and osd-unit.mjs differ.
       if (hosted()) command[JSON.parse(process.env.OSD_SELF).length + 1] = "gogen-unit.mjs";
       const child = await run(command, root);

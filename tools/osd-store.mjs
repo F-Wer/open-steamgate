@@ -1,3 +1,4 @@
+import {activeSystem} from "./osd-system.mjs";
 import {repositoryConfig} from "./osd-abapgit-config.mjs";
 import {userLayersOf, declaredPackage, rootPackage} from "./osd-source-layers.mjs";
 import {packageChildName} from "./osd-object-name.mjs";
@@ -154,7 +155,7 @@ export function exclusionsOf(root) {
 }
 
 export function rootsOf(root, env = process.env) {
-  const config = loadConfig(root);
+  const config = loadConfig(root), system = activeSystem(root, env);
   const packs = new Map([...packRootsOf(root, env), ...userLayersOf(root, env)].map((pack) => [pack.path, pack]));
   return inputFoldersOf(root, config, env).map((path) => packs.get(path) ?? (path === TMP_FOLDER ? tmpRoot() : {
     path, writable: path !== "gen", library: false,
@@ -163,7 +164,7 @@ export function rootsOf(root, env = process.env) {
       abapgit: repositoryConfig(join(root, path)),
       package: rootPackage(join(root, path), "$OSD_" + packageWord(basename(path))),
     } : {}),
-  }));
+  })).map(r => system ? {...r, writable: false} : r);
 }
 
 export class ObjectStore {
@@ -174,7 +175,7 @@ export class ObjectStore {
     // test seams: beforeWrite(file) runs between a create's check and its write
     this.hooks = options.hooks ?? {};
     this.explicitRoots = options.roots !== undefined;
-    this.roots = withTmp(options.roots ?? rootsOf(this.root));
+    this.roots = withTmp(options.roots ?? rootsOf(this.root), this.root);
     // the build's exclusions are the store's too, from the same file
     this.excluded = options.excluded ?? exclusionsOf(this.root);
     this.superPackage = options.superPackage === undefined ? SUPER_PACKAGE : options.superPackage;
@@ -242,7 +243,7 @@ export class ObjectStore {
   // the roots are read again, unless a caller chose them
   reroot() {
     if (this.explicitRoots === false) {
-      this.roots = withTmp(rootsOf(this.root));
+      this.roots = withTmp(rootsOf(this.root), this.root);
     }
     this.index = undefined;
     this.#forget();
@@ -534,6 +535,7 @@ export class ObjectStore {
       checkName(type, name, CREATABLE[type] !== undefined); // a W3MI id, an IWSV keep their own
       const root = requestedRoot ?? [...this.roots].reverse().find(r => r.overlayOf && r.writable)
         ?? this.roots.find((r) => r.writable);
+      if (!root) throw new ReadOnly(type, name);
       const file = join(root.path, ...(root.overlayOf ? [] : ["osd"]), fileOf(name) + meta.ext);
       const packages = this.#packagesOf(file, root);
       entry = {type, name: String(name).toUpperCase(), file, root: root.path, writable: true, library: false,

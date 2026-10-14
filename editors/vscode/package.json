@@ -11,7 +11,7 @@
   "bugs": {"url": "https://github.com/oisee/open-steamgate/issues"},
   "homepage": "https://github.com/oisee/open-steamgate#readme",
   "galleryBanner": {"color": "#15233b", "theme": "dark"},
-  "files": ["extension.js", "launcher.js", "lib.js", "abapgit-zip.js", "abapgit-zip-command.js", "http-lens.js", "system-overview.js", "osd/**", "resources/**", "examples/**", "walkthrough/**", "media/**", "web/**", "README.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.md"],
+  "files": ["extension.js", "launcher.js", "lib.js", "system-sources.js", "abapgit-zip.js", "abapgit-zip-command.js", "http-lens.js", "system-overview.js", "osd/**", "resources/**", "examples/**", "walkthrough/**", "media/**", "web/**", "README.md", "CHANGELOG.md", "LICENSE", "THIRD-PARTY-NOTICES.md"],
   "publisher": "oisee",
   "engines": {"vscode": "^1.101.0"},
   "extensionKind": ["workspace", "ui"],

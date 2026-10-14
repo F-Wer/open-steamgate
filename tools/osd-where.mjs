@@ -107,6 +107,7 @@ export function resolveFrame(file, row, column) {
 }
 
 function read(path) {
+  if (path === undefined) return undefined;
   if (sources.has(path) === false) {
     sources.set(path, existsSync(path) ? readFileSync(path, "utf8") : undefined);
   }

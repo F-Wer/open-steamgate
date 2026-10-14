@@ -1,10 +1,12 @@
 // Real Go builds; run under flock /tmp/osd-heavy.lock with the gogen checks.
 import assert from "node:assert/strict";
-import {spawnSync} from "node:child_process";
+import childProcess, {spawnSync} from "node:child_process";
 import {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {join, resolve} from "node:path";
-import {metadata, summarize} from "../tools/osgo-unit.mjs";
+import {metadata, summarize, main} from "../tools/osgo-unit.mjs";
 import {unitInputs} from "../tools/gogen/unit-inputs.mjs";
+import {syncBuiltinESMExports} from "node:module";
+import {EventEmitter} from "node:events";
 import {compileProgram} from "../tools/gogen/frontend.mjs";
 
 const root = resolve(import.meta.dirname, "..");
@@ -34,6 +36,38 @@ describe("osgo unit CI entry point", function () {
     assert.equal(readdirSync(join(root, ".local")).some((name) => name.startsWith("osgo-unit-")), false, "staging cleaned");
     rmSync(temp, {recursive: true, force: true});
   });
+  it("round 2 item 1: the conformance osgo child keeps the original ten folders and no user packs", async () => {
+    fixture(input);
+    const home = join(temp, "home"), config = {input_folder: ["src", "test", "gen"]};
+    for (const folder of ["src", "test", "gen", ...["open-abap-core/src", "express-icf-shim/src", "open-abap-apc/src",
+      "open-abap-gui/src", "open-abap-odata/src", "ajson/src/core"].map(f => ".local/lars/" + f), "packs/demo/src"])
+      mkdirSync(join(home, folder), {recursive: true});
+    writeFileSync(join(home, "packs/demo/osd-pack.json"), JSON.stringify({name: "demo"}));
+    const originalSpawn = childProcess.spawn, originalLog = console.log;
+    let folders, original;
+    childProcess.spawn = (command, args) => {
+      const staged = args[args.indexOf("--input") + 1];
+      folders = unitInputs({home, config, extraInputs: [staged],
+        extraPacks: !args.includes("--no-extra-packs"), env: {OSD_PACKS: input}}).folders;
+      original = unitInputs({home, config, extraInputs: [staged], env: {OSD_PACKS: "", OSD_WEB_PACKS: ""}});
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+      queueMicrotask(() => {
+        child.stdout.emit("data", JSON.stringify({classes: 1, compiled: 1,
+          rows: [{class: "ZCL_OSGO_CI", testclass: "LTCL_TEST", method: "CHECK", status: "SUCCESS"}]}));
+        child.emit("close", 0);
+      });
+      return child;
+    };
+    syncBuiltinESMExports(); console.log = () => {};
+    try {
+      assert.equal(await main([input, "--json"]), 0);
+      // origin/main conformance passed empty pack env: src, test, gen, staged input + six existing lib folders.
+      assert.deepEqual(folders, original.folders);
+      assert.equal(folders.length, 10);
+    } finally { childProcess.spawn = originalSpawn; syncBuiltinESMExports(); console.log = originalLog; }
+  });
+
   it("passes without XML, emits totals, and leaves the caller's folder unchanged", () => {
     fixture(input);
     const before = snapshot(input);
