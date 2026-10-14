@@ -13,17 +13,6 @@ function fingerprint(value) {
   return JSON.stringify(value, (_, v) => v instanceof Map ? {map: [...v]} : v instanceof Set ? {set: [...v]}
     : definition(v) ? {definition: [v.constructor.name, v.getName(), v.getFilename(), v.getStart().getRow(), v.getStart().getCol()]} : v);
 }
-// The items of a Set, Map (key, value, key, value...) or array when every one
-// is a primitive, else null. A toJSON anywhere would make the encoding depend
-// on more than the items.
-const primitive = (x) => x === null || (typeof x !== "object" && typeof x !== "function" && typeof x !== "bigint");
-function primitiveItems(value) {
-  if (!(value instanceof Set || value instanceof Map || Array.isArray(value)) || "toJSON" in value) return null;
-  const items = [];
-  if (value instanceof Map) { for (const [k, v] of value) items.push(k, v); }
-  else for (const x of Array.isArray(value) ? Array.from(value) : value) items.push(x);
-  return items.every(primitive) ? items : null;
-}
 const clone = (v) => v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? [...v] : v;
 function copy(program) {
   return Object.fromEntries(Object.entries(program).map(([k, v]) => [k, clone(v)]));
@@ -50,25 +39,9 @@ export function replayLowering(program, cached) {
 export function recordLowering(program, lower) {
   const ops = [], written = new Set(), borrowed = new Map();
   let safe = true;
-  // Encoding a whole collection on every read was most of the recording cost
-  // (a lowering iterates the same large collections again and again). A
-  // collection of primitives keeps its last encoding with a copy of its items,
-  // and a read compares the items before reusing it: equal primitives encode
-  // equally, so every read still records the value as it is at that moment.
-  // Anything holding an object is encoded afresh, since a nested change made
-  // and undone between two reads must still be seen by the second one.
-  const encodings = new WeakMap();
-  const encode = (value) => {
-    const items = primitiveItems(value);
-    const known = items && encodings.get(value);
-    if (known && known.items.length === items.length && known.items.every((x, i) => Object.is(x, items[i]))) return known.encoded;
-    const encoded = fingerprint(value);
-    if (items) encodings.set(value, {items, encoded});
-    return encoded;
-  };
   const read = (key, method, args, value) => {
     try {
-      const encoded = encode(value);
+      const encoded = fingerprint(value);
       ops.push({kind: "read", key, method, args, value: encoded});
       if (value && typeof value === "object") {
         if (!borrowed.has(value)) borrowed.set(value, encoded);

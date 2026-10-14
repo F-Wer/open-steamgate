@@ -72,7 +72,7 @@ test("a nested change undone between reads of an alias still guards the second r
   assert.equal(cached.replay, undefined);
 });
 
-test("a reused encoding of a primitive collection follows every change", () => {
+test("collections changed and restored between reads still guard the second read", () => {
   // a Map whose value is an array must not compare as a flattened pair
   const map = new Map([["x", ["y"]], ["q", "r"]]);
   assert.equal(recordLowering({m: map}, (p) => {
@@ -89,6 +89,19 @@ test("a reused encoding of a primitive collection follows every change", () => {
     const second = [...p.wanted].length;
     set.delete("C");
     return first + second;
+  }).replay, undefined);
+  // an array whose iterator hides its elements
+  class Fixed extends Array { *[Symbol.iterator]() { yield "fixed"; } }
+  const program = (shared) => {
+    const a = Fixed.from(["i"]);
+    return {sigs: new Map([["A", a], ["B", shared ? a : Fixed.from(["i"])]])};
+  };
+  assert.equal(recordLowering(program(true), (p) => {
+    const a = p.sigs.get("A");
+    a[0] = "int8";
+    const ir = p.sigs.get("B")[0];
+    a[0] = "i";
+    return ir;
   }).replay, undefined);
   // an undefined first encoding is still the first one
   const x = Object.defineProperty({type: undefined}, "toJSON", {value() { return this.type; }});
