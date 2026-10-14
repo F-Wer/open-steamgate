@@ -3,13 +3,13 @@ import {execFileSync, spawnSync} from "node:child_process";
 import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {tmpdir} from "node:os";
-import {dirname, join, resolve} from "node:path";
+import {basename, dirname, join, resolve} from "node:path";
 import {abapgitXml, zipFiles} from "./osd-abapgit-zip.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
 import {MEDIA, OciError, client, formatRef, manifest, parseRef, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "./osd-oci.mjs";
 import {toolCommand} from "./osd-host.mjs";
 import {runsAs} from "./osd-main.mjs";
-import {MAX_SCAN_BYTES} from "./osd-leak-scan.mjs";
+import {CAPTURE, MAX_SCAN_BYTES} from "./osd-leak-scan.mjs";
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
 const toolRoot = resolve(moduleDir, "..");
@@ -74,16 +74,19 @@ export function build(folder, {name, kind, source} = {}) {
 export function leakGate(trees, metadata, documents = []) {
   const temp = mkdtempSync(join(tmpdir(), "osd-layer-scan-"));
   try {
-    const paths = [], archivePaths = [];
+    const paths = [], archivePaths = [], labels = new Map();
     mkdirSync(join(temp, "content"));
     const content = (bytes, label) => {
       if (bytes.length > MAX_SCAN_BYTES) fail("LEAK", `publish refused: ${label} exceeds scanner size limit (${MAX_SCAN_BYTES} bytes)`);
       const file = join(temp, "content", `${String(paths.length + 1).padStart(6, "0")}.txt`);
       writeFileSync(file, bytes);
       paths.push(file);
+      labels.set(`content/${basename(file)}`, label);
     };
     for (const files of trees) {
       for (const {path, bytes} of files) {
+        // the scanner refuses captures by name, which the neutral names below would hide
+        if (CAPTURE.test(path)) fail("LEAK", `publish refused: ${path} is a capture file (*.pcap, *.pcapng, *.jsonl are never published)`);
         content(bytes, path);
         archivePaths.push(path);
       }
@@ -100,7 +103,9 @@ export function leakGate(trees, metadata, documents = []) {
     const result = spawnSync(command, args, {encoding: "utf8", maxBuffer: 4 * 1024 * 1024});
     const reason = result.error?.message ?? result.stderr?.trim() ?? result.stdout?.trim();
     if (result.error || result.status !== 0 && result.status !== 1) fail("SCAN_FAILED", `SCAN_FAILED: ${reason || `scanner exit ${result.status}, signal ${result.signal}`}`);
-    if (result.status === 1) fail("LEAK", `publish refused: ${reason || "scanner found identifiers"}`);
+    // name what leaked by its archive path, not by the neutral file it was scanned as
+    const named = (reason ?? "").replace(/content\/\d{6}\.txt/g, (n) => labels.get(n) ?? n);
+    if (result.status === 1) fail("LEAK", `publish refused: ${named || "scanner found identifiers"}`);
   } finally { rmSync(temp, {recursive: true, force: true}); }
 }
 

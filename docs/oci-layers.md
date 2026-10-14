@@ -55,6 +55,17 @@ runtime-independent because entries are stored. abapGit's `cl_abap_zip` reads
 method 0. Before republishing a layer, the tool extracts and re-encodes its
 ZIP and requires byte equality (`NOT_CANONICAL` otherwise), rejecting comments,
 extra fields, compression and differing entry order. It also verifies treeDigest.
+So a system holds only layers built by `osd-layer`: `osd-fetch` accepts a
+foreign zip (a plain `oras push`, an abapGit export) as a pack source, but to
+join a system it is unpacked and rebuilt with `osd-layer build`, which gives it
+a new digest.
+
+The leak gate before every push scans each file's content under a neutral
+name, the archive paths, the config, the annotations and the destination
+reference, and refuses a capture file (`*.pcap`, `*.pcapng`, `*.jsonl`) and any
+file larger than the scanner reads. The repository's `.leak-allow.json` does
+not apply to a published layer: a folder whose content is only allowed in this
+repository (`packs/lsd`, `packs/zvdb`'s vectors) cannot be published as is.
 
 `treeDigest` uses `tools/osd-oci.mjs`'s shared helper: SHA-256 of concatenated
 `<content sha256 hex>  <archive relative path>\n` lines, sorted by UTF-8 path

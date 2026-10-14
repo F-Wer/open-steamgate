@@ -40,7 +40,7 @@ const PRIVATE_V4 =
   /\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3})\b/g;
 const UUID =
   /\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b/g;
-const CAPTURE = /\.(pcap|pcapng|jsonl)$/i;
+export const CAPTURE = /\.(pcap|pcapng|jsonl)$/i;
 
 // Lock files are megabytes of base64 integrity hashes, nobody writes them by
 // hand, and no identifier reaches one except by chance. Scanning them produces

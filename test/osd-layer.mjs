@@ -233,6 +233,17 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => leakGate([[{path: name, bytes: Buffer.from("forbidden_publish_identifier")}]], {})).to.throw(/LEAK|publish refused/);
   });
 
+  for (const name of ["trace.pcap", "dump.pcapng", "src/log.JSONL"]) it(`refuses a capture file by its archive name: ${name}`, () => {
+    expect(() => leakGate([[{path: name, bytes: Buffer.from("no identifier inside")}]], {})).to.throw(/capture file/);
+  });
+
+  it("names a leaking file by its archive path, not its neutral scan name", () => {
+    let error;
+    try { leakGate([[{path: "safe.txt", bytes: Buffer.from("x")}, {path: "src/zcl_hit.clas.abap", bytes: Buffer.from("forbidden_publish_identifier")}]], {}); } catch (e) { error = e; }
+    expect(error?.message).to.include("src/zcl_hit.clas.abap");
+    expect(error?.message).not.to.match(/content\/\d{6}\.txt/);
+  });
+
   it("refuses oversized content instead of skipping it", () => {
     expect(() => leakGate([[{path: "large.txt", bytes: Buffer.alloc(8 * 1024 * 1024 + 1, 32)}]], {})).to.throw(/size limit/);
   });
