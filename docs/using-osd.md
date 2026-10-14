@@ -317,7 +317,22 @@ archive, sorted by UTF-8 byte order, before `path` selection or exclusions.
 Content is hashed as raw bytes: CRLF and BOMs are preserved, without
 normalisation. A config `treeDigest` must match. Blob digests and ZIP safety
 are checked before the fetched folder is replaced; failure preserves the
-previous folder. Blobs are cached under `.local/oci`.
+previous folder. Blobs are cached under `.local/oci`, with their digest and
+length checked on reuse. Manifest and config reads are capped at 4 MiB;
+blob reads are capped at their descriptor size. Config identity is verified
+before interpreting `treeDigest`; only the exact OCI empty descriptor is skipped.
+
+Token realms must use HTTPS, except for a registry on localhost or 127.0.0.1.
+A realm may have a different host (for example Docker Hub's auth service).
+`GITHUB_TOKEN` is used only for `ghcr.io`. To use `OSD_OCI_USER` and
+`OSD_OCI_TOKEN`, set `OSD_OCI_REGISTRY` to the exact registry host (including
+its port, if any); these credentials are never used for other registries.
+
+Git and OCI fetches hold an exclusive pack lock, stage the replacement, and
+commit by renaming the marker. Concurrent sources retain both marker entries.
+Locks expire after ten minutes without a heartbeat. Stages, old folders and
+locks use ignored `.osd-fetch-*` names. Cleanup failure after commit logs a
+warning and leaves the old folder for later removal.
 
 Readiness requires both the folder and a matching `.osd-fetched.json` entry:
 git compares `repo`, `ref`, `path`, `exclude`; OCI compares `oci`, `path`,

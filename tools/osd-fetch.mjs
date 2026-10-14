@@ -21,7 +21,7 @@
 // GitHub answers a fetch of any reachable commit; a server that does not
 // gets a full clone and a checkout instead, which is slower and the same.
 import {execFileSync} from "node:child_process";
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {MARKER, markerOf, sourceMatches, packsOf} from "./osd-packs.mjs";
@@ -98,8 +98,90 @@ function copyTree(from, to, exclude) {
   return files;
 }
 
+/** Serialize the folder swap and marker read/modify/write for every source. */
+async function packLock(pack) {
+  mkdirSync(pack.dir, {recursive: true});
+  const lock = join(pack.dir, ".osd-fetch-lock");
+  while (true) {
+    try {
+      mkdirSync(lock);
+      const owner = JSON.stringify({pid: process.pid, at: Date.now()});
+      try { writeFileSync(join(lock, "owner.json"), owner); }
+      catch (error) { rmSync(lock, {recursive: true, force: true}); throw error; }
+      const heartbeat = setInterval(() => {
+        try {
+          if (readFileSync(join(lock, "owner.json"), "utf8") === owner) {
+            const now = new Date();
+            utimesSync(lock, now, now);
+          }
+        } catch { /* A lost lock must not touch its successor. */ }
+      }, 60 * 1000);
+      heartbeat.unref();
+      return () => {
+        clearInterval(heartbeat);
+        if (existsSync(lock) && readFileSync(join(lock, "owner.json"), "utf8") === owner) {
+          rmSync(lock, {recursive: true, force: true});
+        }
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      try {
+        if (Date.now() - statSync(lock).mtimeMs > 10 * 60 * 1000) {
+          // Rename stale locks out of the namespace before deleting them.
+          const stale = `${lock}-${process.pid}-${Date.now()}`;
+          renameSync(lock, stale);
+          rmSync(stale, {recursive: true, force: true});
+          continue;
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      await new Promise((done) => setTimeout(done, 25));
+    }
+  }
+}
+
+/** Marker rename commits the install. Cleanup after it is best effort. */
+function publish(pack, source, stage, entry, log) {
+  const marker = markerOf(pack.dir);
+  marker[source.folder] = entry;
+  const markerTemp = `${stage}.json`, old = `${stage}.old`;
+  let movedOld = false, installed = false;
+  try {
+    writeFileSync(markerTemp, JSON.stringify(marker, null, 2) + "\n");
+    if (existsSync(source.dir)) {
+      renameSync(source.dir, old);
+      movedOld = true;
+    }
+    try {
+      renameSync(stage, source.dir);
+      installed = true;
+      renameSync(markerTemp, join(pack.dir, MARKER));
+    } catch (error) {
+      // A failed stage rename never gives us ownership of the destination.
+      if (installed) rmSync(source.dir, {recursive: true, force: true});
+      if (movedOld) renameSync(old, source.dir);
+      throw error;
+    }
+    try { rmSync(old, {recursive: true, force: true}); }
+    catch (error) { log(`warning: installed ${pack.name}/${source.folder}; cleanup left ${old}: ${error.message}`); }
+  } finally {
+    try { rmSync(markerTemp, {force: true}); }
+    catch (error) { log(`warning: cleanup left ${markerTemp}: ${error.message}`); }
+  }
+}
+
 /** fetch one source of one pack; a no-op when the marker already says this ref */
 export async function fetchSource(pack, source, options = {}) {
+  const release = await packLock(pack);
+  try { return await fetchLocked(pack, source, options); }
+  finally {
+    try { release(); }
+    catch (error) { (options.log ?? (() => {}))(`warning: lock cleanup failed: ${error.message}`); }
+  }
+}
+
+async function fetchLocked(pack, source, options) {
   const log = options.log ?? (() => {});
   const marker = markerOf(pack.dir);
   const before = marker[source.folder];
@@ -107,32 +189,32 @@ export async function fetchSource(pack, source, options = {}) {
     log(`${pack.name}/${source.folder}: already at ${before.digest ? before.digest.slice(0, 19) : before.commit.slice(0, 12)}`);
     return {pack: pack.name, folder: source.folder, commit: before.commit, digest: before.digest, treeDigest: before.treeDigest, files: before.files, fetched: false};
   }
-  if (source.oci !== undefined) return fetchOci(pack, source, marker, log);
+  if (source.oci !== undefined) return fetchOci(pack, source, log);
   log(`${pack.name}/${source.folder}: fetching ${source.repo} at ${source.ref}`);
   const {dir, commit} = checkout(source.repo, source.ref);
+  let stage;
   try {
     const from = join(dir, source.path);
     if (existsSync(from) === false) {
       throw new FetchFailed(source.repo, source.ref, `no /${source.path} in it`);
     }
-    // the folder is replaced whole: what was there is what the last fetch
-    // wrote, and a file the repository dropped must not stay behind
-    rmSync(source.dir, {recursive: true, force: true});
-    mkdirSync(source.dir, {recursive: true});
-    const files = copyTree(from, source.dir, source.exclude);
-    marker[source.folder] = {
+    stage = mkdtempSync(join(pack.dir, ".osd-fetch-stage-"));
+    const files = copyTree(from, stage, source.exclude);
+    publish(pack, source, stage, {
       repo: source.repo, ref: source.ref, commit, path: source.path, exclude: source.exclude,
       files: files.length, at: new Date().toISOString(),
-    };
-    writeFileSync(join(pack.dir, MARKER), JSON.stringify(marker, null, 2) + "\n");
+    }, log);
     log(`${pack.name}/${source.folder}: ${files.length} files from ${commit.slice(0, 12)}`);
     return {pack: pack.name, folder: source.folder, commit, files: files.length, fetched: true};
   } finally {
-    rmSync(dir, {recursive: true, force: true});
+    for (const path of [stage, dir].filter(Boolean)) {
+      try { rmSync(path, {recursive: true, force: true}); }
+      catch (error) { log(`warning: cleanup left ${path}: ${error.message}`); }
+    }
   }
 }
 
-async function fetchOci(pack, source, marker, log) {
+async function fetchOci(pack, source, log) {
   let stage;
   try {
     const layer = await pull(source.oci, {cacheDir: join(pack.root, ".local", "oci")});
@@ -149,7 +231,7 @@ async function fetchOci(pack, source, marker, log) {
     const patterns = source.exclude.map((e) => new RegExp(e, "i"));
     const selected = [...archive].filter(([path]) => path.startsWith(prefix)).map(([path, bytes]) => [path.slice(prefix.length), bytes]);
     if (!selected.length) throw new Error(`no /${source.path} in it`);
-    stage = mkdtempSync(join(dirname(source.dir), `.${source.folder}-`));
+    stage = mkdtempSync(join(pack.dir, ".osd-fetch-stage-"));
     let files = 0;
     for (const [path, bytes] of selected) {
       // copyTree skips excluded directories as well as individual files.
@@ -159,32 +241,17 @@ async function fetchOci(pack, source, marker, log) {
       writeFileSync(join(stage, path), bytes);
       files++;
     }
-    marker[source.folder] = {oci: source.oci, digest: layer.manifest.digest, treeDigest: digest,
-      path: source.path, exclude: source.exclude, files, at: new Date().toISOString()};
-    const markerTemp = `${stage}.json`;
-    const old = `${stage}.old`;
-    try {
-      writeFileSync(markerTemp, JSON.stringify(marker, null, 2) + "\n");
-      const hadOld = existsSync(source.dir);
-      if (hadOld) renameSync(source.dir, old);
-      try {
-        renameSync(stage, source.dir);
-        renameSync(markerTemp, join(pack.dir, MARKER));
-      } catch (error) {
-        rmSync(source.dir, {recursive: true, force: true});
-        if (hadOld) renameSync(old, source.dir);
-        throw error;
-      }
-      rmSync(old, {recursive: true, force: true});
-    } finally {
-      rmSync(markerTemp, {force: true});
-    }
+    publish(pack, source, stage, {oci: source.oci, digest: layer.manifest.digest, treeDigest: digest,
+      path: source.path, exclude: source.exclude, files, at: new Date().toISOString()}, log);
     log(`${pack.name}/${source.folder}: ${files} files from ${source.oci.split("@")[1].slice(0, 19)} tree ${digest.slice(0, 19)}`);
     return {pack: pack.name, folder: source.folder, digest: layer.manifest.digest, treeDigest: digest, files, fetched: true};
   } catch (error) {
-    throw new FetchFailed(source.oci, source.oci.split("@")[1], `${error.code ?? ""}: ${error.message}`);
+    throw new FetchFailed(source.oci, undefined, error.message, error.code);
   } finally {
-    if (stage) rmSync(stage, {recursive: true, force: true});
+    if (stage) {
+      try { rmSync(stage, {recursive: true, force: true}); }
+      catch (error) { log(`warning: cleanup left ${stage}: ${error.message}`); }
+    }
   }
 }
 
@@ -206,14 +273,14 @@ export function unfetched(root, env = process.env) {
 
 /** one line per missing source, for a build that refuses */
 export function describeUnfetched(list) {
-  return list.map((m) => `pack ${m.pack} fetches ${m.folder} from ${m.oci ?? `${m.repo} at ${m.ref.slice(0, 12)}`} and it is not there`).join("; ")
+  return list.map((m) => `pack ${m.pack} fetches ${m.folder} from ${m.oci ?? `${m.repo} at ${(m.ref ?? "unknown ref").slice(0, 12)}`} and it is not there`).join("; ")
     + " — run: node tools/osd-fetch.mjs";
 }
 
 export class FetchFailed extends Error {
-  constructor(repo, ref, why) {
-    super(`${repo} at ${ref}: ${why}`);
-    this.code = "FETCH_FAILED";
+  constructor(repo, ref, why, code = "FETCH_FAILED") {
+    super(`${repo}${ref ? ` at ${ref}` : ""}: ${code === "FETCH_FAILED" ? "" : `${code}: `}${why}`);
+    this.code = code;
   }
 }
 
@@ -222,7 +289,7 @@ export async function main(args) {
   if (args.includes("--check")) {
     const missing = unfetched(root);
     for (const m of missing) {
-      console.log(`${m.pack}/${m.folder}: not fetched (${m.oci ?? `${m.repo} at ${m.ref.slice(0, 12)}`})`);
+      console.log(`${m.pack}/${m.folder}: not fetched (${m.oci ?? `${m.repo} at ${(m.ref ?? "unknown ref").slice(0, 12)}`})`);
     }
     console.log(missing.length === 0 ? "every declared source is there" : `${missing.length} to fetch`);
     return missing.length === 0 ? 0 : 1;

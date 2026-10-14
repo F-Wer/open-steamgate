@@ -60,6 +60,7 @@ local/
 packs/*/upstream
 packs/*/games
 packs/*/.osd-fetched.json
+packs/*/.osd-fetch-*
 docker/workbench/ide-password.txt
 
 # Trace navigation companions are generated locally. Only L3 operational

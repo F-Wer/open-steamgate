@@ -1,6 +1,7 @@
 import {expect} from "chai";
 import {execFileSync} from "node:child_process";
-import {existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import fs, {existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {syncBuiltinESMExports} from "node:module";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {MARKER, FetchFailed, describeUnfetched, fetchAll, fetchSource, unfetched} from "../tools/osd-fetch.mjs";
@@ -11,6 +12,18 @@ import {treeDigest} from "../tools/osd-oci.mjs";
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {zipInProcess} from "../tools/osd-abapgit-zip.mjs";
 import {prepare} from "../tools/osd-build.mjs";
+
+// Patch the real filesystem binding so failures exercise the old code too.
+async function withFsFaults(patches, run) {
+  const originals = Object.fromEntries(Object.keys(patches).map((name) => [name, fs[name]]));
+  for (const [name, patch] of Object.entries(patches)) fs[name] = (...args) => patch(originals[name], ...args);
+  syncBuiltinESMExports();
+  try { return await run(); }
+  finally {
+    Object.assign(fs, originals);
+    syncBuiltinESMExports();
+  }
+}
 
 // A pack may fetch a folder instead of carrying it: a repository, a commit
 // and a path in it, declared in the manifest, copied by tools/osd-fetch.mjs.
@@ -127,6 +140,24 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
     const [pack] = packsOf(root, {});
     expect((await fetchSource(pack, pack.sources[0])).fetched).to.equal(true);
     expect(unfetched(root, {})).to.deep.equal([]);
+  });
+
+  it("hardening 8: a failed force copy preserves the git folder and its marker", async () => {
+    const [pack] = packsOf(root, {}), source = pack.sources[0];
+    await fetchSource(pack, source);
+    const marker = readFileSync(join(pack.dir, MARKER));
+    write(source.dir, "sentinel", "previous folder");
+    let copies = 0, error;
+    try {
+      await withFsFaults({cpSync(copy, from, to) {
+        if (++copies === 2) throw new Error("copy failed");
+        copy(from, to);
+      }}, () => fetchSource(pack, source, {force: true}));
+    } catch (e) { error = e; }
+    expect(error?.message).to.equal("copy failed");
+    expect(readFileSync(join(source.dir, "sentinel"), "utf8")).to.equal("previous folder");
+    expect(readFileSync(join(pack.dir, MARKER))).to.deep.equal(marker);
+    expect(readdirSync(pack.dir).filter((p) => p.startsWith(".osd-fetch-"))).to.deep.equal([]);
   });
 
   it("refuses a path the repository does not have, and leaves nothing behind", async () => {
@@ -255,6 +286,99 @@ describe("tools/osd-fetch: an OCI pack source", function () {
       expect(readFileSync(join(dir, "upstream/zcl_one.clas.abap"))).to.deep.equal(old);
     });
   }
+
+  it("hardening 6: concurrent sources retain both installed identities in the marker", async () => {
+    const digest = r.publish([bytes], {});
+    const pack = declare(digest);
+    const one = pack.sources[0];
+    const two = {...one, folder: "games", dir: join(dir, "games"), path: "src/sub"};
+    const answers = await Promise.all([fetchSource(pack, one), fetchSource(pack, two)]);
+    const marker = JSON.parse(readFileSync(join(dir, MARKER)));
+    for (const [source, answer] of [[one, answers[0]], [two, answers[1]]]) {
+      expect(marker[source.folder]).to.include({oci: source.oci, digest, files: answer.files, path: source.path});
+      expect(readFileSync(join(source.dir, source === one ? "sub/zcl_two.clas.abap" : "zcl_two.clas.abap"), "utf8")).to.equal("* nested\r\n");
+    }
+    expect(readdirSync(dir).filter((p) => p.startsWith(".osd-fetch-"))).to.deep.equal([]);
+  });
+
+  it("hardening 7: cleanup after marker commit warns and leaves an ignored old folder", async () => {
+    const pack = declare(r.publish([bytes], {}));
+    await fetchPack(pack);
+    const logs = [];
+    const answer = await withFsFaults({rmSync(remove, path, options) {
+      if (path.endsWith(".old")) throw new Error("cleanup failed");
+      remove(path, options);
+    }}, () => fetchPack(pack, {force: true, log: (line) => logs.push(line)}));
+    expect(answer.fetched).to.equal(true);
+    expect(unfetched(root, {})).to.deep.equal([]);
+    const leftovers = readdirSync(dir).filter((p) => p.endsWith(".old"));
+    expect(leftovers).to.have.length(1);
+    expect(leftovers[0]).to.match(/^\.osd-fetch-/);
+    expect(readFileSync(".gitignore", "utf8").split("\n")).to.include("packs/*/.osd-fetch-*");
+    expect(logs.join("\n")).to.contain("warning:").and.to.contain("cleanup failed");
+  });
+
+  it("hardening 7: a failed stage rename never deletes a destination it did not install", async () => {
+    const pack = declare(r.publish([bytes], {}));
+    let error;
+    try {
+      await withFsFaults({renameSync(rename, from, to) {
+        if (to === pack.sources[0].dir) {
+          mkdirSync(to);
+          writeFileSync(join(to, "other-process"), "keep");
+          throw new Error("rename failed");
+        }
+        rename(from, to);
+      }}, () => fetchPack(pack));
+    } catch (e) { error = e; }
+    expect(error?.message).to.contain("rename failed");
+    expect(readFileSync(join(pack.sources[0].dir, "other-process"), "utf8")).to.equal("keep");
+    expect(existsSync(join(dir, MARKER))).to.equal(false);
+  });
+
+  it("hardening 7: marker rename failure rolls back only this process's install", async () => {
+    const pack = declare(r.publish([bytes], {}));
+    await fetchPack(pack);
+    write("packs/theirs/upstream/sentinel", "old bytes");
+    const marker = readFileSync(join(dir, MARKER));
+    let error;
+    try {
+      await withFsFaults({renameSync(rename, from, to) {
+        if (to === join(dir, MARKER)) throw new Error("marker rename failed");
+        rename(from, to);
+      }}, () => fetchPack(pack, {force: true}));
+    } catch (e) { error = e; }
+    expect(error?.message).to.contain("marker rename failed");
+    expect(readFileSync(join(dir, "upstream/sentinel"), "utf8")).to.equal("old bytes");
+    expect(readFileSync(join(dir, MARKER))).to.deep.equal(marker);
+  });
+
+  it("hardening 9: diagnostics preserve OCI error codes and name the reference once", async () => {
+    const digest = r.publish([bytes], {});
+    r.tamperBlob = r.put(bytes).digest;
+    const pack = declare(digest);
+    let error;
+    try { await fetchPack(pack); } catch (e) { error = e; }
+    expect(error?.code).to.equal("DIGEST_MISMATCH");
+    expect(error.message.split(digest)).to.have.length(2);
+    expect(describeUnfetched([{pack: "test", folder: "upstream"}])).to.contain("unknown ref");
+    const check = execFileSync(process.execPath, ["--input-type=module", "-e",
+      `import {main} from ${JSON.stringify(new URL("../tools/osd-fetch.mjs", import.meta.url).href)}; await main(["--check"]);`],
+      {env: {...process.env, OSD_ROOT: root, OSD_PACKS: "theirs"}, encoding: "utf8"});
+    expect(check).to.contain(pack.sources[0].oci);
+  });
+
+  it("hardening 9: both builders and CLI diagnostics describe missing OCI and git identities", () => {
+    const digest = "sha256:" + "a".repeat(64);
+    const oci = `ghcr.io/example/pack@${digest}`;
+    const pack = {name: "test", missing: [{folder: "upstream", oci}, {folder: "git", repo: "git.example", ref: "abcdef0123456789"}]};
+    for (const script of ["scripts/build-vscode-web.mjs", "scripts/build-vsix.mjs"]) {
+      // Execute the builders' actual projection without running a packaging build.
+      const projection = readFileSync(script, "utf8").match(/const missing = (?:selected|selectedPacks)\.flatMap[\s\S]*?;\n/)[0];
+      const list = new Function("selected", "selectedPacks", `${projection} return missing;`)([pack], [pack]);
+      expect(describeUnfetched(list)).to.contain(oci).and.to.contain("git.example at abcdef012345");
+    }
+  });
 
   it("refuses tags and mixed OCI/git declarations", () => {
     const digest = "sha256:" + "a".repeat(64);

@@ -18,6 +18,8 @@ const paths = ["gen", "output", "build", ".local/lars", ".local/ci-artifact/tran
 for (const pack of readdirSync("packs")) {
   const manifest = `packs/${pack}/osd-pack.json`;
   if (!existsSync(manifest)) continue;
+  const marker = `packs/${pack}/.osd-fetched.json`;
+  if (existsSync(marker)) paths.push(marker);
   for (const source of JSON.parse(readFileSync(manifest, "utf8")).sources ?? []) {
     paths.push(`packs/${pack}/${source.folder}`);
   }

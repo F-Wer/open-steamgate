@@ -4,7 +4,7 @@ import {MEDIA, sha256} from "../../tools/osd-oci.mjs";
 export function registry({token = "t0k", tamper = false} = {}) {
   const blobs = new Map(), manifests = new Map(), tags = new Map();
   const put = (bytes) => { const d = sha256(bytes); blobs.set(d, bytes); return {digest: d, size: bytes.length}; };
-  let tamperBlob;
+  let tamperBlob, tamperManifest;
   let requests = 0, tokens = 0, blobRequests = 0;
   const server = createServer((req, res) => {
     requests++;
@@ -24,10 +24,12 @@ export function registry({token = "t0k", tamper = false} = {}) {
     const body = m && (m[1] === "manifests" ? manifests.get(key) : blobs.get(key));
     if (!body) { res.writeHead(404); return res.end(); }
     res.writeHead(200, {"content-type": m[1] === "manifests" ? MEDIA.manifest : "application/octet-stream"});
+    if (m[1] === "manifests" && key === tamperManifest) return res.end(Buffer.concat([body, Buffer.from(" ")]));
     res.end((tamper || key === tamperBlob) && m[1] === "blobs" ? Buffer.concat([body, Buffer.from("x")]).subarray(1) : body);
   });
   return {
     server, put,
+    set tamperManifest(digest) { tamperManifest = digest; },
     set tamperBlob(digest) { tamperBlob = digest; },
     publish(layers, config, {mediaType = "application/vnd.osd.abapgit.zip", title, empty = false} = {}) {
       const cfg = put(Buffer.from(JSON.stringify(config)));

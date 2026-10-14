@@ -4,6 +4,7 @@ import {execFileSync, spawnSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {dirname, join, relative, resolve} from "node:path";
 import {build, hashOf, liveHash, missingLibraries} from "../tools/osd-build.mjs";
+import {packsOf} from "../tools/osd-packs.mjs";
 import {transpile} from "../tools/osd-transpile.mjs";
 
 // The builder over a tree of its own. What is cheap to check here is what
@@ -48,6 +49,27 @@ describe("tools/osd-build: the layers, refused before a lock is taken", function
     const stale = verify();
     expect(stale.status, stale.stdout + stale.stderr).to.equal(1);
     expect(liveHash(root)).to.equal(built.hash);
+  });
+
+  it("hardening 1: CI pack and tar restore retain fetched source markers", () => {
+    const oci = `ghcr.io/example/pack@sha256:${"a".repeat(64)}`;
+    write("packs/test/osd-pack.json", JSON.stringify({abap: ["upstream"], sources: [{folder: "upstream", oci}]}));
+    write("packs/test/upstream/ztest.prog.abap", "REPORT ztest.");
+    const marker = JSON.stringify({upstream: {oci, path: "src", exclude: [], files: 1}});
+    write("packs/test/.osd-fetched.json", marker);
+    for (const path of ["gen", "output", "build", ".local/lars", ".local/ci-artifact/transpiler"]) mkdirSync(join(root, path), {recursive: true});
+    const archive = join(root, "artifact.tar");
+    const packed = spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root, encoding: "utf8"});
+    expect(packed.status, packed.stderr).to.equal(0);
+    rmSync(join(root, "packs/test/upstream"), {recursive: true});
+    rmSync(join(root, "packs/test/.osd-fetched.json"));
+    execFileSync("tar", ["-xf", archive], {cwd: root});
+    expect(existsSync(join(root, "packs/test/.osd-fetched.json"))).to.equal(true);
+    expect(readFileSync(join(root, "packs/test/.osd-fetched.json"), "utf8")).to.equal(marker);
+    expect(packsOf(root, {})[0].missing).to.deep.equal([]);
+    // A pack without a marker remains archivable for compatibility.
+    rmSync(join(root, "packs/test/.osd-fetched.json"));
+    expect(spawnSync(process.execPath, [resolve("tools/osd-ci-artifact.mjs"), "pack", archive], {cwd: root}).status).to.equal(0);
   });
 
   it("freezes identical compiler metadata across build locations and processes", async () => {

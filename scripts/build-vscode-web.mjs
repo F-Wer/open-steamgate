@@ -18,7 +18,7 @@ for (const name of names) {
   if (!selected.some((other) => other.name === name)) selected.push(pack);
 }
 const missing = selected.flatMap((pack) => pack.missing.map((source) => ({
-  pack: pack.name, folder: source.folder, repo: source.repo, ref: source.ref,
+  pack: pack.name, folder: source.folder, repo: source.repo, ref: source.ref, oci: source.oci,
 })));
 if (missing.length) throw new Error(describeUnfetched(missing));
 const env = {...process.env, OSD_WEB_PACKS: selection};

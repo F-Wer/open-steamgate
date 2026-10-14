@@ -14,10 +14,11 @@
 // Authentication is the registry's own: a request answered 401 with
 // WWW-Authenticate: Bearer realm=...,service=...,scope=... gets a token
 // from the realm, anonymously for a public package, or with OSD_OCI_USER /
-// OSD_OCI_TOKEN (GITHUB_TOKEN for ghcr.io) as basic credentials. localhost
+// OSD_OCI_TOKEN only for OSD_OCI_REGISTRY (GITHUB_TOKEN only for ghcr.io).
+// Token realms must use HTTPS except when the registry is local. localhost
 // is spoken to over http, for tests.
 import {createHash} from "node:crypto";
-import {existsSync, mkdirSync, readFileSync, renameSync, writeFileSync} from "node:fs";
+import {closeSync, existsSync, fstatSync, mkdirSync, openSync, readSync, renameSync, statSync, writeFileSync} from "node:fs";
 import {join} from "node:path";
 
 export const MEDIA = {
@@ -48,7 +49,7 @@ export function treeDigest(files) {
 export function parseRef(ref) {
   const m = /^([a-z0-9.-]+(?::\d+)?)\/([a-z0-9._\/-]+?)(?::([\w][\w.-]{0,127}))?(?:@(sha256:[0-9a-f]{64}))?$/.exec(ref);
   // a host is told from a path by a dot, a port or the name localhost, as docker does
-  if (!m || !/[.:]|^localhost$/.test(m[1]) || (!m[3] && !m[4])) throw new OciError("BAD_REF", `${ref}: expected host/repository@sha256:<64 hex> (or :tag to resolve)`);
+  if (!m || !/[.:]|^localhost$/.test(m[1]) || (!m[3] && !m[4]) || m[2].split("/").some((p) => p === "." || p === "..")) throw new OciError("BAD_REF", `${ref}: expected host/repository@sha256:<64 hex> (or :tag to resolve)`);
   return {registry: m[1], repository: m[2], tag: m[3], digest: m[4]};
 }
 
@@ -60,9 +61,13 @@ const local = (registry) => /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(registry);
 const base = ({registry}) => `${local(registry) ? "http" : "https"}://${registry}/v2/`;
 
 function credentials(registry, env) {
-  const user = env.OSD_OCI_USER ?? (registry === "ghcr.io" && env.GITHUB_TOKEN ? (env.GITHUB_ACTOR ?? "token") : undefined);
-  const token = env.OSD_OCI_TOKEN ?? (registry === "ghcr.io" ? env.GITHUB_TOKEN : undefined);
-  return user && token ? Buffer.from(`${user}:${token}`).toString("base64") : undefined;
+  if (registry === env.OSD_OCI_REGISTRY && env.OSD_OCI_USER && env.OSD_OCI_TOKEN) {
+    return Buffer.from(`${env.OSD_OCI_USER}:${env.OSD_OCI_TOKEN}`).toString("base64");
+  }
+  if (registry === "ghcr.io" && env.GITHUB_TOKEN) {
+    return Buffer.from(`${env.GITHUB_ACTOR ?? "token"}:${env.GITHUB_TOKEN}`).toString("base64");
+  }
+  return undefined;
 }
 
 function challenge(header) {
@@ -86,11 +91,17 @@ export function client(ref, options = {}) {
     if (res.status === 401 && !bearer) {
       const c = challenge(res.headers.get("www-authenticate"));
       if (!c) throw new OciError("UNAUTHORIZED", `${url}: 401 without a Bearer challenge`);
-      const q = new URLSearchParams();
+      let realm;
+      try { realm = new URL(c.realm); }
+      catch { throw new OciError("INSECURE_REALM", `${c.realm}: invalid token realm URL`); }
+      if (realm.protocol !== "https:" && !(local(parsed.registry) && realm.protocol === "http:")) {
+        throw new OciError("INSECURE_REALM", `${c.realm}: token realm must use HTTPS`);
+      }
+      const q = realm.searchParams;
       if (c.service) q.set("service", c.service);
       q.set("scope", c.scope ?? `repository:${parsed.repository}:pull`);
       const basic = credentials(parsed.registry, env);
-      const t = await fetchImpl(`${c.realm}?${q}`, {headers: basic ? {authorization: `Basic ${basic}`} : {}});
+      const t = await fetchImpl(realm.href, {headers: basic ? {authorization: `Basic ${basic}`} : {}, redirect: "error"});
       if (!t.ok) throw new OciError("UNAUTHORIZED", `${c.realm}: token request answered ${t.status}`);
       const body = await t.json();
       bearer = body.token ?? body.access_token;
@@ -103,6 +114,36 @@ export function client(ref, options = {}) {
   return {ref: parsed, get};
 }
 
+const JSON_LIMIT = 4 * 1024 * 1024;
+
+/** Check headers before reading, and cancel before retaining an oversized chunk. */
+async function boundedBody(res, cap) {
+  const length = res.headers.get("content-length");
+  if (length !== null && Number(length) > cap) {
+    await res.body?.cancel();
+    throw new OciError("SIZE_MISMATCH", `body exceeds ${cap} bytes`);
+  }
+  const reader = res.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  const chunks = [];
+  let size = 0;
+  try {
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > cap) {
+        await reader.cancel();
+        throw new OciError("SIZE_MISMATCH", `body exceeds ${cap} bytes`);
+      }
+      chunks.push(Buffer.from(value));
+    }
+    return Buffer.concat(chunks, size);
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /**
  * The manifest (or index) a reference names, verified: {digest, mediaType,
  * json, bytes}. A tag is resolved only with resolve: true.
@@ -112,7 +153,7 @@ export async function manifest(ref, options = {}) {
   const {tag, digest} = c.ref;
   if (!digest && options.resolve !== true) throw new OciError("TAG_ONLY", `${formatRef({...c.ref, digest: `:${tag}`})}: a tag can move; pin a digest (resolve it with --resolve)`);
   const res = await c.get(`manifests/${digest ?? tag}`, {accept: ACCEPT});
-  const bytes = Buffer.from(await res.arrayBuffer());
+  const bytes = await boundedBody(res, JSON_LIMIT);
   const actual = sha256(bytes);
   if (digest && actual !== digest) throw new OciError("DIGEST_MISMATCH", `manifest of ${c.ref.repository}: expected ${digest}, got ${actual}`);
   const json = JSON.parse(bytes.toString("utf8"));
@@ -124,12 +165,27 @@ export async function blob(ref, descriptor, options = {}) {
   const c = options.client ?? client(ref, options);
   const {digest, size} = descriptor;
   if (!/^sha256:[0-9a-f]{64}$/.test(digest ?? "")) throw new OciError("BAD_DESCRIPTOR", `blob digest ${digest}`);
+  if (!Number.isSafeInteger(size) || size < 0) throw new OciError("BAD_DESCRIPTOR", `blob size ${size}`);
+  const cap = Math.min(size, options.maxSize ?? size);
+  if (size > cap) throw new OciError("SIZE_MISMATCH", `blob ${digest}: exceeds ${cap} bytes`);
   const file = options.cacheDir ? join(options.cacheDir, "blobs", "sha256", digest.slice(7)) : undefined;
-  if (file && existsSync(file)) {
-    const cached = readFileSync(file);
-    if (sha256(cached) === digest) return cached;
+  if (file && existsSync(file) && statSync(file).size === size) {
+    // Read at most size even if another process replaces/grows the cache file.
+    const fd = openSync(file, "r");
+    try {
+      if (fstatSync(fd).size === size) {
+        const cached = Buffer.alloc(size);
+        let offset = 0;
+        while (offset < size) {
+          const count = readSync(fd, cached, offset, size - offset, offset);
+          if (!count) break;
+          offset += count;
+        }
+        if (offset === size && fstatSync(fd).size === size && sha256(cached) === digest) return cached;
+      }
+    } finally { closeSync(fd); }
   }
-  const bytes = Buffer.from(await (await c.get(`blobs/${digest}`)).arrayBuffer());
+  const bytes = await boundedBody(await c.get(`blobs/${digest}`), cap);
   if (typeof size === "number" && bytes.length !== size) throw new OciError("SIZE_MISMATCH", `blob ${digest}: expected ${size} bytes, got ${bytes.length}`);
   if (sha256(bytes) !== digest) throw new OciError("DIGEST_MISMATCH", `blob ${digest}: content hashes to ${sha256(bytes)}`);
   if (file) {
@@ -146,8 +202,14 @@ export async function pull(ref, options = {}) {
   const c = client(ref, options);
   const m = await manifest(ref, {...options, client: c});
   if (m.json.manifests) throw new OciError("IS_INDEX", `${formatRef({...c.ref, digest: m.digest})} is an index; pull its manifests one by one`);
-  const config = m.json.config && m.json.config.size > 0 && m.json.config.mediaType !== "application/vnd.oci.empty.v1+json"
-    ? JSON.parse((await blob(ref, m.json.config, {...options, client: c})).toString("utf8")) : undefined;
+  const descriptor = m.json.config;
+  if (!descriptor || descriptor.size <= 0) throw new OciError("BAD_DESCRIPTOR", "config must have a positive size");
+  const empty = descriptor.mediaType === "application/vnd.oci.empty.v1+json";
+  if (empty && (descriptor.digest !== "sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a" || descriptor.size !== 2)) {
+    throw new OciError("BAD_DESCRIPTOR", "invalid OCI empty config descriptor");
+  }
+  const config = empty ? undefined : JSON.parse((await blob(ref, descriptor,
+    {...options, client: c, maxSize: JSON_LIMIT})).toString("utf8"));
   const layers = [];
   for (const descriptor of m.json.layers ?? []) layers.push({descriptor, bytes: await blob(ref, descriptor, {...options, client: c})});
   return {manifest: m, config, layers};

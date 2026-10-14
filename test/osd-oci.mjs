@@ -81,3 +81,111 @@ describe("osd-oci: pulling a layer by digest", function () {
     } finally { r.server.close(); }
   });
 });
+
+// Tiny streaming responses expose cancellation and requests without a network.
+describe("OCI hardening regressions", () => {
+  const ref = `registry.example/osd/pack@sha256:${"a".repeat(64)}`;
+  const fails = async (run, code) => {
+    let error;
+    try { await run(); } catch (e) { error = e; }
+    expect(error?.code).to.equal(code);
+  };
+  const json = (value) => Buffer.from(JSON.stringify(value));
+  const responseClient = (bytes, headers = {}) => ({ref: parseRef(ref), get: async () => new Response(bytes, {headers})});
+
+  it("hardening 11: rejects dot repository segments", () => {
+    for (const path of ["osd/../pack", "osd/./pack", "../pack", "./pack"])
+      expect(() => parseRef(ref.replace("osd/pack", path))).to.throw(/expected host/);
+    expect(parseRef(ref.replace("osd/pack", "osd/pack.name")).repository).to.equal("osd/pack.name");
+  });
+
+  it("hardening 2: refuses insecure nonlocal realms before requesting them", async () => {
+    for (const realm of ["http://auth.example/token", "file:///token", "/token"]) {
+      const seen = [];
+      await fails(() => manifest(ref, {fetch: async (url) => {
+        seen.push(url);
+        return new Response(null, {status: 401, headers: {"www-authenticate": `Bearer realm="${realm}"`}});
+      }}), "INSECURE_REALM");
+      expect(seen).to.have.length(1);
+    }
+  });
+
+  it("hardening 2: scopes credentials to a registry and preserves realm query parameters", async () => {
+    const {client} = await import("../tools/osd-oci.mjs");
+    const env = {OSD_OCI_USER: "user", OSD_OCI_TOKEN: "secret", GITHUB_TOKEN: "github", GITHUB_ACTOR: "actor"};
+    for (const [host, scope, expected] of [
+      ["registry.example", undefined, undefined],
+      ["registry.example", "other.example", undefined],
+      ["registry.example", "registry.example", "user:secret"],
+      ["ghcr.io", undefined, "actor:github"],
+      ["127.0.0.1:5000", undefined, undefined],
+    ]) {
+      let calls = 0, auth, tokenUrl;
+      const realm = `${host.startsWith("127") ? "http" : "https"}://auth.example/token?existing=yes`;
+      const c = client(ref.replace("registry.example", host), {env: {...env, OSD_OCI_REGISTRY: scope}, fetch: async (url, options) => {
+        calls++;
+        if (calls === 1) return new Response(null, {status: 401, headers: {"www-authenticate": `Bearer realm="${realm}",service="test"`}});
+        if (calls === 2) { auth = options.headers.authorization; tokenUrl = new URL(url); return new Response('{"token":"ok"}'); }
+        return new Response("ok");
+      }});
+      await c.get("manifests/x");
+      expect(auth).to.equal(expected ? `Basic ${Buffer.from(expected).toString("base64")}` : undefined);
+      expect(tokenUrl.searchParams.get("existing")).to.equal("yes");
+      expect(tokenUrl.searchParams.get("service")).to.equal("test");
+      expect(tokenUrl.searchParams.get("scope")).to.equal("repository:osd/pack:pull");
+    }
+  });
+
+  it("hardening 3: rejects oversized headers before reading and cancels overflowing streams", async () => {
+    const bytes = Buffer.from("abc"), descriptor = {digest: sha256(bytes), size: 3};
+    for (const header of [true, false]) {
+      let reads = 0, cancelled = false;
+      const body = new ReadableStream({pull(c) { if (++reads === 1) c.enqueue(Buffer.from("abcd")); else c.close(); }, cancel() { cancelled = true; }}, {highWaterMark: 0});
+      const c = {ref: parseRef(ref), get: async () => new Response(body, {headers: header ? {"content-length": "4"} : {}})};
+      await fails(() => blob(ref, descriptor, {client: c}), "SIZE_MISMATCH");
+      expect(cancelled).to.equal(true);
+      expect(reads).to.equal(header ? 0 : 1);
+    }
+    await fails(() => manifest(ref, {client: responseClient(Buffer.alloc(4 * 1024 * 1024 + 1))}), "SIZE_MISMATCH");
+    const cfg = Buffer.alloc(4 * 1024 * 1024 + 1, " ");
+    const m = json({config: {mediaType: "config", digest: sha256(cfg), size: cfg.length}, layers: []});
+    await fails(() => pull(`registry.example/osd/pack@${sha256(m)}`, {fetch: async (url) => new Response(url.includes("manifests/") ? m : cfg)}), "SIZE_MISMATCH");
+  });
+
+  it("hardening 4: verifies configs, including size zero and impostor empty descriptors", async () => {
+    const bytes = json({treeDigest: "untrusted"});
+    for (const [descriptor, served, code] of [
+      [{mediaType: "config", digest: sha256(bytes), size: 0}, bytes, "BAD_DESCRIPTOR"],
+      [{mediaType: "config", digest: sha256(bytes), size: bytes.length}, Buffer.alloc(bytes.length, "x"), "DIGEST_MISMATCH"],
+      [{mediaType: "config", digest: sha256(bytes), size: bytes.length - 1}, bytes, "SIZE_MISMATCH"],
+      [{mediaType: "application/vnd.oci.empty.v1+json", digest: sha256(bytes), size: bytes.length}, bytes, "BAD_DESCRIPTOR"],
+      [{mediaType: "application/vnd.oci.empty.v1+json", digest: sha256(Buffer.from("{}")), size: 3}, bytes, "BAD_DESCRIPTOR"],
+    ]) {
+      const m = json({config: descriptor, layers: []});
+      await fails(() => pull(`registry.example/osd/pack@${sha256(m)}`, {fetch: async (url) => new Response(url.includes("manifests/") ? m : served)}), code);
+    }
+    const m = json({config: {mediaType: "application/vnd.oci.empty.v1+json", digest: sha256(Buffer.from("{}")), size: 2}, layers: []});
+    let calls = 0;
+    expect((await pull(`registry.example/osd/pack@${sha256(m)}`, {fetch: async () => { calls++; return new Response(m); }})).config).to.equal(undefined);
+    expect(calls).to.equal(1);
+  });
+
+  it("hardening 5: rejects a digest-valid cached blob of the wrong descriptor length", async () => {
+    const cache = mkdtempSync(join(tmpdir(), "oci-size-"));
+    const bytes = Buffer.from("abc"), digest = sha256(bytes);
+    try {
+      await blob(ref, {digest, size: 3}, {cacheDir: cache, client: responseClient(bytes)});
+      await fails(() => blob(ref, {digest, size: 2}, {cacheDir: cache, client: responseClient(bytes)}), "SIZE_MISMATCH");
+    } finally { rmSync(cache, {recursive: true, force: true}); }
+  });
+
+  it("hardening 10: refuses bytes served at a different manifest digest (HTTP 200)", async () => {
+    const r = registry();
+    const host = await listening(r);
+    try {
+      const digest = r.publish([Buffer.from("zip")], {});
+      r.tamperManifest = digest;
+      await fails(() => manifest(`${host}/osd/pack@${digest}`), "DIGEST_MISMATCH");
+    } finally { await new Promise((done) => r.server.close(done)); }
+  });
+});

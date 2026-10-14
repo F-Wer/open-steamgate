@@ -585,7 +585,7 @@ export async function stageSystemSeed(seedRoot, env = process.env, {prebuild = f
   const {describeUnfetched} = await import("../tools/osd-fetch.mjs");
   const selectedPacks = vsixPacks(env);
   const missing = selectedPacks.flatMap((pack) => pack.missing.map((source) => ({
-    pack: pack.name, folder: source.folder, repo: source.repo, ref: source.ref,
+    pack: pack.name, folder: source.folder, repo: source.repo, ref: source.ref, oci: source.oci,
   })));
   if (missing.length > 0) throw new Error(describeUnfetched(missing));
   rmSync(seedRoot, {recursive: true, force: true});
