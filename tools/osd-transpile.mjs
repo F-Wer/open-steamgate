@@ -25,6 +25,7 @@ import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
+import {isSourceIdentity} from "./osd-packs.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {installRfcMessage} from "./osd-rfc-message.mjs";
@@ -186,7 +187,9 @@ export function listFiles(root, config) {
   let skipped = 0;
   for (const folder of folders) {
     for (const filename of walk(resolve(root, folder))) {
-      if (include.length > 0 && include.some((r) => r.test(filename)) === false) {
+      if (isSourceIdentity(filename)) {
+        skipped++;
+      } else if (include.length > 0 && include.some((r) => r.test(filename)) === false) {
         skipped++;
       } else if (exclude.length > 0 && exclude.some((r) => r.test(filename))) {
         skipped++;

@@ -21,7 +21,7 @@
 // GitHub answers a fetch of any reachable commit; a server that does not
 // gets a full clone and a checkout instead, which is slower and the same.
 import {execFileSync} from "node:child_process";
-import {cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, lstatSync, mkdtempSync, readdirSync, renameSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {MARKER, SOURCE, markerOf, sourceOf, sourceMatches, packsOf} from "./osd-packs.mjs";
@@ -72,8 +72,10 @@ function checkout(repo, ref) {
 }
 
 /** copy `from` into `to`, minus the excluded paths; returns the files copied */
-function copyTree(from, to, exclude) {
-  const patterns = exclude.map((e) => new RegExp(e, "i"));
+function copyTree(from, to, source) {
+  const fail = (path, code) => { throw new FetchFailed(source.repo, source.ref, path, code); };
+  if (!lstatSync(from).isDirectory()) fail(source.path, "UNSAFE_ENTRY");
+  const patterns = source.exclude.map((e) => new RegExp(e, "i"));
   const files = [];
   const walk = (dir) => {
     for (const entry of readdirSync(join(from, dir)).sort()) {
@@ -84,12 +86,15 @@ function copyTree(from, to, exclude) {
       if (patterns.some((p) => p.test(rel))) {
         continue;
       }
-      const source = join(from, rel);
-      if (statSync(source).isDirectory()) {
+      const file = join(from, rel);
+      if (rel === SOURCE) fail(rel, "RESERVED_NAME");
+      const stat = lstatSync(file);
+      if (stat.isDirectory()) {
         walk(rel);
       } else {
+        if (!stat.isFile()) fail(rel, "UNSAFE_ENTRY");
         mkdirSync(join(to, dir), {recursive: true});
-        cpSync(source, join(to, rel));
+        cpSync(file, join(to, rel));
         files.push(rel);
       }
     }
@@ -100,7 +105,7 @@ function copyTree(from, to, exclude) {
 
 /** The staged folder carries its identity; its rename commits the install. */
 async function publish(pack, source, stage, entry, log) {
-  writeFileSync(join(stage, SOURCE), JSON.stringify(entry, null, 2) + "\n");
+  writeFileSync(join(stage, SOURCE), JSON.stringify(entry, null, 2) + "\n", {flag: "wx"});
   const old = stage.replace(".osd-fetch-stage-", ".osd-fetch-old-");
   let movedOld = false;
   if (existsSync(source.dir)) {
@@ -138,9 +143,24 @@ async function publish(pack, source, stage, entry, log) {
   }
 }
 
+// A recent leftover may belong to a concurrent fetch. Cleanup is optional.
+function cleanupLeftovers(dir) {
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  try {
+    for (const name of readdirSync(dir)) {
+      if (!/^\.osd-fetch-(old|stage)-/.test(name)) continue;
+      const path = join(dir, name);
+      try {
+        if (lstatSync(path).mtimeMs < cutoff) rmSync(path, {recursive: true, force: true});
+      } catch { /* another fetch or a read-only pack can prevent cleanup */ }
+    }
+  } catch { /* fetching and read-only no-ops do not require cleanup */ }
+}
+
 /** Fetch one source; matching folder identity needs no write access. */
 export async function fetchSource(pack, source, options = {}) {
   const log = options.log ?? (() => {});
+  cleanupLeftovers(pack.dir);
   const before = sourceOf(source.dir);
   if (options.force !== true && existsSync(source.dir) && statSync(source.dir).isDirectory() && sourceMatches(source, before)) {
     log(`${pack.name}/${source.folder}: already at ${before.digest ? before.digest.slice(0, 19) : before.commit.slice(0, 12)}`);
@@ -156,7 +176,7 @@ export async function fetchSource(pack, source, options = {}) {
       throw new FetchFailed(source.repo, source.ref, `no /${source.path} in it`);
     }
     stage = mkdtempSync(join(pack.dir, ".osd-fetch-stage-"));
-    const files = copyTree(from, stage, source.exclude);
+    const files = copyTree(from, stage, source);
     await publish(pack, source, stage, {
       repo: source.repo, ref: source.ref, commit, path: source.path, exclude: source.exclude,
       files: files.length, at: new Date().toISOString(),
@@ -194,6 +214,7 @@ async function fetchOci(pack, source, log) {
       // copyTree skips excluded directories as well as individual files.
       const parts = path.split("/");
       if (parts.includes(".git") || parts.some((_, i) => patterns.some((p) => p.test(parts.slice(0, i + 1).join("/"))))) continue;
+      if (path === SOURCE) throw new FetchFailed(source.oci, undefined, path, "RESERVED_NAME");
       mkdirSync(dirname(join(stage, path)), {recursive: true});
       writeFileSync(join(stage, path), bytes);
       files++;
@@ -203,6 +224,7 @@ async function fetchOci(pack, source, log) {
     log(`${pack.name}/${source.folder}: ${files} files from ${source.oci.split("@")[1].slice(0, 19)} tree ${digest.slice(0, 19)}`);
     return {pack: pack.name, folder: source.folder, digest: layer.manifest.digest, treeDigest: digest, files, fetched: true};
   } catch (error) {
+    if (error instanceof FetchFailed) throw error;
     const failure = new FetchFailed(source.oci, undefined, error.message, error.code);
     if (error.cause) failure.cause = error.cause;
     throw failure;

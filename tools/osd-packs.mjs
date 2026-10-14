@@ -44,6 +44,9 @@ export const PACKS_DIR = "packs";
 
 export const SOURCE = ".osd-source.json";
 
+/** Fetch identity belongs to the folder, never to its compiler inputs. */
+export const isSourceIdentity = (file) => basename(file) === SOURCE;
+
 export function sourceOf(folder) {
   try { return JSON.parse(readFileSync(join(folder, SOURCE), "utf8")); }
   catch { return undefined; }

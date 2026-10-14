@@ -1,9 +1,9 @@
 import {expect} from "chai";
-import {execFileSync, spawn} from "node:child_process";
-import fs, {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {execFileSync, spawn, spawnSync} from "node:child_process";
+import fs, {chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync} from "node:fs";
 import {syncBuiltinESMExports} from "node:module";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {join, resolve} from "node:path";
 import {MARKER, FetchFailed, describeUnfetched, fetchAll, fetchSource, unfetched} from "../tools/osd-fetch.mjs";
 import {SOURCE, sourceOf, BadPack, packsOf} from "../tools/osd-packs.mjs";
 
@@ -12,6 +12,8 @@ import {treeDigest} from "../tools/osd-oci.mjs";
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {zipInProcess} from "../tools/osd-abapgit-zip.mjs";
 import {filesIn, objectOf} from "../tools/osd-inputs.mjs";
+import {transpile, listFiles} from "../tools/osd-transpile.mjs";
+import {compileProgram} from "../tools/gogen/frontend.mjs";
 import {hashOf, prepare} from "../tools/osd-build.mjs";
 
 // Patch the real filesystem binding so failures exercise the old code too.
@@ -67,6 +69,95 @@ describe("tools/osd-fetch: a pack fetches a folder it does not carry", function 
   afterEach(() => {
     rmSync(root, {recursive: true, force: true});
     rmSync(repo, {recursive: true, force: true});
+  });
+
+  it("round3: actually transpiles a fetched folder with source identity", async () => {
+    const [pack] = packsOf(root, {});
+    await fetchSource(pack, pack.sources[0]);
+    symlinkSync(resolve("node_modules"), join(root, "node_modules"), "dir");
+    // Like osd-build's CLI parity test, this isolated class needs no libraries.
+    const config = {input_folder: [pack.sources[0].dir], output_folder: "output",
+      options: {unknownTypes: "compileError"}};
+    const made = await transpile({root, config});
+    expect(made.objects).to.equal(2);
+    expect(readFileSync(join(root, "output/zcl_theirs.clas.mjs"), "utf8")).to.include("zcl_theirs");
+    expect(listFiles(root, config).wanted.map(f => f.split("/").pop())).not.to.include(SOURCE);
+  });
+
+  it("round3: gogen compiles a fetched folder with source identity", async () => {
+    const [pack] = packsOf(root, {});
+    await fetchSource(pack, pack.sources[0]);
+    const seen = [];
+    const program = compileProgram({folders: [pack.sources[0].dir], objects: ["zcl_theirs"],
+      skip: path => { seen.push(path); return false; }});
+    expect(program.classes).to.have.length(1);
+    expect(seen.map(f => f.split("/").pop())).not.to.include(SOURCE);
+  });
+
+  for (const kind of ["file", "symlink"]) it(`round3: refuses a git reserved root name (${kind})`, async () => {
+    const outside = join(root, "outside");
+    writeFileSync(outside, "untouched");
+    if (kind === "file") write(repo, `src/${SOURCE}`, "untrusted");
+    else symlinkSync(outside, join(repo, "src", SOURCE));
+    git(["add", "."]);
+    git(["commit", "-qm", "reserved"]);
+    const [pack] = packsOf(root, {});
+    const source = {...pack.sources[0], ref: git(["rev-parse", "HEAD"])};
+    let error;
+    try { await fetchSource(pack, source); } catch (e) { error = e; }
+    expect(error).to.be.instanceOf(FetchFailed);
+    expect(error.code).to.equal("RESERVED_NAME");
+    expect(readFileSync(outside, "utf8")).to.equal("untouched");
+    expect(existsSync(source.dir)).to.equal(false);
+  });
+
+  for (const target of ["zcl_theirs.clas.abap", "."]) it(`round3: refuses git symlinks to ${target}`, async () => {
+    symlinkSync(target, join(repo, "src/link"));
+    git(["add", "."]);
+    git(["commit", "-qm", "symlink"]);
+    const [pack] = packsOf(root, {});
+    let error;
+    try { await fetchSource(pack, {...pack.sources[0], ref: git(["rev-parse", "HEAD"])}); } catch (e) { error = e; }
+    expect(error).to.be.instanceOf(FetchFailed);
+    expect(error.code).to.equal("UNSAFE_ENTRY");
+    expect(existsSync(pack.sources[0].dir)).to.equal(false);
+  });
+
+  it("round3: identity creation is exclusive even if the stage entry appears late", async () => {
+    const [pack] = packsOf(root, {});
+    let error;
+    try {
+      await withFsFaults({writeFileSync(write, path, bytes, options) {
+        if (String(path).endsWith(`/${SOURCE}`)) write(path, "late entry");
+        return write(path, bytes, options);
+      }}, () => fetchSource(pack, pack.sources[0]));
+    } catch (e) { error = e; }
+    expect(error?.code).to.equal("EEXIST");
+    expect(existsSync(pack.sources[0].dir)).to.equal(false);
+  });
+
+  it("round3: cleans only old fetch leftovers, also on a no-op", async () => {
+    const [pack] = packsOf(root, {});
+    await fetchSource(pack, pack.sources[0]);
+    const stale = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    for (const prefix of ["old", "stage"]) {
+      for (const age of ["stale", "fresh"]) {
+        const path = join(pack.dir, `.osd-fetch-${prefix}-${age}`);
+        mkdirSync(path);
+        if (age === "stale") utimesSync(path, stale, stale);
+      }
+    }
+    const unrelated = join(pack.dir, "unrelated");
+    mkdirSync(unrelated);
+    utimesSync(unrelated, stale, stale);
+    expect((await fetchSource(pack, pack.sources[0])).fetched).to.equal(false);
+    for (const prefix of ["old", "stage"]) {
+      expect(existsSync(join(pack.dir, `.osd-fetch-${prefix}-stale`))).to.equal(false);
+      expect(existsSync(join(pack.dir, `.osd-fetch-${prefix}-fresh`))).to.equal(true);
+    }
+    expect(existsSync(unrelated)).to.equal(true);
+    await withFsFaults({readdirSync() { throw new Error("cleanup unavailable"); }},
+      async () => expect((await fetchSource(pack, pack.sources[0])).fetched).to.equal(false));
   });
 
   it("reads the declaration and says the folder is not there yet", async () => {
@@ -204,6 +295,18 @@ describe("tools/osd-fetch: an OCI pack source", function () {
   afterEach(async () => {
     await new Promise((done) => r.server.close(done));
     rmSync(root, {recursive: true, force: true});
+  });
+
+  it("round3: refuses an OCI reserved name after path and exclusion selection", async () => {
+    write(`payload/src/${SOURCE}`, "untrusted");
+    const pack = declare(r.publish([zipInProcess(join(root, "payload"))], {}));
+    let error;
+    try { await fetchPack(pack); } catch (e) { error = e; }
+    expect(error).to.be.instanceOf(FetchFailed);
+    expect(error.code).to.equal("RESERVED_NAME");
+    expect(existsSync(pack.sources[0].dir)).to.equal(false);
+    const filtered = {...pack.sources[0], exclude: ["^\\.osd-source\\.json$"]};
+    expect((await fetchSource(pack, filtered)).fetched).to.equal(true);
   });
 
   it("selects path and exclusions, records identity, caches blobs and passes build readiness", async () => {
@@ -389,7 +492,7 @@ describe("tools/osd-fetch: an OCI pack source", function () {
     expect(filesIn(root, "packs/theirs/upstream").map(f => f.name)).not.to.include(SOURCE);
   });
 
-  it("round2: readiness ignores the informational summary and leak scanning skips identity metadata", async () => {
+  it("round2: readiness ignores the informational summary and leak scanning checks identity metadata", async () => {
     const pack = declare(r.publish([bytes], {}));
     await fetchPack(pack);
     writeFileSync(join(dir, MARKER), "{}");
@@ -398,8 +501,9 @@ describe("tools/osd-fetch: an OCI pack source", function () {
     const entry = sourceOf(pack.sources[0].dir);
     entry.repo = ["192", "168", "1", "10"].join(".");
     writeFileSync(identity, JSON.stringify(entry));
-    const scan = execFileSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", identity], {encoding: "utf8"});
-    expect(scan).to.be.a("string");
+    const scan = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", identity], {encoding: "utf8"});
+    expect(scan.status, scan.stdout + scan.stderr).to.equal(1);
+    expect(scan.stderr).to.include(["192", "168", "1", "10"].join("."));
     rmSync(identity);
     // Even a matching legacy summary cannot make this folder ready.
     writeFileSync(join(dir, MARKER), JSON.stringify({upstream: {...entry, repo: undefined}}));

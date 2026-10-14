@@ -45,9 +45,6 @@ const CAPTURE = /\.(pcap|pcapng|jsonl)$/i;
 // readers to skip it.
 const GENERATED = /(^|\/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|go\.sum|Cargo\.lock)$/;
 
-// Fetch identity is transport metadata, never pack content.
-const SOURCE_METADATA = /(^|\/)\.osd-source\.json$/;
-
 // The allowlist names the values it excuses, so scanning it finds every one of
 // them and the check reports on its own paperwork. It is read as configuration
 // above, and skipped as content here.
@@ -272,7 +269,7 @@ function scan(root, sources, names) {
   for (const source of sources) {
     const file = typeof source === "string" ? source : source.file;
     const forAllow = typeof source === "string" ? file : (source.realFile ?? file);
-    if (GENERATED.test(forAllow) || SOURCE_METADATA.test(forAllow) || OWN_CONFIG.test(forAllow)) continue;
+    if (GENERATED.test(forAllow) || OWN_CONFIG.test(forAllow)) continue;
     if (CAPTURE.test(forAllow)) {
       hits.push({ file, how: "имя файла", what: "захват", text: file });
       continue;
