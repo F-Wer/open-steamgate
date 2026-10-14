@@ -2,7 +2,7 @@
 // joined by the literal operator & at compile time (`a` & `b`). The joined
 // form took the whole text for one literal until 2026-10-14, so WHEN `abc` &
 // `def` never matched (abapiti inbox 049). Blanks inside the joined parts are
-// kept, as SAP documents for & (not yet measured on A4H). A refusal is
+// kept: A4H 2026-10-14, 'ab ' & 'c' is strlen 4, "ab c". A refusal is
 // returned, not thrown.
 const LITERAL = /'(?:[^']|'')*'|`(?:[^`]|``)*`/y;
 export function textLiteral(n, Expressions) {
