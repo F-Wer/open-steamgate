@@ -107,12 +107,21 @@ CONSTANTS: BEGIN OF r${i}, ascii${i} TYPE c VALUE 'a', unicode${i} TYPE ${type} 
   }
 }
 
+// The proof is hermetic: user layers, extra packs and $TMP from the
+// environment would change the ADT folder list between machines.
+const HERMETIC_DROP = ["OSD_PACKS", "OSD_WEB_PACKS", "OSD_LAYERS"];
+function hermeticEnv(extra = {}) {
+  const env = {...process.env, OSD_TMP: "off", ...extra};
+  for (const name of HERMETIC_DROP) delete env[name];
+  return env;
+}
+
 function capture(out, cache) {
   const core = join(libraryPath(process.cwd(), "open-abap-core"), "src");
   const ajson = join(libraryPath(process.cwd(), "ajson"), "src/core");
   // Checkout-relative paths keep source positions byte-stable across worktrees.
   const config = JSON.parse(readFileSync("abap_transpile.json", "utf8"));
-  const {folders: adtFolders} = unitInputs({home: ".", config});
+  const {folders: adtFolders} = unitInputs({home: ".", config, env: hermeticEnv()});
   const fixtures = [
     {name: "semantics", folders: [corpus, core, ajson], objects: [...classNames(corpus), ...coreObjects]},
     {name: "constructors-constants-owned", folders: [inputs], objects: classNames(inputs)},
@@ -212,7 +221,7 @@ function main() {
       for (const mode of ["none", "cold", "warm"]) {
         const dir = join(output, `sink-${sink}`, mode);
         const child = spawnSync(process.execPath, [...process.execArgv, join(here, "typing-proof.mjs"), "--capture", dir, mode === "none" ? "none" : cache],
-          {stdio: "inherit", env: {...process.env, GOGEN_SINK_LOCALS: sink, GOGEN_TYPING_CACHE_MODE: mode}});
+          {stdio: "inherit", env: hermeticEnv({GOGEN_SINK_LOCALS: sink, GOGEN_TYPING_CACHE_MODE: mode})});
         assert.equal(child.error, undefined);
         assert.equal(child.status, 0, `capture sink=${sink} cache=${mode}`);
         const count = mode === "none" ? files(dir).length : compareBytes(join(output, `sink-${sink}`, "none"), dir);
