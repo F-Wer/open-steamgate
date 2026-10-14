@@ -29,13 +29,29 @@ export function replayLowering(program, cached) {
 }
 
 export function recordLowering(program, lower) {
-  const ops = [], written = new Set(), borrowed = [];
+  const ops = [], written = new Set(), borrowed = new Map();
   let safe = true;
+  // Encoding a whole collection on every read was most of the recording cost
+  // (a lowering iterates the same large collections again and again), so an
+  // object's encoding is reused until the next recorded effect or assignment.
+  // A nested change that bypasses those is still caught by the final check:
+  // every object read is encoded once more at the end and compared.
+  let encodings = new WeakMap();
+  const forget = () => { encodings = new WeakMap(); };
   const read = (key, method, args, value) => {
     try {
-      const encoded = fingerprint(value);
+      const object = value && typeof value === "object";
+      let encoded = object ? encodings.get(value) : undefined;
+      if (encoded === undefined) {
+        encoded = fingerprint(value);
+        if (object) encodings.set(value, encoded);
+      }
       ops.push({kind: "read", key, method, args, value: encoded});
-      if (value && typeof value === "object") borrowed.push([value, encoded]);
+      if (object) {
+        const first = borrowed.get(value);
+        if (first === undefined) borrowed.set(value, encoded);
+        else if (first !== encoded) safe = false;
+      }
     } catch { safe = false; }
     return value;
   };
@@ -55,7 +71,7 @@ export function recordLowering(program, lower) {
             }
             if (["get", "has"].includes(method)) return (...args) => read(key, method, args, collection[method](...args));
             if (["set", "add", "delete", "clear", "push"].includes(method)) return (...args) => {
-              written.add(key); ops.push({kind: "effect", key, method, args});
+              written.add(key); ops.push({kind: "effect", key, method, args}); forget();
               const result = collection[method](...args);
               return result === collection ? wrappers.get(collection) : result;
             };
@@ -77,14 +93,14 @@ export function recordLowering(program, lower) {
           && (value instanceof Map || value instanceof Set || value instanceof WeakMap
             || value instanceof WeakSet || Array.isArray(value))) safe = false;
       target[key] = value;
-      if (!ignored.has(key)) { written.add(key); ops.push({kind: "assign", key, value: clone(value)}); }
+      if (!ignored.has(key)) { written.add(key); ops.push({kind: "assign", key, value: clone(value)}); forget(); }
       return true;
     },
   });
   const ir = lower(proxy);
   // Nested changes cannot be represented by collection effects. Retry those
   // lowerings, rather than replaying an incomplete mutation transcript.
-  try { if (borrowed.some(([v, encoded]) => fingerprint(v) !== encoded)) safe = false; }
+  try { for (const [v, encoded] of borrowed) if (fingerprint(v) !== encoded) { safe = false; break; } }
   catch { safe = false; }
   return {ir, replay: safe ? {ops, written} : undefined};
 }

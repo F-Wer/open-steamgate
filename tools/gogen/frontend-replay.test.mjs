@@ -36,6 +36,24 @@ test("nested mutations and previous-class traversal refuse caching", () => {
   assert.equal(recordLowering(p, (p) => p.classes.length).replay, undefined);
 });
 
+test("a reused read encoding never hides a nested change", () => {
+  const p = program();
+  p.sigs.set("BASE=>RUN", {type: "i"});
+  // the second read reuses the first encoding; the final check still sees the change
+  assert.equal(recordLowering(p, (p) => {
+    const sig = p.sigs.get("BASE=>RUN");
+    sig.type = "int8";
+    return p.sigs.get("BASE=>RUN").type;
+  }).replay, undefined);
+  // repeated reads of an unchanged input replay, and refuse a changed one
+  const cached = recordLowering(program(), (p) => [...p.wanted].length + [...p.wanted].length);
+  assert.equal(cached.replay.ops.filter((op) => op.kind === "read").length, 2);
+  assert.ok(replayLowering(program(), cached.replay));
+  const changed = program();
+  changed.wanted.add("OTHER");
+  assert.equal(replayLowering(changed, cached.replay), false);
+});
+
 test("assigning a collection refuses replay, including a first chained write", () => {
   for (const value of [new Map(), new Set(), new WeakMap(), new WeakSet(), []]) {
     const first = program();
