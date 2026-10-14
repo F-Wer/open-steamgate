@@ -2,8 +2,16 @@
 // Registry/file identity is guarded by the enclosing immutable session.
 const context = new Set(["currentClass", "currentOwner", "currentTypes"]);
 const ignored = new Set(["reg", "frontendCounts"]);
+// An abaplint class or interface definition is parsed from registry sources
+// the cache version already covers, so where it was defined names it. Encoding
+// its whole graph instead was most of the recording time and of the entries'
+// size (a local class definition is read once per method that uses it).
+const definitions = new Set(["ClassDefinition", "InterfaceDefinition"]);
+const definition = (v) => v && typeof v === "object" && definitions.has(v.constructor?.name)
+  && typeof v.getName === "function" && typeof v.getFilename === "function" && typeof v.getStart === "function";
 function fingerprint(value) {
-  return JSON.stringify(value, (_, v) => v instanceof Map ? {map: [...v]} : v instanceof Set ? {set: [...v]} : v);
+  return JSON.stringify(value, (_, v) => v instanceof Map ? {map: [...v]} : v instanceof Set ? {set: [...v]}
+    : definition(v) ? {definition: [v.constructor.name, v.getName(), v.getFilename(), v.getStart().getRow(), v.getStart().getCol()]} : v);
 }
 const clone = (v) => v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? [...v] : v;
 function copy(program) {
@@ -29,13 +37,16 @@ export function replayLowering(program, cached) {
 }
 
 export function recordLowering(program, lower) {
-  const ops = [], written = new Set(), borrowed = [];
+  const ops = [], written = new Set(), borrowed = new Map();
   let safe = true;
   const read = (key, method, args, value) => {
     try {
       const encoded = fingerprint(value);
       ops.push({kind: "read", key, method, args, value: encoded});
-      if (value && typeof value === "object") borrowed.push([value, encoded]);
+      if (value && typeof value === "object") {
+        if (!borrowed.has(value)) borrowed.set(value, encoded);
+        else if (borrowed.get(value) !== encoded) safe = false;
+      }
     } catch { safe = false; }
     return value;
   };
@@ -84,7 +95,7 @@ export function recordLowering(program, lower) {
   const ir = lower(proxy);
   // Nested changes cannot be represented by collection effects. Retry those
   // lowerings, rather than replaying an incomplete mutation transcript.
-  try { if (borrowed.some(([v, encoded]) => fingerprint(v) !== encoded)) safe = false; }
+  try { for (const [v, encoded] of borrowed) if (fingerprint(v) !== encoded) { safe = false; break; } }
   catch { safe = false; }
   return {ir, replay: safe ? {ops, written} : undefined};
 }
