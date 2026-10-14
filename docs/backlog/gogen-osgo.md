@@ -980,6 +980,53 @@ E.6  A pack cut out of a system                                        [S+A]
      └─ the perimeter is the hard part, not the export: a DPC_EXT's
         closure is the finding of Sprint 0, and the stubs are what make a
         pack run before the closure is transpiled
+
+E.10 A system is a manifest of layer digests (OCI)                  [S]  M-L
+     └─ Alice via dell, 2026-10-14, after Lars, "Storing ABAP build
+        artifacts in OCI registry" (SAP Community 2022): a system is
+        already an ordered layer list (abap_transpile.json input_folder,
+        later wins by object name, E.1), which is OCI layer semantics.
+        Alice: she likes the layers -- they are the core, not only
+        an oci: source for packs.
+     └─ the layer: an OCI artifact (ORAS shape) whose ABAP blob is the
+        abapGit offline zip, the same file a real system imports; a pack
+        layer adds its data/ and webapp/ as blobs and its osd-pack.json as
+        the config. Libraries (open-abap-core ...), our own src/, packs
+        and a customer layer exported from a system (E.6, vsp) are all
+        layers of the one kind.
+     └─ the system manifest: an ordered list of {name, ref, digest},
+        itself an artifact, so a whole OSG system is one digest. It is the
+        registry counterpart of input_folder + libs.lock.json + the pack
+        list; osd-fetch --system <ref|file> pulls each layer by digest,
+        verifies sha256 of manifest and blobs, unpacks into a
+        content-addressed .local/layers/<digest>/ (immutable, so it is the
+        layer cache) and writes the input_folder order. The build is
+        unchanged; an unfetched layer is refused as UNFETCHED is today.
+     └─ steps: (1) an oci:<ref>@sha256:<digest> source in osd-fetch next
+        to git, ~1 day; (2) the manifest, materialise, input_folder from
+        it, generation hash = the layer digests, ~2 days; (3) publishing
+        from each repository's CI (oras push, GITHUB_TOKEN) + docs, ~1 day.
+        First proof is abapiti's: v0.5.0 CI pushes zlnt.zip to GHCR, dell
+        pulls, checks sha256, imports into A4H.
+     └─ to settle while building (stoker's review, 2026-10-14):
+        - pull without the oras binary: the registry v2 API is a token,
+          a manifest and blobs by digest, a few dozen lines of fetch, and
+          the Bun binary and the Pages workflow must pull too
+        - reproducible means the toolchain as well: the manifest records
+          the transpiler pin and the OSG commit, or "system = digests"
+          holds only for the ABAP
+        - redistribution: a layer of a third-party repository is a copy
+          of it; open-abap-odata's licence still reads "todo", so it stays
+          a git source until that is settled
+        - live identifiers: a customer layer goes to the customer's
+          private registry only, and osd-leak-scan --paths runs on the
+          unpacked tree before any push; a layer is opaque to the
+          repository's leak scan
+        - development: a manifest entry may name a local folder instead
+          of a digest, so a library can still be edited in place
+        - a later layer overrides an object but cannot remove one; whether
+          a whiteout is needed (OCI's deletion marker) is open, and how
+          data/ rows of the same table combine (by file, by key) is too
 ```
 
 ---
