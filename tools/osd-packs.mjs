@@ -35,11 +35,40 @@ import {cockpitAppsOf} from "./osd-cockpit-apps.mjs";
 import {existsSync, readFileSync, readdirSync, statSync} from "node:fs";
 import {basename, delimiter, isAbsolute, join, relative, resolve} from "node:path";
 import {runsAs} from "./osd-main.mjs";
+import {parseRef} from "./osd-oci.mjs";
 import {readLock} from "./osd-lock.mjs";
 import {TMP_FOLDER, tmpDisabled} from "./osd-tmp.mjs";
 
 export const MANIFEST = "osd-pack.json";
 export const PACKS_DIR = "packs";
+
+export const SOURCE = ".osd-source.json";
+
+/** Fetch identity belongs to the folder, never to its compiler inputs. */
+export const isSourceIdentity = (file) => basename(file) === SOURCE;
+
+export function sourceOf(folder) {
+  try { return JSON.parse(readFileSync(join(folder, SOURCE), "utf8")); }
+  catch { return undefined; }
+}
+
+export const MARKER = ".osd-fetched.json";
+
+export function markerOf(packDir) {
+  try {
+    return JSON.parse(readFileSync(join(packDir, MARKER), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+export function sourceMatches(source, entry) {
+  if (!entry || entry.path !== source.path
+      || JSON.stringify(entry.exclude) !== JSON.stringify(source.exclude)) return false;
+  return source.oci !== undefined
+    ? entry.oci === source.oci && entry.repo === undefined && entry.ref === undefined
+    : entry.oci === undefined && entry.repo === source.repo && entry.ref === source.ref;
+}
 
 const slash = (p) => p.split("\\").join("/");
 
@@ -102,12 +131,23 @@ export function packAt(root, dir) {
   // so a build can tell a folder nobody fetched from one that is not there
   const sources = [declared.sources ?? []].flat().filter((s) => s !== null && typeof s === "object").map((s) => {
     if (typeof s.folder !== "string" || s.folder === ""
-        || (typeof s.repo !== "string" && typeof s.lock !== "string")
+        || (s.oci === undefined && typeof s.repo !== "string" && typeof s.lock !== "string")
         || (s.lock === undefined && s.repo === "")) {
       throw new BadPack(dir, "a source needs a folder and either a repo or a libs.lock.json library name");
     }
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(s.folder)) {
       throw new BadPack(dir, `source folder must be a single directory name: ${s.folder}`);
+    }
+    if (s.oci !== undefined) {
+      if (typeof s.oci !== "string" || s.repo !== undefined || s.lock !== undefined || s.ref !== undefined) {
+        throw new BadPack(dir, "an OCI source cannot also set repo, lock or ref");
+      }
+      try {
+        const parsed = parseRef(s.oci);
+        if (!parsed.digest || parsed.tag) throw new Error("pin host/repository@sha256:<64 hex>, without a tag");
+      } catch (error) {
+        throw new BadPack(dir, `OCI source: ${error.message}`);
+      }
     }
     let repo = s.repo;
     let ref = String(s.ref ?? "main");
@@ -123,8 +163,7 @@ export function packAt(root, dir) {
     return {
       folder: s.folder,
       dir: join(dir, s.folder),
-      repo,
-      ref,
+      ...(s.oci === undefined ? {repo, ref} : {oci: s.oci}),
       path: String(s.path ?? "src").replace(/^\/+|\/+$/g, ""),
       // what not to copy, as regular expressions over the path inside the
       // repository folder: a GUI-bound program, a test class, a file loader
@@ -132,10 +171,11 @@ export function packAt(root, dir) {
     };
   });
   return {
+    root,
     sources,
-    // the sources whose folder is not there: an unfetched pack is a
+    // absent folders and stale identities: an unfetched pack is a
     // different system, and it is said rather than built smaller
-    missing: sources.filter((s) => isDir(s.dir) === false),
+    missing: sources.filter((s) => !isDir(s.dir) || !sourceMatches(s, sourceOf(s.dir))),
     name,
     description: declared.description === undefined ? undefined : String(declared.description),
     dir,
@@ -328,7 +368,7 @@ function main(args) {
     }
     for (const s of pack.sources) {
       const state = pack.missing.includes(s) ? "NOT FETCHED: node tools/osd-fetch.mjs" : "fetched";
-      console.log(`  source ${s.folder} <- ${s.repo} ${s.ref.slice(0, 12)} /${s.path}  (${state})`);
+      console.log(`  source ${s.folder} <- ${s.oci ?? `${s.repo} ${s.ref.slice(0, 12)}`} /${s.path}  (${state})`);
     }
   }
   return 0;

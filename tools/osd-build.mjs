@@ -126,7 +126,7 @@ function walk(dir, out = [], seen = new Set()) {
     return out;
   }
   for (const e of entries) {
-    if (e.name === ".git" || e.name === "node_modules") {
+    if (e.name === ".git" || e.name === "node_modules" || e.name === ".osd-source.json") {
       continue;
     }
     const p = join(dir, e.name);

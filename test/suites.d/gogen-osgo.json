@@ -19,6 +19,7 @@
     "test/osd-destinations.mjs",
     "test/osd-dev.mjs",
     "test/osd-fetch.mjs",
+    "test/osd-oci.mjs",
     "test/osd-git.mjs",
     "test/osd-git-history.mjs",
     "test/osd-host.mjs",

@@ -56,6 +56,7 @@ const treeRoot = () => {
 /** the abapGit object a file belongs to: zcl_x.clas.abap and zcl_x.clas.xml are one object */
 export function objectOf(filename) {
   // <name>.<type>[.<member>].<ext>; the type is the four-character abapGit kind
+  if (filename === ".osd-source.json") return undefined;
   const parts = filename.split(".");
   if (parts.length < 3) {
     return undefined;

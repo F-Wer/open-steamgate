@@ -1,3 +1,4 @@
+import {isSourceIdentity} from "../osd-packs.mjs";
 import {append} from "./append.mjs";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
@@ -128,7 +129,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);
       if (e.isDirectory()) walk(path);
-      else if (skip(path)) continue;
+      else if (isSourceIdentity(e.name) || skip(path)) continue;
       else if (e.name.toLowerCase().endsWith(".clas.testclasses.abap") && includeTests !== true
           && !includeTests?.has?.(objName(e.name).toUpperCase())) continue;
       else if (/\.(abap|xml)$/i.test(e.name)) {
