@@ -124,6 +124,10 @@ jobs:
         run: node tools/gogen/semantics.mjs
       - name: Byte ownership and frontend emission
         run: node --test tools/gogen/emit-large.test.mjs tools/gogen/frontend-owned.test.mjs tools/gogen/frontend-bytes.test.mjs tools/gogen/emit-go.test.mjs tools/gogen/emit-sink-locals.test.mjs tools/gogen/symbols.test.mjs tools/gogen/local-constants.test.mjs tools/gogen/cfit.test.mjs tools/gogen/session-statics.test.mjs tools/gogen/frontend-supplied.test.mjs tools/gogen/sink-locals.test.mjs tools/gogen/ir-children.test.mjs
+      # frontend-artifact-digests.test.mjs compares Node and Bun digests
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
       - name: Frontend cache validation and replay
         # One file at a time: the cache's tool identity hashes tools/**, so a
         # file writing there while another compiles changes that identity

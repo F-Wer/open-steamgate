@@ -2,8 +2,14 @@ import {test} from "node:test";
 import assert from "node:assert/strict";
 import {execFileSync} from "node:child_process";
 import {existsSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
-import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {homedir, tmpdir} from "node:os";
+import {delimiter, join} from "node:path";
+
+/** Bun from OSD_BUN, PATH or its default install folder. */
+function bunPath() {
+  const candidates = [process.env.OSD_BUN, ...(process.env.PATH ?? "").split(delimiter).map((dir) => dir && join(dir, "bun")), join(homedir(), ".bun", "bin", "bun")];
+  return candidates.find((file) => file && existsSync(file));
+}
 import {compileProgram} from "./frontend.mjs";
 import {artifactDigestsOf, artifactDigestStats, prepareArtifactDigests, definitionFingerprint, canonical} from "./frontend-artifact-digests.mjs";
 import {objectCache} from "./frontend-object-cache.mjs";
@@ -160,8 +166,8 @@ test("deferred metadata preserves the lowering snapshot when a later owner mutat
 
 test("fresh processes, Node/Bun and provenance on/off have identical artifact digests", {timeout: 30_000}, () => scratch((dir) => {
   corpus(dir);
-  const hosts = [process.execPath, "/home/alice/.bun/bin/bun"];
-  assert.ok(existsSync(hosts[1]), "Bun stability gate requires its installed runtime");
+  const hosts = [process.execPath, bunPath()];
+  assert.ok(hosts[1], "Bun stability gate requires Bun on PATH, in ~/.bun/bin or in OSD_BUN");
   const captures = [];
   for (const host of hosts) for (const provenance of ["0", "1"]) for (let round = 0; round < 2; round++) {
     const args = [...(host === hosts[1] ? ["--no-install"] : []), "tools/gogen/frontend-artifact-digests-cli.mjs", dir];
