@@ -1,0 +1,19 @@
+{
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "cockpit/zosd_fleet2/manifest.json",
+      "lines": [
+        {
+          "lines": [1, 181],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/cockpit", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-cockpit/manifest.json", "anchor": "<partial>", "offset": 0}
+          ]
+        }
+      ]
+    }
+  ]
+}
