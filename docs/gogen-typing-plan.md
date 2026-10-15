@@ -131,3 +131,10 @@ For P5 run `OSD_HEAVY_RANGE=90-99 tools/osd-heavy.sh node tools/sqlscript-confor
 - **Less visible consumers:** frontend uses `require("./frontend-object-cache.mjs")` only with cacheDir: update to `.ts` while preserving synchronous lazy loading and no top-level await. `copy-js-runtime.mjs` copies only `.mjs`; emitted JS expects `abap.mjs`, so P2 leaves runtime files intact. `frontend-cache.mjs` hashes `.mjs`/Go but **omits `.ts`**: fix its file selection in P0, including shared tools; object-cache identity already hashes both. Migrate size-budget path keys with renames, preserving limits. Keep parser/core identity from the transpiler's own `createRequire`; an unchecked require result is not a typed parser boundary.
 
 Validation of this plan: checked all 51 source hashes/counts/import edges, inspected test assertions and workflow commands, ran the repository's preview-closure audit. No generator, compiler, runtime or dependency code changed; no code suites or byte-equivalence runs claimed. Local Node is 26.9.0; the requested 22/24 matrix remains an implementation gate.
+
+## Where the plan went (2026-10-15)
+
+- Large files are typed **in place with same-line JSDoc** (#752 emit-go, #754 frontend): abapiti lowers JSDoc in `.mjs` exactly like `.ts` (no `@ts-check` needed), line budgets do not move, and stoker's open branches do not conflict on a rename. Small leaves still convert straight to `.ts`.
+- Every typing PR runs a **runtime-shape truthfulness audit**: each annotated function is instrumented over the unit fixture and the semantics corpus, and recorded shapes are compared with the annotations until no contradiction is left (174 contradictions in frontend, 244 in emit-go, that spot-check critics had missed).
+- `frontend.mjs` is being **split into eight modules** (docs/frontend-split-plan.md); P8 here is superseded by that plan.
+- **After the split:** convert the JSDoc-typed modules to plain `.ts`, one module per PR (JSDoc→TS codemod plus rename; byte proof and token proof as for every PR), once stoker's cache cycle is done.
