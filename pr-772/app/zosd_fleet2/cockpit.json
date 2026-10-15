@@ -1,0 +1,26 @@
+{
+  "app": "zosd_fleet2",
+  "title": "Runs fleet2",
+  "service": "ZL3C_FLEET2_SRV",
+  "files": [
+    "index.html",
+    "Component.js",
+    "manifest.json",
+    "Cockpit.controller.js",
+    "Cockpit.fragment.xml",
+    "List.controller.js",
+    "StartRun.fragment.xml",
+    "i18n/i18n.properties",
+    "Series.js",
+    "Live.js",
+    "Words.js"
+  ],
+  "tile": {
+    "type": "dynamic",
+    "subtitle": "Fleet run cockpit",
+    "icon": "sap-icon://process",
+    "serviceUrl": "/sap/opu/odata/sap/ZL3C_FLEET2_SRV/RunSet/$count?$filter=Status%20ne%20'DONE'%20and%20Status%20ne%20'PARTIAL'%20and%20Status%20ne%20'FAILED'%20and%20Status%20ne%20'NOT-RUN'",
+    "serviceRefreshInterval": "30",
+    "numberUnit": "open"
+  }
+}
