@@ -53,8 +53,19 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
       throw new Unsupported(`${owner}=>${attr} is ${a.getVisibility() === abaplint.Visibility.Private ? "private" : "protected"} to ${at}`);
     }
     const file = pool?.getABAPFiles().find((f) => f.getFilename() === a.getFilename());
-    const definition = file?.getInfo().getClassDefinitionByName(at.split(":").at(-1));
-    const readOnly = definition?.attributes.find((x) => upper(x.name) === attr)?.readOnly === true;
+    // ClassDataBegin is absent from core's info attributes, and its readOnly
+    // flag also matches VALUE literals. Locate the declaration by its name token.
+    const {Statements, Expressions, Nodes} = abaplint;
+    const declaration = file?.getStatements().find((st) =>
+      [Statements.ClassData, Statements.ClassDataBegin, Statements.Data, Statements.DataBegin].some((kind) => st.get() instanceof kind)
+      && st.getTokens().some((token) => token.getStart().equals(a.getToken().getStart())));
+    const hasReadOnly = (node) => {
+      const children = node?.getChildren() ?? [];
+      return children.some((c, i) => c instanceof Nodes.TokenNode && upper(c.getFirstToken().getStr()) === "READ"
+        && children[i + 1] instanceof Nodes.TokenNode && children[i + 1].getFirstToken().getStr() === "-"
+        && children[i + 2] instanceof Nodes.TokenNode && upper(children[i + 2].getFirstToken().getStr()) === "ONLY");
+    };
+    const readOnly = hasReadOnly(declaration) || hasReadOnly(declaration?.findDirectExpression(Expressions.DataDefinition));
     if (write && !inside && readOnly) {
       throw new Unsupported(`${owner}=>${attr}: a write to a READ-ONLY attribute outside ${at}`);
     }

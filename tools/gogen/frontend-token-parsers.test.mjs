@@ -1,8 +1,8 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync, writeFileSync, readFileSync, rmSync} from "node:fs";
+import {mkdirSync, symlinkSync, mkdtempSync, writeFileSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {basename, join} from "node:path";
+import {basename, dirname, join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {spawnSync} from "node:child_process";
 import {createRequire} from "node:module";
@@ -137,4 +137,87 @@ test("ordinary FIND and REPLACE flags retain supported forms and refusals", asyn
     const p = compile(`DATA text TYPE string. DATA n TYPE i. ${statement}`);
     assert.equal(p.partial.length, 1, statement);
   }
+});
+
+test("round 2 READ-ONLY structured declarations and literal values", async (t) => {
+  const owner = (decl) => `CLASS zcl_owner DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION. ${decl} ENDCLASS. CLASS zcl_owner IMPLEMENTATION. ENDCLASS.`;
+  for (const value of ["READ-ONLY", " READ-ONLY", "text READ-ONLY"]) {
+    await t.test(`literal ${JSON.stringify(value)}`, async () => both(compile("zcl_owner=>txt = 'ok'. rv = strlen( zcl_owner=>txt ).", {
+      "zcl_owner.clas.abap": owner(`CLASS-DATA txt TYPE string VALUE '${value}'.`),
+    }), 2));
+  }
+  for (const [decl, body] of [
+    ["CLASS-DATA ro TYPE i READ-ONLY.", "zcl_owner=>ro = 7."],
+    ["CLASS-DATA: BEGIN OF ro READ-ONLY, f TYPE i, END OF ro.", "zcl_owner=>ro-f = 7."],
+    ["CLASS-DATA: BEGIN OF ro READ-ONLY, f TYPE i, END OF ro.", "DATA s LIKE zcl_owner=>ro. zcl_owner=>ro = s."],
+  ]) {
+    await t.test(body, () => {
+      const p = compile(body, {"zcl_owner.clas.abap": owner(decl)});
+      assert.equal(p.partial.length, 1, body);
+      assert.match(JSON.stringify(p.partial), /READ-ONLY/, body);
+    });
+  }
+});
+
+test("round 2 WITH discovers inline table; FINAL and NEW DATA stay discovered", () => {
+  for (const sql of [
+    "WITH +c AS ( SELECT id FROM zgogen_t_dbw ) SELECT id FROM +c INTO TABLE @DATA(real).",
+    "SELECT id FROM zgogen_t_dbw INTO TABLE @FINAL(real).",
+    "SELECT id FROM zgogen_t_dbw INTO TABLE NEW @DATA(real).",
+  ]) assert.deepEqual([...inlineTableLocals(parsedBody(sql))], ["REAL"], sql);
+  const p = compile("WITH +c AS ( SELECT id FROM zgogen_t_dbw ) SELECT id FROM +c INTO TABLE @DATA(real). rv = lines( real ).", {
+    "zgogen_t_dbw.tabl.xml": readFileSync(new URL("./testdata/zgogen_t_dbw.tabl.xml", import.meta.url), "utf8"),
+  });
+  assert.deepEqual(p.skipped, []);
+  assert.ok(p.partial.some(message => message.includes("WITH"))); // WITH remains outside the lowering subset.
+  assert.ok(p.classes[0].methods.some(method => method.name === "RUN"));
+});
+
+test("round 2 FIND count and offset inline targets keep integer types", async (t) => {
+  const result = "TYPES: BEGIN OF sub, offset TYPE i, length TYPE i, END OF sub. TYPES subs TYPE STANDARD TABLE OF sub WITH DEFAULT KEY. TYPES: BEGIN OF result, line TYPE i, offset TYPE i, length TYPE i, submatches TYPE subs, END OF result. DATA t TYPE STANDARD TABLE OF result WITH DEFAULT KEY.";
+  for (const clause of ["MATCH COUNT DATA(n)", "MATCH OFFSET DATA(o)"]) {
+    const name = clause.includes("COUNT") ? "n" : "o";
+    await t.test(clause, () => {
+      const p = compile(`${result} FIND ALL OCCURRENCES OF 'x' IN 'axx' ${clause} RESULTS t. rv = ${name}.`);
+      // Combined FIND options are currently refused, but their locals must be typed correctly.
+      assert.deepEqual(p.skipped, []);
+      const method = p.classes[0].methods[0];
+      assert.equal(method.locals.find(x => x.name === name.toUpperCase()).type.k, "i");
+    });
+  }
+});
+
+test("round 2 analysis loads the transpiler core instance", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-core-instance-"));
+  try {
+    // A distinct root core must never be loaded, even without npm overrides.
+    const top = join(dir, "node_modules/@abaplint/core");
+    const nested = join(dir, "node_modules/@abaplint/transpiler/node_modules/@abaplint");
+    mkdirSync(top, {recursive: true});
+    mkdirSync(nested, {recursive: true});
+    writeFileSync(join(top, "package.json"), JSON.stringify({main: "index.js"}));
+    writeFileSync(join(top, "index.js"), 'throw new Error("loaded root core instead of transpiler core");');
+    writeFileSync(join(nested, "../../package.json"), '{}');
+    symlinkSync(dirname(createRequire(require.resolve("@abaplint/transpiler/package.json")).resolve("@abaplint/core/package.json")), join(nested, "core"), "dir");
+    let source = readFileSync(new URL("./frontend-analysis.mjs", import.meta.url), "utf8");
+    // Relocate only this module; keep its unrelated local dependencies in place.
+    source = source.replace('"./host-io.ts"', JSON.stringify(new URL("./host-io.ts", import.meta.url).href))
+      .replace('"../osd-samc.ts"', JSON.stringify(new URL("../osd-samc.ts", import.meta.url).href));
+    const file = join(dir, "analysis.mjs");
+    writeFileSync(file, source);
+    const analysis = await import(pathToFileURL(file).href);
+    assert.deepEqual([...analysis.inlineTableLocals(parsedBody("SELECT id FROM ztab INTO TABLE @DATA(real)."))], ["REAL"]);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("round 2 CDS BOM mapping", () => {
+  assert.deepEqual(cdsSqlViews(["\uFEFF" + cds]), {ZTEST: "ZGOOD"});
+});
+
+test("round 2 unreadable DDLS mapping names the source", () => {
+  assert.throws(() => compile("rv = 1.", {"zbroken.ddls.asddls": cds + " invalid syntax!!"}),
+    /zbroken.ddls.asddls.*view mapping could not be read/);
+  assert.throws(() => cdsSqlViews([{filename: "zbroken.ddls.asddls", source: cds + " invalid syntax!!"}]),
+    /zbroken.ddls.asddls.*view mapping could not be read/);
 });
