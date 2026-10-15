@@ -14,15 +14,16 @@ describe("gogen typing byte proof", function () {
   });
   after(() => rmSync(scratch, {recursive: true, force: true}));
 
-  it("records and compares both sink modes and all three cache modes", () => {
-    const target = join(scratch, "parent");
-    for (const action of ["--record", "--compare"]) {
-      const run = spawnSync(process.execPath, [...process.execArgv, "tools/gogen/typing-proof.mjs", action, target],
-        {encoding: "utf8", timeout: 290000, maxBuffer: 4e6});
-      assert.equal(run.error, undefined);
-      assert.equal(run.status, 0, run.stdout + run.stderr);
-      assert.equal((run.stdout.match(/byte-identical artifacts/g) ?? []).length, 6, run.stdout);
-    }
+  // One tree proves only that the cache modes agree; parent-against-candidate
+  // equality is each conversion PR's own proof (both sink modes, recorded on
+  // the parent). CI keeps to the default sink mode and a single record pass,
+  // which already compares cold and warm output with the uncached output.
+  it("records the default sink mode in all three cache modes, all byte-identical", () => {
+    const run = spawnSync(process.execPath, [...process.execArgv, "tools/gogen/typing-proof.mjs", "--record", join(scratch, "parent")],
+      {encoding: "utf8", timeout: 290000, maxBuffer: 4e6, env: {...process.env, GOGEN_TYPING_SINKS: "1"}});
+    assert.equal(run.error, undefined);
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.equal((run.stdout.match(/byte-identical artifacts/g) ?? []).length, 3, run.stdout);
   });
 
   it("rejects whitespace, CRLF, numeric spelling, absent fields, ordering and file-set drift", () => {

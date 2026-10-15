@@ -216,7 +216,13 @@ function main() {
   try {
     prepareInputs();
     const output = join(scratch, "output");
-    for (const sink of ["0", "1"]) {
+    // GOGEN_TYPING_SINKS narrows the sink-locals modes (CI runs the default "1";
+    // a conversion PR's parent proof runs both).
+    const sinks = (process.env.GOGEN_TYPING_SINKS ?? "0,1").split(",");
+    if (sinks.length === 0 || sinks.some((s) => s !== "0" && s !== "1") || new Set(sinks).size !== sinks.length) {
+      throw new Error(`GOGEN_TYPING_SINKS must list "0" and/or "1" once each, got ${JSON.stringify(process.env.GOGEN_TYPING_SINKS)}`);
+    }
+    for (const sink of sinks) {
       const cache = join(scratch, `cache-${sink}`);
       for (const mode of ["none", "cold", "warm"]) {
         const dir = join(output, `sink-${sink}`, mode);
