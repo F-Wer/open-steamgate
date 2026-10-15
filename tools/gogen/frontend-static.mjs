@@ -59,13 +59,19 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
     const declaration = file?.getStatements().find((st) =>
       [Statements.ClassData, Statements.ClassDataBegin, Statements.Data, Statements.DataBegin].some((kind) => st.get() instanceof kind)
       && st.getTokens().some((token) => token.getStart().equals(a.getToken().getStart())));
-    const hasReadOnly = (node) => {
+    const hasReadOnly = (node, trailing = false) => {
       const children = node?.getChildren() ?? [];
-      return children.some((c, i) => c instanceof Nodes.TokenNode && upper(c.getFirstToken().getStr()) === "READ"
+      return children.some((c, i) => (!trailing || i === children.length - 3)
+        && c instanceof Nodes.TokenNode && upper(c.getFirstToken().getStr()) === "READ"
         && children[i + 1] instanceof Nodes.TokenNode && children[i + 1].getFirstToken().getStr() === "-"
         && children[i + 2] instanceof Nodes.TokenNode && upper(children[i + 2].getFirstToken().getStr()) === "ONLY");
     };
-    const readOnly = hasReadOnly(declaration) || hasReadOnly(declaration?.findDirectExpression(Expressions.DataDefinition));
+    const data = declaration?.findDirectExpression(Expressions.DataDefinition);
+    // A keyed table consumes READ-ONLY in TypeTableKey. Do not search through
+    // arbitrary descendants: VALUE/Constant/Source may contain the same text.
+    const keyedReadOnly = data?.findDirectExpression(Expressions.TypeTable)
+      ?.findDirectExpressions(Expressions.TypeTableKey).some((key) => hasReadOnly(key, true));
+    const readOnly = hasReadOnly(declaration) || hasReadOnly(data) || keyedReadOnly;
     if (write && !inside && readOnly) {
       throw new Unsupported(`${owner}=>${attr}: a write to a READ-ONLY attribute outside ${at}`);
     }
