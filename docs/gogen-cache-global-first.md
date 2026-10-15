@@ -20,8 +20,12 @@ manifest or cache payload format is unnecessary. It hashes the ordered effective
 loaded objects, their dependency roles, and ordered filename/raw-text hashes,
 alongside registry config and actual tool identity. JSON framing separates names
 and contents. The new `gogen-global-content-1` domain ignores older generation
-keys. The loaded immutable snapshot binds the certificate to the exact inputs
-used by compilation, rather than to a preliminary disk scan. Mtimes and file sizes
+keys. The loaded immutable snapshot binds the certificate to the registry
+inputs used by compilation, rather than to a preliminary disk scan. Known gap,
+present on main before this step and not changed by it: CDS sources
+(`.ddls.asddls`) are read outside the registry for the SQL view mapping and are
+not in the snapshot, so an edit to one is not seen by the global guard (follow-up
+fix: hash them into the generation key). Mtimes and file sizes
 are never reuse authority. Effective additions, removals, provider changes and
 object/file/layer order changes invalidate it. Selection and other program inputs
 remain checked by replay; excluded test sources do not enter the loaded snapshot.
