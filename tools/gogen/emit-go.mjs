@@ -21,7 +21,7 @@ import {emitByteStatement} from "./emit-bytes.mjs";
 // object as its receiver; a static one is a plain function.
 
 // An absent or OTHERS-only clause carries no named exception codes.
-const exceptionCodes = (exceptions) => {
+/** @param {import("./ir.ts").Exceptions | null | undefined} exceptions @returns {string} */ const exceptionCodes = (exceptions) => {
   const codes = Object.entries(exceptions?.map ?? {}).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
   return codes ? `map[string]int32{${codes}}` : "nil";
 };
@@ -31,9 +31,9 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "panic print println real recover bool byte error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 "
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
-let exportedFields = false, OWNERSHIP, SYMBOLS;
-const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
-export const ident = (name) => {
+/** @type {boolean} */ let exportedFields = false, /** @type {import("./emit-go-types.ts").Ownership} */ OWNERSHIP, /** @type {import("./emit-go-types.ts").SymbolCollector | null} */ SYMBOLS;
+/** @param {import("./emit-go-types.ts").Field} v @returns {string} */ const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
+/** @param {string} name @returns {string} */ export const ident = (name) => {
   // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
   // from the _ of an attribute of the class's own
   const id = String(name).toLowerCase().replace(/~/g, "__").replace(/[^a-z0-9_]/g, "_");
@@ -42,9 +42,9 @@ export const ident = (name) => {
   // A leading capital exports them; the rest of the spelling stays stable.
   return exportedFields ? safe[0].toUpperCase() + safe.slice(1) : safe;
 };
-const selfField = (name) => `${exportedFields ? "Self" : "self"}_${typeName(name)}`;
+/** @param {string} name @returns {string} */ const selfField = (name) => `${exportedFields ? "Self" : "self"}_${typeName(name)}`;
 
-const evType = (key) => `EV_${typeName(key)}`;
+/** @param {string} key @returns {string} */ const evType = (key) => `EV_${typeName(key)}`;
 /*
  * ultra/events: CLASS_CONSTRUCTOR runs once, at the first use of the class:
  * the first NEW of it or of a subclass, or the first call of one of its
@@ -55,17 +55,17 @@ const evType = (key) => `EV_${typeName(key)}`;
  * UTILITIES is left out: its class constructor is two kernel lines setting
  * constants the front end already knows (CHAR_UTILITIES).
  */
-const ownCctor = (cls) => cls.name !== "CL_ABAP_CHAR_UTILITIES"
+/** @param {import("./emit-go-types.ts").Class} cls @returns {boolean} */ const ownCctor = (cls) => cls.name !== "CL_ABAP_CHAR_UTILITIES"
   && (cls.methods.some((m) => m.name === "CLASS_CONSTRUCTOR") || (cls.stubs ?? []).some((m) => m.name === "CLASS_CONSTRUCTOR"));
-function chainCctor(cls) {
+/** @param {import("./emit-go-types.ts").Class} cls @returns {boolean} */ function chainCctor(cls) {
   for (let c = cls; c; c = c.super ? CLASSES.get(c.super) : null) if (ownCctor(c)) return true;
   return false;
 }
 
-let STABLE_ROWS = new Set();
-let movePair;
-const stable = (t) => t?.stable || (t?.k === "table" && STABLE_ROWS.has(t.row.go ?? `${t.row.k}:${t.row.len ?? ""}`));
-export function goType(t) {
+/** @type {Set<string>} */ let STABLE_ROWS = new Set();
+/** @type {import("./emit-go-types.ts").MovePair} */ let movePair;
+/** @param {import("./emit-go-types.ts").TypeProbe} t @returns {boolean | undefined} */ const stable = (t) => t?.stable || (t?.k === "table" && STABLE_ROWS.has(t.row.go ?? `${t.row.k}:${t.row.len ?? ""}`));
+/** @param {import("./emit-go-types.ts").Type} t @returns {string} */ export function goType(t) {
   switch (t.k) {
     case "i": return "int32";
     case "int8": return "int64";
@@ -80,14 +80,14 @@ export function goType(t) {
     default: throw new Error(`no Go type for ${t.k}`);
   }
 }
-const rowValue = (table, item) => stable(table) ? `(*(${item}))` : item;
-const rowAddress = (table, item) => stable(table) ? item : `&${item}`;
-const rowStored = (table, value) => stable(table) ? `abap.Ptr(${value})` : value;
-const rowRef = (table, tb, item) => stable(table) ? `abap.RowRef(&${tb}, ${item}, ${desc(table.row)})` : `abap.Data{P: &${item}, T: ${desc(table.row)}}`;
-const boundRow = (table, tb, index) => table.row.k === "data" ? rowValue(table, `${tb}[${index}]`) : !stable(table) && table.row.k !== "struct" ? `abap.BindRow(&${tb}, int(${index}))` : rowAddress(table, `${tb}[${index}]`);
+/** @param {import("./emit-go-types.ts").Type} table @param {string} item @returns {string} */ const rowValue = (table, item) => stable(table) ? `(*(${item}))` : item;
+/** @param {import("./emit-go-types.ts").Type} table @param {string} item @returns {string} */ const rowAddress = (table, item) => stable(table) ? item : `&${item}`;
+/** @param {import("./emit-go-types.ts").Type} table @param {string} value @returns {string} */ const rowStored = (table, value) => stable(table) ? `abap.Ptr(${value})` : value;
+/** @param {import("./emit-go-types.ts").TableType} table @param {string} tb @param {string} item @returns {string} */ const rowRef = (table, tb, item) => stable(table) ? `abap.RowRef(&${tb}, ${item}, ${desc(table.row)})` : `abap.Data{P: &${item}, T: ${desc(table.row)}}`;
+/** @param {import("./emit-go-types.ts").TableType} table @param {string} tb @param {string} index @returns {string} */ const boundRow = (table, tb, index) => table.row.k === "data" ? rowValue(table, `${tb}[${index}]`) : !stable(table) && table.row.k !== "struct" ? `abap.BindRow(&${tb}, int(${index}))` : rowAddress(table, `${tb}[${index}]`);
 
 // a p field holds its decimals: initial is 0, 0.0, 0.00 ... (go/abap packed.go)
-const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
+/** @param {import("./emit-go-types.ts").PackedType} t @returns {string} */ const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
 
 // an x field is always its full length: initial is that many 00 bytes.
 // A structure's initial value sets every component whose initial value is
@@ -95,14 +95,14 @@ const pZero = (t) => (t.calc || !t.dec ? "0" : `0.${"0".repeat(t.dec)}`);
 // an x/d/t/n/p component, a row built from one, a CLASS-DATA and an instance
 // attribute all started at "" in Go while JS and ABAP give the type's
 // initial value; ZCL_GOGEN_T_XINIT pins it)
-const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "x" ? JSON.stringify("\u0000".repeat(t.len)).replaceAll("\\u0000", "\\x00")
+/** @param {import("./emit-go-types.ts").Type} t @returns {string} */ const zero = (t) => (t.k === "i" || t.k === "int8" || t.k === "f" ? "0" : t.k === "x" ? JSON.stringify("\u0000".repeat(t.len)).replaceAll("\\u0000", "\\x00")
   : t.k === "string" || t.k === "c" || t.k === "xstring" ? `""` : t.k === "struct" ? `${t.go}{${zeroFields(t).join(", ")}}` : t.k === "data" || t.k === "dref" ? "abap.Data{}"
     : t.k === "d" ? `"00000000"` : t.k === "t" ? `"000000"` : t.k === "p" ? JSON.stringify(pZero(t)) : t.k === "n" ? JSON.stringify("0".repeat(t.len)) : "nil");
 /** is this zero() text Go's own zero value for the type, so a declaration may leave it out */
-const isGoZero = (z) => z === "0" || z === `""` || z === "nil" || z === "abap.Data{}" || /^[A-Za-z0-9_.]+\{\}$/.test(z);
+/** @param {string} z @returns {boolean} */ const isGoZero = (z) => z === "0" || z === `""` || z === "nil" || z === "abap.Data{}" || /^[A-Za-z0-9_.]+\{\}$/.test(z);
 /** the components of a structure whose initial value is not Go's zero value, as `name: value` */
-function zeroFields(t, skip = new Set()) {
-  return (STRUCTDEFS.get(t.go)?.fields ?? []).filter((f) => !skip.has(String(f.name).toUpperCase())).map((f) => [f, zero(f.type)])
+/** @param {import("./emit-go-types.ts").StructType} t @param {Set<string>} [skip] @returns {string[]} */ function zeroFields(t, skip = new Set()) {
+  return (STRUCTDEFS.get(t.go)?.fields ?? []).filter((f) => !skip.has(String(f.name).toUpperCase())).map(/** @returns {[import("./emit-go-types.ts").Field, string]} */ (f) => [f, zero(f.type)])
     .filter(([, z]) => !isGoZero(z)).map(([f, z]) => `${ident(f.name)}: ${z}`);
 }
 
@@ -113,39 +113,39 @@ function zeroFields(t, skip = new Set()) {
  * slice is a reference, so every move of a table out of a place goes
  * through a generated clone. Flat values need none.
  */
-const composite = (t) => t?.k === "table" || t?.k === "struct";
-const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
-let CLONES = new Map();
+/** @param {import("./emit-go-types.ts").Type | undefined} t @returns {boolean} */ const composite = (t) => t?.k === "table" || t?.k === "struct";
+/** @param {import("./emit-go-types.ts").Param} p @returns {boolean} */ const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
+/** @type {Map<string, import("./emit-go-types.ts").Descriptor>} */ let CLONES = new Map();
 // classes some compiled class inherits from: a reference to one is the Go
 // interface I_<class>, so it can hold any subclass; a leaf class stays *T
-let POLY = new Set();
-let CLASSES = new Map();
-let EVENTS = new Map();
+/** @type {Set<string>} */ let POLY = new Set();
+/** @type {Map<string, import("./emit-go-types.ts").Class>} */ let CLASSES = new Map();
+/** @type {Map<string, import("./ir.ts").Event>} */ let EVENTS = new Map();
 // descriptors of the types generic data binds to, generated at the end
-let DESCS = new Map();
+/** @type {Map<string, import("./emit-go-types.ts").Descriptor>} */ let DESCS = new Map();
 // elementary descriptors with a type name (ultra/json, RTTI's absolute
 // names): one var each, abap.Named once at start
-let NAMED = new Map();
-let STRUCTDEFS = new Map();
-let HELPER_IMPORTS = new Set();
+/** @type {Map<string, import("./emit-go-types.ts").NamedDescriptor>} */ let NAMED = new Map();
+/** @type {import("./emit-go-types.ts").StructDefinitions} */ let STRUCTDEFS = new Map();
+/** @type {Set<string>} */ let HELPER_IMPORTS = new Set();
 // A helper package is imported under an alias ident() can never produce (a
 // lower-case first letter and an inner capital), so an ABAP local or
 // parameter of the same name cannot shadow it: `tstmp` in CL_ABAP_TSTMP did.
-const helperAlias = (name) => `h${name[0].toUpperCase()}${name.slice(1)}`;
+/** @param {string} name @returns {string} */ const helperAlias = (name) => `h${name[0].toUpperCase()}${name.slice(1)}`;
 // a host function named pkg.Fn (frontend NATIVE / KERNEL rows): pkg other than
 // abap is a helper package, imported and called through its alias
-const helperFn = (fn) => {
+/** @param {string} fn @returns {string} */ const helperFn = (fn) => {
   const m = /^([a-z][a-z0-9]*)\.(\w+)$/.exec(fn);
   if (!m || m[1] === "abap") return fn;
   HELPER_IMPORTS.add(m[1]);
   return `${helperAlias(m[1])}.${m[2]}`;
 };
-function needsCopy(t) {
+/** @param {import("./emit-go-types.ts").Type | undefined} t @returns {boolean} */ function needsCopy(t) {
   if (t?.k === "table") return true;
   if (t?.k === "struct") return (STRUCTDEFS.get(t.go)?.fields ?? []).some((f) => needsCopy(f.type));
   return false;
 }
-function cloneName(t) {
+/** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function cloneName(t) {
   const key = goType(t);
   if (!CLONES.has(key)) CLONES.set(key, {name: `clone_${CLONES.size}`, type: t});
   return CLONES.get(key).name;
@@ -154,7 +154,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** a value moved out of a place: a table (or a structure holding one) is copied */
 /** one condition of an internal table's WHERE over the row `row`
  * (ultra/itab: a nested component and IS [NOT] INITIAL read through fx) */
-function whereItem(w, row, ctx) {
+/** @param {import("./emit-go-types.ts").Where} w @param {string} row @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function whereItem(w, row, ctx) {
   const saved = ctx.lrow;
   ctx.lrow = row;
   try {
@@ -168,13 +168,13 @@ function whereItem(w, row, ctx) {
     ctx.lrow = saved;
   }
 }
-function copied(text, t, e) {
+/** @param {string} text @param {import("./emit-go-types.ts").Type} t @param {import("./emit-go-types.ts").Expr} [e] @returns {string} */ function copied(text, t, e) {
   return needsCopy(t) && (e === undefined || PLACES.has(e.e)) ? `${cloneName(t)}(${text})` : text;
 }
-const descKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t${t.sorted ? "s" : t.hashed ? "h" : ""}:${descKey(t.row)}`
+/** @param {import("./emit-go-types.ts").TypeProbe} t @returns {string} */ const descKey = (t) => (t.k === "struct" ? `s:${t.go}` : t.k === "table" ? `t${t.sorted ? "s" : t.hashed ? "h" : ""}:${descKey(t.row)}`
   : `${t.k}:${t.len ?? ""}:${t.dec ?? ""}:${t.name ?? ""}`);
 /** the descriptor of a type, for generic data: built-in for elementary types, generated for the rest */
-function desc(t) {
+/** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function desc(t) {
   if ((t.qname || t.ddic) && !["struct", "table", "dref", "ref", "exc", "data"].includes(t.k)) {
     const base = desc({...t, qname: undefined, ddic: undefined});
     const key = `${base}|${t.qname ?? ""}|${t.ddic ?? ""}`;
@@ -208,10 +208,10 @@ function desc(t) {
     default: throw new Error(`no descriptor for ${t.k}`);
   }
 }
-function descFuncs() {
-  const out = [];
+/**  @returns {string[]} */ function descFuncs() {
+  /** @type {string[]} */ const out = [];
   const done = new Set();
-  const inits = [];
+  /** @type {string[]} */ const inits = [];
   for (let again = true; again;) {
     again = false;
     for (const [key, d] of [...DESCS]) {
@@ -242,10 +242,10 @@ function descFuncs() {
  * descriptors of a row and of a STANDARD TABLE of rows where the row type
  * is in the subset
  */
-function tableRegistry(program) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @returns {string[]} */ function tableRegistry(program) {
   const tables = program.tables ?? [];
   if (tables.length === 0) return [];
-  const irType = (t) => (t === null ? "nil" : `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`);
+  /** @param {import("./emit-go-types.ts").WriteType | null} t @returns {string} */ const irType = (t) => (t === null ? "nil" : `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`);
   const lines = tables.map((t) => {
     const cols = t.columns.map((c) => `{Name: ${JSON.stringify(c.name)}, Kind: '${c.kind}', Len: ${c.len}, Dec: ${c.dec}, Key: ${c.key}, IR: ${irType(c.type)}}`);
     const types = t.row ? `Row: ${desc(t.row)}, Rows: ${desc({k: "table", row: t.row})}` : `Why: ${JSON.stringify(t.why)}`;
@@ -257,7 +257,7 @@ function tableRegistry(program) {
 }
 
 /** a structure that holds a string, a table or a reference, at any depth */
-export function deepType(t) {
+/** @param {import("./emit-go-types.ts").Type} t @returns {boolean} */ export function deepType(t) {
   if (["string", "xstring", "table", "ref", "exc", "dref", "data"].includes(t?.k)) return true;
   if (t?.k === "struct") return (STRUCTDEFS.get(t.go)?.fields ?? []).some((f) => deepType(f.type));
   return false;
@@ -265,13 +265,13 @@ export function deepType(t) {
 
 /** the Copy, Zero and New of a generated descriptor: a whole move, a CLEAR
  * and a CREATE DATA through generic data */
-function copyZero(t) {
+/** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function copyZero(t) {
   const g = goType(t);
   return `Copy: func(dst, src any) { *dst.(*${g}) = ${copied(`*src.(*${g})`, t)} }, Zero: func(p any) { *p.(*${g}) = ${zero(t)} }, New: func() any { p := new(${g}); *p = ${zero(t)}; return p }`;
 }
 
 /** a structure with a d, t or n field somewhere (and nothing IsInitialData cannot read) */
-function typedZeroInside(t, seen = new Set()) {
+/** @param {import("./emit-go-types.ts").StructType} t @param {Set<string>} [seen] @returns {boolean} */ function typedZeroInside(t, seen = new Set()) {
   if (seen.has(t.go)) return false;
   seen.add(t.go);
   const fs = STRUCTDEFS.get(t.go)?.fields ?? [];
@@ -288,8 +288,8 @@ function typedZeroInside(t, seen = new Set()) {
   return found;
 }
 
-function cloneFuncs() {
-  const out = [];
+/**  @returns {string[]} */ function cloneFuncs() {
+  /** @type {string[]} */ const out = [];
   const done = new Set();
   for (let again = true; again;) {
     again = false;
@@ -310,21 +310,21 @@ function cloneFuncs() {
   return out;
 }
 
-export function emitGo(program, pkg = "main", layers = null, unitBuild = false, symbols = null) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {string} [pkg] @param {import("./emit-go-types.ts").Layers | null} [layers] @param {boolean} [unitBuild] @param {import("./emit-go-types.ts").SymbolCollector | null} [symbols] @returns {string} */ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, symbols = null) {
   SYMBOLS = symbols;
-  const factories = Array.isArray(program) ? new Map() : constructorFactories(program);
+  /** @type {import("./emit-go-types.ts").ConstructorFactories} */ const factories = Array.isArray(program) ? new Map() : constructorFactories(program);
   STABLE_ROWS = new Set();
-  const collectStable = (v) => {
+  /** @param {unknown} v @returns {void} */ const collectStable = (v) => {
     if (Array.isArray(v)) { for (const x of v) collectStable(x); return; }
     if (!v || typeof v !== "object") return;
-    const table = v.table?.type;
+    const table = (/** @type {import("./emit-go-types.ts").WalkNode} */ (v)).table?.type;
     if (table?.stable && table.row.go) STABLE_ROWS.add(table.row.go);
-    for (const key of ["body", "branches", "cases", "catches", "else", "then", "cleanup"]) collectStable(v[key]);
+    for (const key of ["body", "branches", "cases", "catches", "else", "then", "cleanup"]) collectStable((/** @type {import("./emit-go-types.ts").WalkNode} */ (v))[key]);
   };
-  for (const cls of program.classes ?? program) for (const method of cls.methods ?? []) collectStable(method.body);
+  for (const cls of /** @type {readonly import("./emit-go-types.ts").Class[]} */ (program.classes ?? program)) for (const method of cls.methods ?? []) collectStable(method.body);
   exportedFields = Boolean(layers);
   HELPER_IMPORTS = new Set();
-  OWNERSHIP = analyzeOwnership(program);
+  OWNERSHIP = (/** @type {import("./emit-go-types.ts").AnalyzeOwnership} */ (analyzeOwnership))(program);
   const classes = layers?.classes ?? (Array.isArray(program) ? program : program.classes);
   const structs = layers?.structs ?? (Array.isArray(program) ? new Map() : program.structs);
   CLONES = new Map();
@@ -333,11 +333,11 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
   STRUCTDEFS = Array.isArray(program) ? structs : program.structs;
   CLASSES = new Map((Array.isArray(program) ? classes : program.classes).map((c) => [c.name, c]));
   POLY = new Set([...CLASSES.values()].map((c) => c.super).filter(Boolean));
-  movePair = analyzeTableMoves(program, stable, goType);
+  movePair = (/** @type {import("./emit-go-types.ts").AnalyzeTableMoves} */ (analyzeTableMoves))(program, stable, goType);
   HELPER_IMPORTS.add("hostclass");
   EVENTS = Array.isArray(program) ? new Map() : (program.events ?? new Map());
   const consts = layers?.consts ?? (Array.isArray(program) ? new Map() : program.consts);
-  const out = [];
+  /** @type {string[]} */ const out = [];
   append(out, ["// Code generated by tools/gogen/emit-go.mjs. DO NOT EDIT.", "", `package ${pkg}`, "", "import (",
     "\t\"math\"", "\t\"runtime/debug\"", "\t\"sort\"", "\t\"strings\"", "", "\t\"osg/gogen/abap\"", "\t\"osg/gogen/amc\"", "\u0000helper-imports"], (layers?.imports ?? []).map((p) => `\t. ${JSON.stringify(p)}`), [")", "", "var _ = math.Sin", "var _ = debug.Stack", "var _ = sort.Ints", "var _ strings.Builder", "var _ = abap.AddI", "var _ = amc.Current", "var _ = hHostclass.ZCL_OSD_ENQ_KERNEL", ""]);
   if (layers?.marker) out.push(`type ${layers.marker} struct{}`, "");
@@ -347,7 +347,7 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
     for (const f of st.fields) out.push(`\t${ident(f.name)} ${goType(f.type)}`);
     out.push("}", "");
   }
-  append(out, localConstantDeclarations(consts, {type: goType, literal: constLiteral}));
+  append(out, (/** @type {import("./emit-go-types.ts").LocalConstantDeclarations} */ (localConstantDeclarations))(consts, {type: goType, literal: constLiteral}));
   if (consts.size > 0) out.push("");
   // interfaces used as reference types, and classes referred to but not compiled
   for (const [name, sigs] of program.interfaceMethods ?? []) {
@@ -447,12 +447,12 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   append(out, exceptionSupers(program));
-  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF"))) append(out, objectRttiGo(program, {goType, ident}));
+  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
   append(out, hostRaiseGlue(program, classes, layers));
   if (!layers) append(out, dispatcher(classes));
   append(out, staticRegistry(program, classes));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_NAME"))) append(out, nativeRtti(program));
-  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, nativeMessageText(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
+  if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_GET_TEXT_FOR_MESSAGE"))) append(out, (/** @type {import("./emit-go-types.ts").NativeMessageText} */ (nativeMessageText))(program, {goType, ident, classes: CLASSES, poly: POLY, ancestorsOf}));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_DESCRIBE_BY_DATA"))) append(out, nativeRttiData(program));
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_JSON_PARSE"))) append(out, nativeJsonParse());
   if (classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === "Native_AJSON_ENCODE"))) {
@@ -485,10 +485,10 @@ export function emitGo(program, pkg = "main", layers = null, unitBuild = false, 
  * (mv_js_encoding: utf8 or utf16le / utf-16le). The work is abap.EncodeText /
  * abap.DecodeText; N and bytes that are no valid text are refused, not guessed.
  */
-function nativeCodepage(classes) {
-  const out = [];
-  const has = (fn) => classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === fn));
-  const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.name === p);
+/** @param {readonly import("./emit-go-types.ts").Class[]} classes @returns {string[]} */ function nativeCodepage(classes) {
+  /** @type {string[]} */ const out = [];
+  /** @param {string} fn @returns {boolean} */ const has = (fn) => classes.some((c) => c.methods.some((m) => m.body?.[0]?.fn === fn));
+  /** @param {string} cls @param {string} meth @param {string} p @returns {boolean | undefined} */ const sup = (cls, meth, p) => classes.find((c) => c.name === cls)?.methods.find((m) => m.name === meth)?.params.some((x) => x.name === p);
   if (has("Native_CONV_OUT_CONVERT")) {
     const withSup = sup("CL_ABAP_CONV_OUT_CE", "CONVERT", "SUP_N");
     append(out, [`func Native_CONV_OUT_CONVERT(s *abap.Session, me *CL_ABAP_CONV_OUT_CE, data string, n int32, buffer *string${withSup ? ", sup_n string" : ""}) {`], withSup ? ["\tif sup_n != \"\" {", "\t\tdata = abap.SubS(data, 0, n)", "\t}"] : ["\tif n != 0 {", `\t\tpanic(abap.NotCompiled("CL_ABAP_CONV_OUT_CE=>CONVERT", "N given"))`, "\t}"], [`\t*buffer = abap.EncodeText(me.${ident("MV_JS_ENCODING")}, data)`, "}", ""]);
@@ -509,16 +509,16 @@ function nativeCodepage(classes) {
  * superclasses below). INTO receives the object itself, or, for a CATCH
  * that also covers runtime exceptions, an exception value.
  */
-function catchCond(c) {
+/** @param {import("./emit-go-types.ts").Catch} c @returns {string} */ function catchCond(c) {
   const rt = c.covers.map((x) => `xE.Class == ${JSON.stringify(x)}`);
   const own = c.own.map((x) => `abap.IsA(xRX.Class, ${JSON.stringify(x)})`);
-  const parts = [];
+  /** @type {string[]} */ const parts = [];
   if (rt.length) parts.push(`(xOK && (${rt.join(" || ")}))`);
   if (own.length) parts.push(`(xROK && (${own.join(" || ")}))`);
   return parts.length ? parts.join(" || ") : "false";
 }
 
-function catchInto(c, t, ctx) {
+/** @param {import("./emit-go-types.ts").Catch} c @param {string} t @param {import("./emit-go-types.ts").Context} ctx @returns {string[]} */ function catchInto(c, t, ctx) {
   if (!c.into) return [];
   // a local, or an attribute of the class (a report's global data)
   const v = c.intoPlace ? place(c.intoPlace, ctx) : ident(c.into);
@@ -526,7 +526,7 @@ function catchInto(c, t, ctx) {
   return [`${t}\t\t\t\t${v} = abap.CaughtException(xR)`];
 }
 
-function exceptionSupers(program) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @returns {string[]} */ function exceptionSupers(program) {
   const m = Object.entries(program.exceptionSupers ?? {}).sort(([a], [b]) => a.localeCompare(b));
   if (m.length === 0) return [];
   return ["func init() {", "\tabap.RegisterSupers(map[string]string{", ...m.map(([k, v]) => `\t\t${JSON.stringify(k)}: ${JSON.stringify(v)},`), "\t})", "}", ""];
@@ -540,7 +540,7 @@ function exceptionSupers(program) {
  * registry has that is not a structure (a class, a data element) dumps; a
  * name nobody has is TYPE_NOT_FOUND, as on a system.
  */
-function nativeRtti(program) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @returns {string[]} */ function nativeRtti(program) {
   const sd = CLASSES.get("CL_ABAP_STRUCTDESCR");
   const ed = CLASSES.get("CL_ABAP_ELEMDESCR");
   const comp = sd?.attributes.find((a) => a.name === "MT_REFS_COMP");
@@ -549,8 +549,8 @@ function nativeRtti(program) {
   if (!sd || !ed || !comp || comp.unsupported || sd.abstract || ed.abstract) {
     return [head, `\tpanic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "RTTI needs CL_ABAP_STRUCTDESCR and CL_ABAP_ELEMDESCR compiled"))`, "}", ""];
   }
-  const has = (cls, a) => [cls, ...ancestorsOf(cls)].some((c) => c.attributes?.some((x) => x.name === a && !x.unsupported && !x.static));
-  const set = (cls, v, a, val) => (has(cls, a) ? [`\t${v}.${ident(a)} = ${val}`] : []);
+  /** @param {import("./emit-go-types.ts").Class} cls @param {string} a @returns {boolean} */ const has = (cls, a) => [cls, ...ancestorsOf(cls)].some((c) => c.attributes?.some((x) => x.name === a && !x.unsupported && !x.static));
+  /** @param {import("./emit-go-types.ts").Class} cls @param {string} v @param {string} a @param {string} val @returns {string[]} */ const set = (cls, v, a, val) => (has(cls, a) ? [`\t${v}.${ident(a)} = ${val}`] : []);
   const out = ["// the structures RTTI can describe: name -> components (name, type kind)", "var rttiStructs = map[string][][2]string{"];
   for (const [n, cs] of [...program.rtti.structs].sort()) out.push(`\t${JSON.stringify(n)}: {${cs.map((c) => `{${JSON.stringify(c.name)}, ${JSON.stringify(c.kind)}}`).join(", ")}},`);
   append(out, ["}", "", "var rttiKnown = map[string]bool{"], [...program.rtti.known].sort().map((n) => `\t${JSON.stringify(n)}: true,`), ["}", ""]);
@@ -582,22 +582,22 @@ function nativeRtti(program) {
  * output length of a p that comes from the dictionary, a structure's length,
  * a table type's name and its key. A reference or an object is refused.
  */
-function nativeRttiData(program) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @returns {string[]} */ function nativeRttiData(program) {
   const td = CLASSES.get("CL_ABAP_TYPEDESCR");
   const ed = CLASSES.get("CL_ABAP_ELEMDESCR");
   const sd = CLASSES.get("CL_ABAP_STRUCTDESCR");
   const tb = CLASSES.get("CL_ABAP_TABLEDESCR");
   const ret = goType({k: "ref", name: "CL_ABAP_TYPEDESCR"});
   const head = `func Native_DESCRIBE_BY_DATA(s *abap.Session, p_data abap.Data) ${ret} {`;
-  const attr = (cls, a) => [cls, ...ancestorsOf(cls)].flatMap((c) => c.attributes ?? []).find((x) => x.name === a && !x.unsupported && !x.static);
-  const need = [[ed, "OUTPUT_LENGTH"], [sd, "MT_REFS"], [sd, "MT_REFS_COMP"], [sd, "COMPONENTS"], [tb, "MO_LINE_TYPE"], [tb, "TABLE_KIND"], [tb, "HAS_UNIQUE_KEY"],
+  /** @param {import("./emit-go-types.ts").Class} cls @param {string} a @returns {import("./emit-go-types.ts").Attribute | undefined} */ const attr = (cls, a) => [cls, ...ancestorsOf(cls)].flatMap((c) => c.attributes ?? []).find((x) => x.name === a && !x.unsupported && !x.static);
+  /** @type {[import("./emit-go-types.ts").Class | undefined, string][]} */ const need = [[ed, "OUTPUT_LENGTH"], [sd, "MT_REFS"], [sd, "MT_REFS_COMP"], [sd, "COMPONENTS"], [tb, "MO_LINE_TYPE"], [tb, "TABLE_KIND"], [tb, "HAS_UNIQUE_KEY"],
     [td, "KIND"], [td, "TYPE_KIND"], [td, "LENGTH"], [td, "DECIMALS"], [td, "ABSOLUTE_NAME"], [td, "RELATIVE_NAME"], [td, "DDIC"]];
   const missing = [td, ed, sd, tb].some((c) => !c || c.abstract) ? "the RTTI classes" : need.filter(([c, a]) => !attr(c, a)).map(([c, a]) => `${c.name}-${a}`).join(", ");
   if (missing) return [head, `\tpanic(abap.NotCompiled("CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", ${JSON.stringify(`RTTI needs ${missing} compiled`)}))`, "}", ""];
   const refRow = attr(sd, "MT_REFS").type.row.go;
   const compRow = attr(sd, "COMPONENTS").type.row.go;
   const dataRef = goType(attr(sd, "MT_REFS").type.row.k === "struct" ? STRUCTDEFS.get(refRow).fields.find((f) => f.name === "TYPE").type : null);
-  const f = (a) => ident(a);
+  /** @param {string} a @returns {string} */ const f = (a) => ident(a);
   return [
     // parity-wave1: the output lengths of the data elements the program's
     // components are typed with (frontend ddicOutputLength)
@@ -712,7 +712,7 @@ function nativeRttiData(program) {
  * text that is not JSON raises CX_SXML_PARSE_ERROR (XML_OFFSET 0, see
  * go/abap/jsonparse.go) (ultra/json)
  */
-function nativeJsonParse() {
+/**  @returns {string[]} */ function nativeJsonParse() {
   const head = "func Native_JSON_PARSE(s *abap.Session, iv_json string, it_nodes abap.Data) {";
   const cx = CLASSES.get("CX_SXML_PARSE_ERROR");
   const ctor = cx?.constructor?.params ?? cx?.ctorParams;
@@ -728,19 +728,19 @@ function nativeJsonParse() {
  * its arguments out of generic data by name. A class the registry has but the
  * program did not compile dumps instead of passing for an unknown one.
  */
-function staticRegistry(program, classes) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {readonly import("./emit-go-types.ts").Class[]} classes @returns {string[]} */ function staticRegistry(program, classes) {
   const wanted = program.dynStatics ?? new Set();
   if (wanted.size === 0) return [];
   const out = ["func init() {", `\tabap.KnownClasses(${goStrings(classes.map((c) => c.name))}, ${goStrings([...(program.rtti?.known ?? [])].filter((n) => !n.includes("=>")))})`];
   for (const cls of classes) {
     for (const m of [...cls.methods, ...(cls.stubs ?? [])]) {
       if (!m.static || !wanted.has(m.name) || !definable(program, m)) continue;
-      const lines = [];
+      /** @type {string[]} */ const lines = [];
       const args = m.params.map((p, i) => {
         const v = `v${i}`;
         if (p.dir !== "importing") { lines.push(`\t\t${v} := new(${goType(p.type)})`); return v; }
         if (p.suppliedOf) { lines.push(`\t\t${v} := ""`, `\t\tif _, ok := a[${JSON.stringify(p.suppliedOf)}]; ok {`, `\t\t\t${v} = "X"`, `\t\t}`); return v; }
-        const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
+        /** @param {string} d @returns {string} */ const read = (d) => (["i", "string", "c", "d", "t"].includes(p.type.k) ? unwrapTo(p.type, d)
           : p.type.k === "data" ? d : byRef(p) ? `${d}.P.(*${goType(p.type)})` : `*${d}.P.(*${goType(p.type)})`);
         const absent = p.optional && p.default === undefined ? zero(p.type)
           : `func() ${byRef(p) ? "*" : ""}${goType(p.type)} { panic(abap.ArithmeticError{Class: "CX_SY_DYN_CALL_PARAM_MISSING", Op: ${JSON.stringify(`${cls.name}=>${m.name} ${p.name}`)}}) }()`;
@@ -755,10 +755,10 @@ function staticRegistry(program, classes) {
   return out;
 }
 
-const goStrings = (xs) => `[]string{${xs.map((x) => JSON.stringify(x)).join(", ")}}`;
+/** @param {readonly string[]} xs @returns {string} */ const goStrings = (xs) => `[]string{${xs.map((x) => JSON.stringify(x)).join(", ")}}`;
 
-function ancestorsOf(cls) {
-  const out = [];
+/** @param {import("./emit-go-types.ts").Class} cls @returns {import("./emit-go-types.ts").Class[]} */ function ancestorsOf(cls) {
+  /** @type {import("./emit-go-types.ts").Class[]} */ const out = [];
   for (let c = cls; c.super && CLASSES.has(c.super);) { c = CLASSES.get(c.super); out.push(c); }
   return out;
 }
@@ -770,7 +770,7 @@ function ancestorsOf(cls) {
  * object (its attributes) and keeps an unrelated class with the same methods
  * from fitting.
  */
-function classInterface(program, cls) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {import("./emit-go-types.ts").Class} cls @returns {string[]} */ function classInterface(program, cls) {
   const T = typeName(cls.name);
   const out = [`type I_${T} interface {`];
   if (cls.super && POLY.has(cls.super)) out.push(`\tI_${typeName(cls.super)}`);
@@ -792,14 +792,14 @@ function classInterface(program, cls) {
  * object's own field, and every class that implements the interface gives
  * it. A read is *p, a write *p = v; both reach the object.
  */
-const accessorName = (attr) => `Ptr_${typeName(attr)}`;
+/** @param {string} attr @returns {string} */ const accessorName = (attr) => `Ptr_${typeName(attr)}`;
 
 // Exported methods have the same identity in every Go package. The Greek
 // letter cannot come from an ABAP name: ident() and typeName() emit ASCII
 // only, so no user method/accessor can collide with this generated marker.
-const interfaceMarker = (intf) => `AbapΩImplements_${typeName(intf)}`;
+/** @param {string} intf @returns {string} */ const interfaceMarker = (intf) => `AbapΩImplements_${typeName(intf)}`;
 
-function implementedInterfaces(program, cls) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {import("./emit-go-types.ts").Class} cls @returns {Set<string>} */ function implementedInterfaces(program, cls) {
   const out = new Set();
   for (const c of [cls, ...ancestorsOf(cls)]) {
     for (const intf of c.interfaces ?? []) {
@@ -810,7 +810,7 @@ function implementedInterfaces(program, cls) {
   return out;
 }
 
-function componentInterfaces(reg, intf, seen = new Set()) {
+/** @param {import("./ir.ts").Program["reg"] | undefined} reg @param {string} intf @param {Set<string>} [seen] @returns {string[]} */ function componentInterfaces(reg, intf, seen = new Set()) {
   for (const c of reg?.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
     const name = String(c.name).toUpperCase();
     if (!seen.has(name)) { seen.add(name); componentInterfaces(reg, name, seen); }
@@ -818,19 +818,19 @@ function componentInterfaces(reg, intf, seen = new Set()) {
   return [...seen];
 }
 
-function intfAccessors(program, intf) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {string} intf @returns {string[]} */ function intfAccessors(program, intf) {
   return (program.interfaceAttrs?.get(intf) ?? []).filter((a) => !a.static && !a.unsupported && definable(program, {params: [{type: a.type}]}))
     .map((a) => `\t${accessorName(a.name)}() *${goType(a.type)}`);
 }
 
-function attrAccessors(cls, inst) {
-  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &${exceptionClass(cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(a.name)})` : "me"}.${ident(a.name)} }`);
+/** @param {import("./emit-go-types.ts").Class} cls @param {readonly import("./emit-go-types.ts").Attribute[]} inst @returns {string[]} */ function attrAccessors(cls, inst) {
+  const out = inst.filter((a) => a.fromIntf).map((a) => `func (me *${typeName(cls.name)}) ${accessorName(a.name)}() *${goType(a.type)} { return &${(/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(a.name)})` : "me"}.${ident(a.name)} }`);
   return out.length ? [...out, ""] : [];
 }
 
 /** a signature whose every type is declared in this program */
-export function definable(program, m) {
-  const ok = (t) => {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {import("./emit-go-types.ts").Signature} m @returns {boolean} */ export function definable(program, m) {
+  /** @param {import("./emit-go-types.ts").Type | undefined} t @returns {boolean} */ const ok = (t) => {
     if (!t) return true;
     if (t.k === "struct") return program.structs.has(t.go);
     if (t.k === "table") return ok(t.row);
@@ -840,9 +840,9 @@ export function definable(program, m) {
   return m.params.every((p) => ok(p.type)) && ok(m.returning?.type);
 }
 
-export function referencedClasses(program) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @returns {Set<string>} */ export function referencedClasses(program) {
   const seen = new Set();
-  const visit = (t) => {
+  /** @param {import("./emit-go-types.ts").Type | undefined} t @returns {void} */ const visit = (t) => {
     if (!t) return;
     if (t.k === "ref" && !t.intf) seen.add(t.name);
     if (t.k === "table") visit(t.row);
@@ -859,19 +859,19 @@ export function referencedClasses(program) {
 }
 
 /** the bytes of an x literal written as hex text, padded or cut to its length */
-export function hexBytes(text, len) {
+/** @param {string} text @param {number} [len] @returns {number[]} */ export function hexBytes(text, len) {
   const b = (String(text).match(/[0-9a-fA-F]{2}/g) ?? []).map((h) => parseInt(h, 16));
   if (len === undefined) return b;
   return b.length >= len ? b.slice(0, len) : [...b, ...new Array(len - b.length).fill(0)];
 }
 
-function constLiteral(c) {
-  const hoisted = localConstant(c, {fields: STRUCTDEFS, expr, zero, ident, struct: (t, v) => `${t.go}{${v}}`});
+/** @param {import("./emit-go-types.ts").Constant} c @returns {string} */ function constLiteral(c) {
+  const hoisted = (/** @type {import("./emit-go-types.ts").LocalConstant} */ (localConstant))(c, {fields: STRUCTDEFS, expr, zero, ident, struct: (t, v) => `${t.go}{${v}}`});
   if (hoisted !== undefined) return hoisted;
   // a structured constant: its components, an unset one initial
   if (c.type.k === "struct") {
     const fields = STRUCTDEFS.get(c.type.go)?.fields ?? [];
-    return `${c.type.go}{${fields.map((f) => `${ident(f.name)}: ${c.value[f.name] === undefined ? zero(f.type) : constLiteral({type: f.type, value: c.value[f.name]})}`).join(", ")}}`;
+    return `${c.type.go}{${fields.map((f) => `${ident(f.name)}: ${(/** @type {Readonly<Record<string, import("./emit-go-types.ts").LiteralValue>>} */ (c.value))[f.name] === undefined ? zero(f.type) : constLiteral({type: f.type, value: (/** @type {Readonly<Record<string, import("./emit-go-types.ts").LiteralValue>>} */ (c.value))[f.name]})}`).join(", ")}}`;
   }
   if (c.type.k === "i") return String(Number(c.value));
   // int8: the digits as written, a JS number would round 9223372036854775807
@@ -883,7 +883,7 @@ function constLiteral(c) {
   throw new Error(`constant of type ${c.type.k}`);
 }
 
-function signature(cls, m, inInterface = false) {
+/** @param {import("./emit-go-types.ts").ClassName} cls @param {import("./ir.ts").Method} m @param {boolean} [inInterface] @returns {string} */ function signature(cls, m, inInterface = false) {
   const params = ["s *abap.Session", ...m.params.map((p) => `${ident(p.name)} ${p.dir === "importing" && !byRef(p) ? "" : "*"}${goType(p.type)}`)];
   const ret = m.returning ? ` (${ident(m.returning.name)} ${goType(m.returning.type)})` : "";
   if (inInterface) return `${typeName(m.name)}(${params.join(", ")})${ret}`;
@@ -900,12 +900,12 @@ function signature(cls, m, inInterface = false) {
  * The receiver is reached by its method alone, so the Go runtime needs none
  * of the generated types.
  */
-function amcGlue(program) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @returns {string[]} */ function amcGlue(program) {
   const channels = (program.amcChannels ?? []).map((c) => {
     const auth = (c.authorities ?? []).map((a) => `{Path: ${JSON.stringify(a.path ?? "")}, Program: ${JSON.stringify(a.program ?? "")}, Activity: ${JSON.stringify(a.activity ?? "")}}`);
     return `\t\tamc.Channel{App: ${JSON.stringify(c.applicationId)}, Path: ${JSON.stringify(c.path)}, Type: ${JSON.stringify(c.type)}, Scope: ${JSON.stringify(c.scope ?? "")}, Auth: []amc.Authority{${auth.join(", ")}}},`;
   });
-  const cases = [];
+  /** @type {string[]} */ const cases = [];
   for (const [type, intf] of [["TEXT", "IF_AMC_MESSAGE_RECEIVER_TEXT"], ["BINARY", "IF_AMC_MESSAGE_RECEIVER_BINARY"], ["PCP", "IF_AMC_MESSAGE_RECEIVER_PCP"]]) {
     // the receiver interfaces are rarely used as reference types, so their
     // RECEIVE is read off a class that implements it
