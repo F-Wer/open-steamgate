@@ -1036,7 +1036,7 @@ function callFunction(node, ctx, text) {
   // host function like NATIVE_FM, reached only through its destination
   const viaDest = dest === undefined ? undefined : DESTINATION_FM.get(`${upper(dest)} ${name}`);
   const fm = viaDest ?? (dest === undefined ? NATIVE_FM.get(name) : undefined);
-  if (fm === undefined && dest === undefined && ctx.program.functionModules?.has(name)) return compiledFunctionCall(node, ctx, text, name);
+  if (fm === undefined && dest === undefined && resolvedFunctionModule(ctx, name)) return compiledFunctionCall(node, ctx, text, name);
   if (fm === undefined && dest !== undefined) throw new Unsupported(`CALL FUNCTION '${name}' DESTINATION '${dest}': no host implementation of this destination`);
   if (fm === undefined) throw new Unsupported(`CALL FUNCTION '${name}': no host implementation of this function module`);
   if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND)\b/i.test(text) || (viaDest === undefined && /\bDESTINATION\b/i.test(text))) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);

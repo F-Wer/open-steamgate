@@ -144,6 +144,34 @@ test("macro-expanded CALL FUNCTION records lowering ownership and signature DDIC
   assert.notEqual(emitGo(p), emitGo(build()), "signature edit changes cold output");
 });
 
+test("macro-expanded missing CALL FUNCTION records a consumer miss before the module is added", () => {
+  const c = syntheticCorpus({classes: 4});
+  c.files["zcl_a.clas.abap"] = classSource("zcl_a", "invoke 'ZORACLE_FUNCTION'.");
+  c.files["zcl_a.clas.macros.abap"] = "DEFINE invoke. CALL FUNCTION &1 EXPORTING iv_value = 7 IMPORTING ev_value = rv. END-OF-DEFINITION.";
+  const moduleFile = "zoracle_group.fugr.zoracle_function.abap";
+  const originalXml = c.files["zoracle_group.fugr.xml"], originalModule = c.files[moduleFile];
+  c.files["zoracle_group.fugr.xml"] = originalXml.replaceAll("ZORACLE_FUNCTION", "ZOTHER");
+  delete c.files[moduleFile];
+  c.files["zoracle_group.fugr.zother.abap"] = originalModule.replaceAll("zoracle_function", "zother");
+  const build = () => recordProvenance(() => {
+    const reg = registry(c.files); reg.parse();
+    return compileProgram({registry: reg, folders: [], objects: ["ZCL_A", "ZORACLE_GROUP"], tolerant: true});
+  });
+  const query = (q) => q.artifact === "CLAS ZCL_A" && q.phase === "lowering"
+    && q.kind === "function-module-owner" && q.args[0] === "ZORACLE_FUNCTION";
+  const before = build();
+  assert.ok(JSON.stringify([before.skipped, before.partial]).includes("no host implementation"), JSON.stringify([before.skipped, before.partial]));
+  assert.ok(provenanceOf(before).get("CLAS ZCL_A").misses.some(query), "consumer ownership MISS");
+  c.files["zoracle_group.fugr.xml"] = originalXml;
+  delete c.files["zoracle_group.fugr.zother.abap"];
+  c.files[moduleFile] = originalModule;
+  const after = build(), manifest = provenanceOf(after).get("CLAS ZCL_A");
+  assert.ok(!JSON.stringify([after.skipped, after.partial]).includes("no host implementation"));
+  assert.ok(JSON.stringify(after.classes.find((cls) => cls.name === "ZCL_A")).includes('"s":"call"'));
+  assert.ok(manifest.hits.some((q) => query(q) && q.result.includes("FUGR ZORACLE_GROUP")), "consumer ownership HIT");
+  assert.ok(!manifest.misses.some(query));
+});
+
 test("selection queries add edges and belong to their consumer", () => {
   const c = syntheticCorpus({classes: 4}), reg = registry(c.files);
   recordProvenance(() => {
