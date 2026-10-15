@@ -1,6 +1,7 @@
+import {Expressions, Unsupported, upper, I, F, P31, S, XS, numeric} from "./frontend-base.mjs";
 // Overloaded numeric built-ins, with explicit result types for both emitters.
 export function builtin(name, direct, named, ctx, api, calc) {
-  const {FUNCTIONS, Expressions, source, convert, Unsupported, upper, I, F, P31, S, XS, numeric} = api;
+  const {FUNCTIONS, source, convert} = api;
   const kind = FUNCTIONS[name];
   if (name === "BOOLX") {
     const params = named?.findDirectExpressions(Expressions.ParameterS) ?? [];

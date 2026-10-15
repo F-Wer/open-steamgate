@@ -6,17 +6,17 @@ import {parseSamc} from "../osd-samc.ts";
 import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
 const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
-const abaplint = transpilerRequire("@abaplint/core");
+/** @type {typeof import("@abaplint/core")} */ const abaplint = transpilerRequire("@abaplint/core");
 const {Expressions, ExpressionsCDS, Nodes} = abaplint;
 
-const trees = new WeakMap();
-const inlineTables = new WeakMap();
-export function rearrangedClass(node, Rearranger) {
+/** @type {WeakMap<import("@abaplint/core").Nodes.StructureNode, import("@abaplint/core").Nodes.StructureNode | undefined>} */ const trees = new WeakMap();
+/** @type {WeakMap<import("@abaplint/core").Nodes.StructureNode, Set<string>>} */ const inlineTables = new WeakMap();
+/** @param {import("@abaplint/core").Nodes.StructureNode} node @param {typeof import("@abaplint/transpiler/build/src/rearranger.js").Rearranger} Rearranger */ export function rearrangedClass(node, Rearranger) {
   if (!trees.has(node)) trees.set(node, new Rearranger().run("CLAS", node));
   return trees.get(node);
 }
 
-export function inlineTableLocals(body) {
+/** @param {import("@abaplint/core").Nodes.StructureNode | undefined} body @returns {Set<string>} */ export function inlineTableLocals(body) {
   if (!body) return new Set();
   if (!inlineTables.has(body)) {
     const names = new Set();
@@ -51,7 +51,7 @@ export function samcOf(folders) {
 
 // Keep failures out of the serializable map and defer them until SQL uses a
 // view. The map belongs to the registry, including reused registry compiles.
-const cdsFailures = new WeakMap();
+/** @type {WeakMap<Record<string, string>, Map<string, string>>} */ const cdsFailures = new WeakMap();
 const cdsObservers = new WeakMap();
 // Registry/provenance hooks are injected so these analyses stay source-only.
 export const bindCdsRegistry = (views, observe) => { if (views) cdsObservers.set(views, observe); };
@@ -70,7 +70,7 @@ function sqlViewName(annotations) {
 }
 
 // A CDS view entity has no SQL view name and is left out.
-export function cdsSqlViews(sources) {
+/** @param {readonly (string | {filename: string; source: string})[]} sources */ export function cdsSqlViews(sources) {
   const out = {};
   const failures = new Map();
   cdsFailures.set(out, failures);
@@ -87,7 +87,7 @@ export function cdsSqlViews(sources) {
     const obj = reg.getFirstObject();
     // Pinned core's getSQLViewName() searches raw text and includes comments.
     // Its parsed CDS annotations exclude comments and expose the string token.
-    const tree = obj?.getTree();
+    /** @type {import("@abaplint/core").Nodes.ExpressionNode | undefined} */ const tree = obj?.getTree();
     if (!tree) {
       const message = `${filename}: DDLS view mapping could not be read`;
       // Without a tree there is no definition or SQL view name to read; the

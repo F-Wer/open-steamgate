@@ -91,7 +91,7 @@ export type Expr = ExprMetadata & (
   | { readonly e: 'ev_arg'; readonly name: string; readonly type: Type }
   | { readonly e: 'ev_handler'; readonly type: Type }
   | { readonly e: 'table_lit'; readonly rows: readonly Expr[]; readonly type: Type }
-  | { readonly e: 'sorted_move'; readonly x: Expr; readonly keys: readonly string[]; readonly unique: boolean; readonly type: Type }
+  | { readonly e: 'sorted_move'; readonly x: Expr; readonly keys: readonly string[]; readonly unique: boolean | undefined; readonly type: Type }
   | { readonly e: 'template'; readonly parts: readonly TemplatePart[]; readonly type: Type }
   | { readonly e: 'exc_ref' | 'exc_previous'; readonly x: Expr; readonly type: Type }
   | { readonly e: 'exc_text'; readonly x: Expr; readonly type: Type }
@@ -151,8 +151,8 @@ export type Stmt =
   | { readonly s: 'describe_kind'; readonly x: Expr; readonly target: Expr }
   | { readonly s: 'shift_places'; readonly target: Expr; readonly amount: Expr; readonly left: boolean; readonly circular: boolean }
   | { readonly s: 'shift_left_circ_bytes'; readonly target: Expr }
-  | { readonly s: 'shift_left_leading'; readonly target: Expr; readonly mask: Expr; readonly maskLen: number }
-  | { readonly s: 'shift_right_trailing'; readonly target: Expr; readonly mask: Expr; readonly maskLen: number }
+  | { readonly s: 'shift_left_leading'; readonly target: Expr; readonly mask: Expr; readonly maskLen: number | undefined }
+  | { readonly s: 'shift_right_trailing'; readonly target: Expr; readonly mask: Expr; readonly maskLen: number | undefined }
   | ConcatBytesParts
   | ConcatBytesTable
   | { readonly s: 'condense'; readonly target: Expr; readonly noGaps: boolean }
@@ -313,7 +313,7 @@ export interface ResolvedKey { readonly name: string; readonly unique: boolean; 
 export interface TemplateOptions { readonly decimals?: number; readonly raw?: boolean; readonly width?: number; readonly align?: string; readonly pad?: string;
     // two absence values today: null at frontend.mjs:5998, omitted at 5968; phase 2 normalises
     readonly pdec?: number | null }
-export type TemplatePart = {readonly text: string} | {readonly value: Expr; readonly opts: TemplateOptions};
+export type TemplatePart = {readonly text: string; readonly value?: undefined; readonly opts?: undefined} | {readonly text?: undefined; readonly value: Expr; readonly opts: TemplateOptions};
 export interface Catch { readonly classes: readonly string[]; readonly into: string | null; readonly intoPlace?: Expr; readonly intoKind: 'exc' | 'ref' | null; readonly intoType: Type | null; readonly covers: readonly string[]; readonly own: readonly string[]; readonly body: readonly Stmt[] }
 export interface SqlColumn { readonly name: string; readonly type: Type; readonly sql?: string; readonly named?: boolean; readonly agg?: {readonly star: true} | {readonly fn: string; readonly col: string} }
 export interface SqlAssignment { readonly line?: boolean; readonly field?: string; readonly type: Type }

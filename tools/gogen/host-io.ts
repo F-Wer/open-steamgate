@@ -69,3 +69,6 @@ export function gitHead(cwd: string): string | undefined {
 export function env(name: string): string | undefined {
   return process.env[name];
 }
+
+// Pure adapter shape; no Node Dirent crosses the compiler host boundary.
+export interface DirectoryEntry { name: string; isDirectory: () => boolean }

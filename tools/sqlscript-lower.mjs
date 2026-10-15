@@ -63,7 +63,7 @@ export const DIALECTS = {
     divide: (a, b) => `(${a} / ${b})`,
     // and when the source asked for integer division, it says so
     intDiv: (a, b) => `DIV(${a}, ${b})`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     castInt: (e) => `CAST(${e} AS INTEGER)`,
@@ -71,10 +71,10 @@ export const DIALECTS = {
     castDec: (e, n, s) => `CAST(${e} AS DECIMAL(${n}, ${s}))`,
     // HANA's own, so they pass through -- they are the reference the two
     // renderings below were measured against
-    substrBefore: (s, x) => `SUBSTR_BEFORE(${s()}, ${x()})`,
-    substrAfter: (s, x) => `SUBSTR_AFTER(${s()}, ${x()})`,
-    toChar: (x) => `TO_NVARCHAR(${x()})`,
-    locate: (s, x) => `LOCATE(${s()}, ${x()})`,
+    substrBefore: /** @param {() => string} s @param {() => string} x */ (s, x) => `SUBSTR_BEFORE(${s()}, ${x()})`,
+    substrAfter: /** @param {() => string} s @param {() => string} x */ (s, x) => `SUBSTR_AFTER(${s()}, ${x()})`,
+    toChar: /** @param {() => string} x */ (x) => `TO_NVARCHAR(${x()})`,
+    locate: /** @param {() => string} s @param {() => string} x */ (s, x) => `LOCATE(${s()}, ${x()})`,
     // case-sensitive, which is the reference the other two are measured against
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     aggName: () => "STRING_AGG",
@@ -108,7 +108,7 @@ export const DIALECTS = {
     },
     divide: (a, b) => `(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC))`,
     intDiv: (a, b) => `CAST(TRUNC(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC)) AS INTEGER)`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s} FROM ${from}${len === undefined ? "" : ` FOR ${len}`})`,
     // PostgreSQL rounds some numeric-to-integer casts. SQLScript truncates
@@ -116,12 +116,12 @@ export const DIALECTS = {
     castInt: (e) => `CAST(TRUNC(CAST(${e} AS NUMERIC)) AS INTEGER)`,
     castChar: (e, n) => `SUBSTRING(CAST(${e} AS VARCHAR) FROM 1 FOR ${n})`,
     castDec: (e, n, s) => `CAST(${e} AS NUMERIC(${n}, ${s}))`,
-    substrBefore: (s, x) =>
+    substrBefore: /** @param {() => string} s @param {() => string} x */ (s, x) =>
       `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, strpos(${s()}, ${x()}) - 1) ELSE '' END`,
-    substrAfter: (s, x) =>
+    substrAfter: /** @param {() => string} s @param {() => string} x */ (s, x) =>
       `CASE WHEN strpos(${s()}, ${x()}) > 0 THEN substr(${s()}, strpos(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
-    toChar: (x) => `CAST(${x()} AS VARCHAR)`,
-    locate: (s, x) => `strpos(${s()}, ${x()})`,
+    toChar: /** @param {() => string} x */ (x) => `CAST(${x()} AS VARCHAR)`,
+    locate: /** @param {() => string} s @param {() => string} x */ (s, x) => `strpos(${s()}, ${x()})`,
     // PostgreSQL escapes with a backslash by default, which neither ABAP nor
     // the other engines do: 'a\\%' would mean a literal % there only. ESCAPE ''
     // switches it off, so a pattern means the same on every engine
@@ -148,7 +148,7 @@ export const DIALECTS = {
     guardZero: (divided, divisor) => `CASE WHEN (${divisor}) = 0 THEN error('division by zero') ELSE ${divided} END`,
     // `//` is the integer one, for when the source asked for it
     intDiv: (a, b) => `(${a} // ${b})`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     // It raises like HANA on a value that will not convert -- and ROUNDS
@@ -170,12 +170,12 @@ export const DIALECTS = {
     // a statement whose values are out of step with its `?`s, which no
     // engine catches. Calling the thunk once per occurrence pushes one value
     // per placeholder, in the order the text has them.
-    substrBefore: (s, x) =>
+    substrBefore: /** @param {() => string} s @param {() => string} x */ (s, x) =>
       `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, instr(${s()}, ${x()}) - 1) ELSE '' END`,
-    substrAfter: (s, x) =>
+    substrAfter: /** @param {() => string} s @param {() => string} x */ (s, x) =>
       `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, instr(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
-    toChar: (x) => `CAST(${x()} AS VARCHAR)`,
-    locate: (s, x) => `instr(${s()}, ${x()})`,
+    toChar: /** @param {() => string} x */ (x) => `CAST(${x()} AS VARCHAR)`,
+    locate: /** @param {() => string} s @param {() => string} x */ (s, x) => `instr(${s()}, ${x()})`,
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     aggName: () => "string_agg",
     dummy: "(SELECT 1) AS dummy",
@@ -210,7 +210,7 @@ export const DIALECTS = {
     // here where HANA raises, it is written down, and the conformance table
     // keeps measuring it.
     intDiv: (a, b) => `(${a} / ${b})`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTR(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     // SQLite's CAST never raises: 'x' becomes 0, which is a DIFFERENT
@@ -254,12 +254,12 @@ export const DIALECTS = {
     // a statement whose values are out of step with its `?`s, which no
     // engine catches. Calling the thunk once per occurrence pushes one value
     // per placeholder, in the order the text has them.
-    substrBefore: (s, x) =>
+    substrBefore: /** @param {() => string} s @param {() => string} x */ (s, x) =>
       `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, 1, instr(${s()}, ${x()}) - 1) ELSE '' END`,
-    substrAfter: (s, x) =>
+    substrAfter: /** @param {() => string} s @param {() => string} x */ (s, x) =>
       `CASE WHEN instr(${s()}, ${x()}) > 0 THEN substr(${s()}, instr(${s()}, ${x()}) + length(${x()})) ELSE '' END`,
-    toChar: (x) => `CAST(${x()} AS VARCHAR)`,
-    locate: (s, x) => `instr(${s()}, ${x()})`,
+    toChar: /** @param {() => string} x */ (x) => `CAST(${x()} AS VARCHAR)`,
+    locate: /** @param {() => string} s @param {() => string} x */ (s, x) => `instr(${s()}, ${x()})`,
     like: (e, p, esc, neg) => `(${e}${neg ? " NOT" : ""} LIKE ${p}${esc === undefined ? "" : ` ESCAPE ${esc}`})`,
     // SQLite calls it group_concat, and takes the ORDER BY inside it
     aggName: () => "group_concat",
@@ -307,7 +307,7 @@ export class Refused extends Error {}
 // v DESC gives 2,1,N). PostgreSQL and DuckDB put NULL last ascending by
 // default, so the placement is written out on every engine rather than
 // left to each one's default
-const orderKey = (d, k) => `${d.quote(k.col)} ${k.desc ? "DESC NULLS LAST" : "ASC NULLS FIRST"}`;
+/** @param {(typeof DIALECTS)[keyof typeof DIALECTS]} d @param {import("./sqlscript-types.ts").SqlOrder} k */ const orderKey = (d, k) => `${d.quote(k.col)} ${k.desc ? "DESC NULLS LAST" : "ASC NULLS FIRST"}`;
 
 export function lower(rel, dialectName, options = {}) {
   const d = DIALECTS[dialectName];
