@@ -3,6 +3,7 @@
 import {copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync} from "node:fs";
 import {dirname, join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
+import {assertTableFieldsTyped} from "./frontend-ddic.mjs";
 import {home} from "./home.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 
@@ -100,6 +101,7 @@ export function compileOsg() {
  */
 export async function osgDatabase(program) {
   const {DatabaseSetup} = await import(`${home}/node_modules/@abaplint/transpiler/build/src/db/index.js`);
+  assertTableFieldsTyped(program.reg);
   const setup = new DatabaseSetup(program.reg).run();
   process.env.OSD_ROOT ??= home;
   const {seedStatements} = await import(`${home}/test/seed.mjs`);

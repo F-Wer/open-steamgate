@@ -332,3 +332,16 @@ test("oracle 009 byte replacement expectations on IR-as-JS", async (t) => {
     assert.equal(m.ZCL_GOGEN_T_REPL009.PROBE({sy: {index: 0, subrc: 0}}, index + 1), want);
   });
 });
+
+
+test("unsupported attributes do not qualify for packed checksum emission", () => {
+  for (const supported of [false, true]) {
+    const program = compile("", "METHOD checksum. r = r + n. ENDMETHOD.",
+      "TYPES packed TYPE p LENGTH 16 DECIMALS 0. METHODS checksum IMPORTING VALUE(n) TYPE i RETURNING VALUE(r) TYPE packed.");
+    if (!supported) program.classes[0].attributes = [];
+    // classIr preserves the name/reason when it cannot lower an attribute.
+    program.classes[0].attributes.unshift({name: "UNSUPPORTED", unsupported: "unsupported attribute type"});
+    const go = emitGo(program);
+    assert.equal(go.includes("hPackedint.Add"), supported);
+  }
+});
