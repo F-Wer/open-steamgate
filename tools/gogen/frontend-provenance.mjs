@@ -69,7 +69,7 @@ class Recorder {
 
   // Repeated core lookups usually observe the same answer. Intern the scalar
   // tuple before allocating argument/result arrays, a row or its public key.
-  /** @param {import('./frontend-session-types.ts').RegistryState} state @param {string} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {string | undefined} result @returns {void} */ namedQuery(state, kind, args, result) {
+  /** @param {import('./frontend-session-types.ts').RegistryState} state @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {string | undefined} result @returns {void} */ namedQuery(state, kind, args, result) {
     const frame = this.current(state), owner = frame?.key;
     let node = frame?.named;
     if (!node) {
@@ -171,7 +171,7 @@ class Recorder {
     const entered = this.enterArtifact(reg, obj, phase);
     try { return run(); } finally { if (entered) this.leaveArtifact(); }
   }
-  /** @template T @param {string} kind @param {unknown[]} args @param {(frame: import('./frontend-session-types.ts').QueryContext) => T} run @returns {T} */ context(kind, args, run) {
+  /** @template T @param {import('./frontend-session-types.ts').Query['kind']} kind @param {unknown[]} args @param {(frame: import('./frontend-session-types.ts').QueryContext) => T} run @returns {T} */ context(kind, args, run) {
     const frame = {kind, args};
     this.contexts.push(frame);
     try { return run(frame); } finally { this.contexts.pop(); }
@@ -386,7 +386,7 @@ class Recorder {
 
 // Explicit, audited enumeration: these APIs classify a single call site, never
 // grant an exemption to other calls from the same file or an enclosing pass.
-/** @param {import('./frontend-session-types.ts').Registry} reg @param {string} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').Role} role @param {(obj: import('./frontend-session-types.ts').ArtifactObject) => boolean} predicate @returns {import('./frontend-session-types.ts').ArtifactObject[]} */ export function enumerateObjects(reg, kind, args = [], role = "scheduling", predicate = () => true) {
+/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').Role} role @param {(obj: import('./frontend-session-types.ts').ArtifactObject) => boolean} predicate @returns {import('./frontend-session-types.ts').ArtifactObject[]} */ export function enumerateObjects(reg, kind, args = [], role = "scheduling", predicate = () => true) {
   const objects = [...registryObjects.call(reg)].filter(predicate);
   if (active) {
     const state = active.state(reg);
@@ -395,7 +395,7 @@ class Recorder {
   }
   return objects;
 }
-/** @param {import('./frontend-session-types.ts').Registry} reg @param {string} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
+/** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
   if (active) active.query(active.state(reg), {kind, args, result, ...details});
 }
 /** @template T @param {import('./frontend-session-types.ts').Role} role @param {() => T} run @returns {T} */ export function withRole(role, run) {

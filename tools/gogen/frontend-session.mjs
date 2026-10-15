@@ -60,7 +60,7 @@ const effects = new Set(["skipped", "partial"]);
   return JSON.stringify([...program.supplied].filter(([k]) => k.startsWith(`${owner}=>`)).map(([k, v]) => [k, [...v]]));
 }
 
-export const compileClass = artifactLowering(/** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {import('./frontend-session-types.ts').ClassObject} obj @param {import('./frontend-session-types.ts').ClassLowering} lower @param {import('./frontend-session-types.ts').CacheSession | undefined} session @returns {import('./frontend-session-types.ts').ClassIR} */ function compileClass(ctx, obj, lower, session) {
+export const compileClass = artifactLowering(/** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {import('./frontend-session-types.ts').ClassObject} obj @param {import('./frontend-session-types.ts').ClassLowering} lower @param {import('./frontend-session-types.ts').CacheSession | null | undefined} session @returns {import('./frontend-session-types.ts').ClassIR} */ function compileClass(ctx, obj, lower, session) {
   const program = ctx.program;
   const counts = program.frontendCounts;
   const file = obj.getMainABAPFile();
@@ -85,7 +85,7 @@ export const compileClass = artifactLowering(/** @param {import('./frontend-sess
   // any lowering that changed shared program state; only diagnostics and
   // current-class context and elementary own-method signatures can be
   // replayed without changing naming/order.
-  /** @type {boolean | undefined} */ const candidate = session && !sensitiveSource.test(file.getRaw());
+  /** @type {boolean | null | undefined} */ const candidate = session && !sensitiveSource.test(file.getRaw());
   /** @type {import('./frontend-session-types.ts').ProgramSnapshot | undefined} */ const before = candidate ? snapshot(program) : undefined;
   const start = {skipped: program.skipped.length, partial: program.partial.length};
   /** @type {import('./frontend-session-types.ts').RecordedLowering | undefined} */ const recorded = session && !candidate && !/\bFOR\s+ALL\s+ENTRIES\b/i.test(file.getRaw()) ? recordLowering(program, (tracked) => lower({...ctx, program: tracked}, obj)) : undefined;

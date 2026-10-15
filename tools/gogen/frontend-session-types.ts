@@ -42,7 +42,7 @@ export interface ArtifactObject {
 // Local class adapters retain the owning core object beside their own getters.
 export interface ClassObject {
   getName(): string;
-  getMainABAPFile(): Core.ABAPFile;
+  getMainABAPFile(): Core.ABAPFile | undefined;
   obj?: ArtifactObject;
 }
 export type ArtifactInput = ArtifactObject | {obj: ArtifactObject};
@@ -93,19 +93,18 @@ export interface CacheSession {
   files: SourceFile[];
   classes: Map<string, SessionEntry>;
 }
-export type SessionInput = Partial<CacheSession> | undefined;
+export type SessionInput = Partial<CacheSession> | null | undefined;
 export interface CompileOptions {
   [key: string]: unknown;
   provenance?: boolean;
   cacheDir?: string;
   registry?: Registry;
-  session?: Partial<CacheSession>;
+  session?: Partial<CacheSession> | null;
 }
 export type Role = 'artifact' | 'scheduling' | 'final-output';
 // Hooks normalize strings and undefined, retaining other scalar answers.
 export type QueryScalar = string | number | boolean | null | undefined;
-export interface Query {
-  kind: string;
+export interface QueryBase {
   args: QueryScalar[];
   result: QueryScalar[];
   role?: Role;
@@ -119,7 +118,36 @@ export interface Query {
   queryArgs?: QueryScalar[];
   site?: string[];
 }
-export interface QueryRow extends Query {role: Role; phase: string; artifact: string}
+// Named semantic answers carry different payloads; keep their discriminants
+// through Recorder.query, stored rows and semanticQuery's partial details.
+export interface LockDescriptor {
+  name: string;
+  table: string;
+  key: string[];
+  fields: LockField[];
+}
+export interface RttiComponent {name: string; kind: string}
+export type ObservationKind =
+  | 'getObject' | 'getFileByName' | 'findObjectForFile' | 'getFirstObject'
+  | 'unknown-scan' | 'function-module-owner' | 'function-group-include'
+  | 'function-module-index' | 'badi-definition' | 'implicit-type-pool'
+  | 'implicit-type-pool-constant' | 'behavior-definition' | 'cds-alias'
+  | 'include-parent' | 'include-macro-context' | 'global-definitions'
+  | 'registry-inventory' | 'registry-parse' | 'registry-findIssues'
+  | 'registry-findIssuesObject' | 'registry-isDirty' | 'registry-getFiles'
+  | 'registry-getObjectCount' | 'registry-setConfig' | 'include-graph'
+  | 'supplied-index' | 'locals' | 'local-dispatch' | 'selected-groups'
+  | 'selected-classes' | 'ownership-dispatch' | 'table-inventory'
+  | 'lock-inventory' | 'rtti-inventory' | 'rtti' | 'exception-supers'
+  | 'tables' | 'locks';
+export type Query = QueryBase & (
+  | {kind: ObservationKind}
+  | {kind: 'supplied'; parameters: string[]}
+  | {kind: 'lock'; descriptor: LockDescriptor | 'MISSING'}
+  | {kind: 'ownershipSafety'; names: string[]; dynamic: boolean}
+  | {kind: 'rtti-owner'; known: string[]; structs: [string, RttiComponent[]][]}
+);
+export type QueryRow = Query & {role: Role; phase: string; artifact: string};
 export interface QueryEntry {queries: Map<string, QueryRow>; edges: Set<string>}
 // Leaves contain true; intermediate nodes are Maps indexed by scalar tuples.
 export interface QueryTrie extends Map<QueryScalar, QueryTrie | true> {}
