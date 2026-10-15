@@ -99,3 +99,8 @@ export interface FactoryMethod { name: string; params: readonly FrontendParam[];
 export type ConstantIdentifier = Pick<abaplint.TypedIdentifier, "getType" | "getValue">;
 
 export type ConstantInitializer = ValueExpr | {readonly e: "float"; readonly value: number; readonly type: Type};
+
+// Shared source-analysis contracts; parser implementations stay in abaplint.
+export interface OwnershipSource extends abaplint.IObject, Partial<Pick<abaplint.ABAPObject, 'getABAPFiles'>> {}
+export interface OwnershipSafety { readonly names: ReadonlySet<string>; readonly dynamic: boolean }
+export type OwnershipSafetyMap = ReadonlyMap<string, OwnershipSafety>;

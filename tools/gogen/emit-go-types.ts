@@ -2,6 +2,7 @@
 // Erasable contracts for emit-go.mjs. IR tags stay discriminated so the
 // emitter's existing switches narrow nodes without a runtime adapter.
 import type * as IR from './ir.ts';
+import type {OwnershipSafetyMap} from './frontend-types.ts';
 import type {Layers as SymbolLayers} from './symbols.ts';
 
 export type {Type, Field, Param, ResolvedKey, SqlColumn, WriteType, TemplateOptions} from './ir.ts';
@@ -20,9 +21,15 @@ export type CallExpr = RuntimeFields<Omit<RawCall, 'owner' | 'static' | 'callee'
   readonly static?: boolean;
   readonly callee?: string;
 };
-export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int'}>> | CallExpr
+// Ownership probes also synthesize substrings without the renderer's base hint.
+export interface SubstringExpr extends Omit<RuntimeFields<Extract<IR.Expr, {e: 'substr'}>>, 'base'> {
+  readonly base?: IR.Type;
+}
+export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'substr'}>> | CallExpr | SubstringExpr
   | {readonly e: 'int' | 'float'; readonly value: number; readonly type?: IR.Type};
-type StatementFields<T> = T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
+export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
+type StatementFields<T> = T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly fields?: readonly LockField[]}
+  : T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
   : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}
   : T extends {s: 'stub' | 'kernel_loop'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
   : T extends {s: 'call_dyn_static'} ? Omit<T, 'cls'> & {readonly cls: string | Expr}
@@ -126,11 +133,13 @@ export interface AmcChannel {
   readonly type: string;
   readonly authorities?: readonly {readonly path?: string; readonly program?: string; readonly activity?: string}[];
 }
-export interface FunctionModule extends Omit<IR.FunctionModule, 'sig'> {
+export interface FunctionModule extends Omit<IR.FunctionModule, 'sig' | 'module'> {
+  readonly module: Exclude<IR.FunctionModule['module'], IR.Method> | Method;
   readonly sig: Method | UnsupportedMethod;
 }
 export interface Program extends Omit<IR.Program, 'functionModules' | 'classes' | 'consts' | 'tables' | 'exceptionSupers' | 'reg' | 'structs' | 'interfaceAttrs' | 'intfOwnAttrs' | 'interfaceMethods' | 'sigs'> {
   readonly classes: readonly Class[];
+  readonly ownershipSafety?: OwnershipSafetyMap;
   readonly functionModules?: Map<string, FunctionModule>;
   readonly reg?: IR.Program['reg'];
   readonly structs: StructDefinitions;
@@ -175,9 +184,9 @@ export interface Descriptor { readonly name: string; readonly type: TableType | 
 export interface NamedDescriptor { readonly name: string; readonly text: string }
 export interface TryFrame { level: number; mode: 'body' | 'catch'; used: Set<number> }
 export interface SinkSite { locals: readonly Local[]; depth: number }
-export type SunkLocals = Map<readonly Stmt[], readonly Local[]>;
+export type SunkLocals<Body extends readonly object[] = readonly Stmt[]> = Map<Body, readonly Local[]>;
 export interface Context {
-  readonly cls: Partial<Class>;
+  readonly cls: Partial<Omit<Class, 'constructor'>>;
   loop?: number;
   inCtor?: boolean;
   method?: Partial<Method>;
@@ -226,7 +235,7 @@ export type EmitByteStatement = (st: ByteStatement, ctx: ByteContext, indent: st
 export type EmitBuiltinGo = (e: Builtin, args: readonly string[], names: ReadonlyMap<string, string>, imports: Set<string>) => string;
 export type EmitPackedInt8 = (e: Conversion, render: (e: Expr) => string, helper: RenderName) => string | null;
 export type EmitPackedComparison = (c: Condition, render: (e: Expr) => string) => string | null;
-export type ExceptionClass = (cls: Partial<Class> | null | undefined, classes: ReadonlyMap<string, Class>) => boolean;
+export type ExceptionClass = (cls: Partial<Pick<Class, 'name' | 'super'>> | null | undefined, classes: ReadonlyMap<string, Class>) => boolean;
 export interface RttiHelpers { readonly goType: RenderType; readonly ident: RenderName }
 export type ObjectRttiGo = (program: ProgramInput, helpers: RttiHelpers) => string[];
 export interface MessageHelpers extends RttiHelpers {

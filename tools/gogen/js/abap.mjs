@@ -1756,8 +1756,8 @@ export function FindResults(s, p, kind, icase, all) {
     for (const [r, what] of PCRE_REFUSED) if (r.test(plain)) notCompiled(`FIND PCRE: ${what} is not in Go's RE2: ${p}`);
     if (/\\u/.test(plain)) notCompiled("FIND PCRE: RE2 does not read this pattern (error parsing regexp: invalid escape sequence: `\\u`); whether PCRE does is not measured");
     if (/[\n\r]/.test(s) && /[\^$.]/.test(syntax)) notCompiled("FIND PCRE: a text with line ends: PCRE's ^ $ and . around them are not measured");
-    // Translate validated absolute anchors (\z rejects a final newline).
-    for (const [i, anchor] of anchors.reverse()) p = p.slice(0, i) + (anchor === "A" ? "^" : "(?![\\s\\S])") + p.slice(i + 2);
+    // Group anchors for quantifiers; $ fences scalar boundaries, and the guard rejects a final newline.
+    for (const [i, anchor] of anchors.reverse()) p = p.slice(0, i) + (anchor === "A" ? "(?:^)" : "(?:$(?![\\s\\S]))") + p.slice(i + 2);
     p = normalizePCREGenerics(p, icase, notCompiled);
     try { re = new RegExp(p, "gdu"); } catch { notCompiled(`FIND PCRE: the pattern does not compile here: ${p}`); }
   } else {

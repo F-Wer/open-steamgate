@@ -27,9 +27,14 @@ function unpack(file) {
   return deserialize(inflateRawSync(payload));
 }
 export function shadowCache(reg, root, namespace, portable) {
-  const dir = join(root, "v3", namespace), graphs = new Map();
+  // Namespace/tool identity and key/query indexes are needed only on a miss.
+  let namespaceValue, directory;
+  const namespaceOf = () => namespaceValue ??= typeof namespace === "function" ? namespace() : namespace;
+  const dir = () => directory ??= join(root, "v3", namespaceOf());
+  const graphs = new Map();
   let compute, stats;
-  const entryDir = (owner, name) => join(dir, hashV3([owner, name]));
+  const computer = (program) => compute ??= keyComputer(reg, namespaceOf(), program);
+  const entryDir = (owner, name) => join(dir(), hashV3([owner, name]));
   const index = (location) => {
     const keys = JSON.parse(readFileSync(join(location, "index.json"), "utf8"));
     if (!Array.isArray(keys) || keys.length > KEEP_CANDIDATES || keys.some((k) => !validHash(k))) throw new Error("bad v3 index");
@@ -38,7 +43,7 @@ export function shadowCache(reg, root, namespace, portable) {
   const graphOf = (id) => {
     if (!validHash(id)) throw new Error("bad v3 graph id");
     if (!graphs.has(id)) {
-      const bytes = readFileSync(join(dir, `${id}.provenance`));
+      const bytes = readFileSync(join(dir(), `${id}.provenance`));
       if (checksum(bytes) !== id) throw new Error("bad v3 graph checksum");
       graphs.set(id, deserialize(inflateRawSync(bytes)));
     }
@@ -47,7 +52,6 @@ export function shadowCache(reg, root, namespace, portable) {
   const begin = (program, attach = true) => {
     if (!stats) {
       stats = {entries: [], recomputeMs: 0, validated: 0, disagreements: 0};
-      compute = keyComputer(reg, namespace, program);
     }
     if (attach) program.frontendCounts.shadowV3 = stats;
   };
@@ -71,10 +75,10 @@ export function shadowCache(reg, root, namespace, portable) {
             if (!portable(value)) { refuse("nonportable-candidate"); continue; }
           } catch { refuse("corrupt-candidate"); continue; }
           // Recompute completeness from the graph, never trust a persisted bit.
-          const saved = compute(graph, candidate.root, value);
+          const saved = computer(program)(graph, candidate.root, value);
           if (!saved.complete || saved.key !== key) { refuse(saved.reason ?? "corrupt-key"); continue; }
           row.complete = true;
-          const current = compute(graph, candidate.root, value, {current: true});
+          const current = computer(program)(graph, candidate.root, value, {current: true});
           if (auditBuiltArtifacts(reg)) { refuse("audit-built-artifact"); break; }
           if (!current.complete) { refuse(current.reason); continue; }
           if (current.key !== key) { refuse(mismatchReason(saved, current)); continue; }
@@ -121,11 +125,11 @@ export function shadowCache(reg, root, namespace, portable) {
         return;
       }
       const bytes = deflateRawSync(serialize(graph), {level: 4}), graphHash = checksum(bytes);
-      try { mkdirSync(dir, {recursive: true}); write(join(dir, `${graphHash}.provenance`), bytes); }
+      try { mkdirSync(dir(), {recursive: true}); write(join(dir(), `${graphHash}.provenance`), bytes); }
       catch { return; }
       for (const entry of entries) {
         const value = deserialize(entry.valueBytes), root = `lowering:${entry.owner}`;
-        const result = compute(graph, root, value);
+        const result = computer(program)(graph, root, value);
         const row = stats.entries.findLast((r) => r.name === value.name);
         if (row) { row.currentComplete = result.complete; row.completenessReason = result.reason; }
         if (!result.complete) continue;

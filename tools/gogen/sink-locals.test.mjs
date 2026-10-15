@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {sinkLocals, generatedBindings} from './sink-locals.mjs';
+import {sinkLocals, generatedBindings} from './sink-locals.ts';
 const type = {k: 'i'};
 const x = {e: 'var', name: 'X', type};
 const y = {e: 'var', name: 'Y', type};

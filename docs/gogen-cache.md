@@ -828,10 +828,12 @@ Provenance remains observational: it supplies step 3 metadata, without changing
 cache keys, source hashes or the whole-registry version guard. Selective
 per-entry keys remain step 4.
 
-The implementation lives in `frontend-provenance.mjs` and its version-specific
+The facade lives in `frontend-provenance.mjs`; its recorder is loaded synchronously
+only for recording or provenance inspection. The implementation lives in
+`frontend-provenance-recorder.mjs` and its version-specific
 `frontend-provenance-hooks.mjs` adapters. Scoped synchronous hooks restore the
 original descriptors in `finally`, including on errors. The frontend's FM
-selection walk was moved unchanged into the recorder module so its index reads
+selection walk remains in the facade, with recorder hooks so its index reads
 and named ownership queries can be attributed to each consumer. Function-group
 signature/lowering work and class lowering have explicit artifact contexts.
 `frontend.mjs` shrinks by 20 physical lines.
@@ -914,7 +916,7 @@ guard can be removed**. A later key implementation must retain the global guard
 or decline reuse for every entry with unknown/incomplete provenance.
 
 ```sh
-node tools/gogen/frontend-provenance.mjs <folders...> \
+node tools/gogen/frontend-provenance-recorder.mjs <folders...> \
   --objects ZCL_READER --show 'CLAS ZCL_READER'
 node --test tools/gogen/frontend-provenance.test.mjs
 # Run the combined frontend/cache suites sequentially: ownership tests generate
@@ -1295,3 +1297,9 @@ implemented. The recorder-time budget remains unmet and its cacheDir-only cost
 is provisionally accepted for this shadow step. Step 4b flagged selective lookup
 and Step 4c default selective lookup remain plans. Production still performs no
 selective reuse across registry versions.
+
+Step 4b.1 adds the [global-first fast path](gogen-cache-global-first.md): ordinary
+compilation probes v3 only after exact global/replay misses. Exhaustive shadow
+validation remains available for the oracle. The global certificate now also
+covers dependency roles and Node/V8 identity; both tool-identity variants share
+actual source/build hashing.
