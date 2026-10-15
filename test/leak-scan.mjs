@@ -95,12 +95,20 @@ describe("leak scanner", () => {
     result = scan(digestFile("uuid-node.abap", `* TS: shape.${node}\n`));
     assert.equal(result.status, 1, result.stderr);
     assert.match(result.stderr, /192\.168\.1\.42/);
+    // and in the second half's node field
+    const second = "bbbbbbbbbbbb0bbb0bbbbbbbbbbbbbbb" + "aaaaaaaa" + "aaaa" + "1aaa" + "9aaa" + "c0a8012aaaaa";
+    result = scan(digestFile("uuid-node-2.abap", `sha256:${second}\n`));
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /192\.168\.1\.42/);
   });
 
   it("treats a bare 64-hex value as a digest only when the same scan saw it after a marker", () => {
     const marked = digestFile("shape-class.abap", `* TS: shape.${digest}\n`);
     const bare = digestFile("descriptor.abap", `CREATE OBJECT x EXPORTING name = \`${digest.toUpperCase()}\`.\n`);
     let result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", marked, bare], {encoding: "utf8"});
+    assert.ok([0, 2].includes(result.status), result.stderr);
+    // the order of the files does not matter: the marked one may come last
+    result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", bare, marked], {encoding: "utf8"});
     assert.ok([0, 2].includes(result.status), result.stderr);
     result = scan(bare);
     assert.equal(result.status, 1, result.stderr);
