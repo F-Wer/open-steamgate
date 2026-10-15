@@ -21,7 +21,9 @@ export function runSensitivity(runOracle, {classes = 4, seed = 719, lineModes = 
       scenarios: [{name: mutation.kind, steps: [mutation]}],
       env: {...process.env, GOGEN_CACHE_ORACLE_FAULT: fault}});
     const row = {kind: mutation.kind, fault, mismatch: result.mismatches > 0,
-      mismatches: result.mismatches, observations: result.rows, runtimeMs: result.runtimeMs,
+      mismatches: result.mismatches,
+      differingArtifacts: [...new Set(result.rows.flatMap((r) => r.differences.artifacts))],
+      differingClasses: [...new Set(result.rows.flatMap((r) => r.differences.classes))], observations: result.rows, runtimeMs: result.runtimeMs,
       ...(!result.mismatches ? {status: "not covered", reason: notCovered[mutation.kind]} : {status: "covered"})};
     rows.push(row); onResult(row); save();
     if (!row.mismatch && !row.reason) throw new Error(`sensitivity regression: ${mutation.kind} under ${fault} produced no MISMATCH`);

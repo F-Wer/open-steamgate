@@ -71,3 +71,19 @@ export function compareArtifacts(warm, cold) {
   }
   return {equal: true};
 }
+
+// Record all differences, including consumer IR, rather than attributing a
+// sensitivity row to whichever aggregate artifact happens to differ first.
+export function artifactDifferences(left, right) {
+  const changed = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])]
+    .filter((key) => a[key] !== b[key]);
+  return {artifacts: changed(left.artifacts, right.artifacts),
+    classes: changed(left.classArtifacts, right.classArtifacts)};
+}
+
+export function assertDdicRun(capture) {
+  const cls = JSON.parse(capture.classArtifacts.ZCL_DDIC ?? "null");
+  if (!cls?.methods.some((method) => method.name === "RUN" && !method.dropped) ||
+      ["broken", "skipped", "partial"].some((key) => capture.artifacts[key].includes("ZCL_DDIC")))
+    throw new Error("valid DDIC edit must still lower ZCL_DDIC.RUN");
+}

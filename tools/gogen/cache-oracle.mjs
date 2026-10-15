@@ -9,7 +9,7 @@ import {fileURLToPath} from "node:url";
 import {libraryPath} from "../osd-lib-path.mjs";
 import {home} from "./home.mjs";
 import {syntheticCorpus} from "./cache-oracle-corpus.mjs";
-import {captureArtifacts, compareArtifacts} from "./cache-oracle-capture.mjs";
+import {captureArtifacts, compareArtifacts, artifactDifferences, assertDdicRun} from "./cache-oracle-capture.mjs";
 import {expectedNoChange, expectedNoChangeWithoutLines, uncacheableFeatures} from "./cache-oracle-coverage.mjs";
 import {runSensitivity as sensitivityMatrix} from "./cache-oracle-sensitivity.mjs";
 export {syntheticCorpus, captureArtifacts, compareArtifacts};
@@ -139,7 +139,10 @@ export function runOracle({classes = 300, seed = 719, real = false, scenarios,
           const args = {folders, objects, order};
           const warm = captureInChild({...args, cacheDir}, caseDir, opts);
           const cold = captureInChild(args, caseDir, opts);
-          const coldChange = compareArtifacts(previousCold, cold);
+          if (["ddic-key", "ddic-data-element"].includes(mutation.kind)) {
+            for (const capture of [previousCold, warm, cold]) assertDdicRun(capture);
+          }
+          const coldChange = {...compareArtifacts(previousCold, cold), ...artifactDifferences(previousCold, cold)};
           const expected = expectedNoChange[mutation.kind] ?? (noline && expectedNoChangeWithoutLines[mutation.kind]);
           if (coldChange.equal && !expected) throw new Error(`dead mutation: ${mutation.kind}, noline=${noline}`);
           const dependentChanges = ["signature", "remove-object", "rename"].includes(mutation.kind)
@@ -149,7 +152,7 @@ export function runOracle({classes = 300, seed = 719, real = false, scenarios,
           const row = {...compareArtifacts(warm, cold), scenario: scenario.name, kind: mutation.kind, noline,
             loweredClasses: warm.counts.loweredClasses, reusedClasses: warm.counts.reusedClasses,
             lowered: warm.counts.lowered, reused: warm.counts.reused, coldCounts: cold.counts,
-            coldChange, ...(expected ? {expectedNoChange: expected} : {}), dependentChanges};
+            differences: artifactDifferences(warm, cold), coldChange, ...(expected ? {expectedNoChange: expected} : {}), dependentChanges};
           previousCold = cold;
           rows.push(row); onResult(row); save();
         }

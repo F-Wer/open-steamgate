@@ -191,7 +191,7 @@ test("old version directories are pruned, recent and foreign ones kept", () => {
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
-test("a superclass edit changes what a cached CATCH takes, warm equal to cold", () => {
+test("an exception superclass edit changes leaf IR and exception metadata, warm equal to cold", () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-object-catch-")), cacheDir = join(dir, "cache");
   const cx = (name, sup) => `CLASS ${name} DEFINITION PUBLIC INHERITING FROM ${sup} CREATE PUBLIC.
 ENDCLASS.
@@ -217,7 +217,7 @@ ENDCLASS.`;
       assert.ok(warm.frontendCounts.reusedClasses.includes("ZCL_CATCHER"));
       outputs.push(cold);
     }
-    // the edit moved ZCX_LEAF from the first CATCH to the second
+    // the leaf superclass changes emitted owner IR and exception metadata
     assert.notEqual(outputs[0], outputs[1]);
     // and the entry's key names the hierarchy it read, not only the global version
     const entries = readdirSync(cacheDir, {recursive: true}).filter((f) => f.endsWith(".bin"))

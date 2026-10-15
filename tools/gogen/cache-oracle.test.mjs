@@ -5,6 +5,7 @@ import {execFileSync} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
+import {artifactDifferences, assertDdicRun} from "./cache-oracle-capture.mjs";
 import {home} from "./home.mjs";
 import {compareArtifacts, runOracle, syntheticCorpus} from "./cache-oracle.mjs";
 import {sensitivityFault, notCovered, uncacheableFeatures} from "./cache-oracle-coverage.mjs";
@@ -15,6 +16,17 @@ test("artifact comparison reports the first byte offset, including UTF-8 and mis
   assert.equal(compareArtifacts({artifacts: {}}, {artifacts: {missing: "[]"}}).equal, false);
   for (const key of ["emitGo", "emitJs", "broken", "skipped", "partial", "diagnostics", "missing", "tables"])
     assert.equal(compareArtifacts({artifacts: {[key]: "a"}}, {artifacts: {[key]: "b"}}).artifact, key);
+});
+
+test("coverage evidence names every differing artifact and consumer; DDIC refusals fail", () => {
+  const before = {artifacts: {emitGo: "a", tables: "old"}, classArtifacts: {ZCL_DDIC: "same"}};
+  const after = {artifacts: {emitGo: "b", tables: "new"}, classArtifacts: {ZCL_DDIC: "same"}};
+  assert.deepEqual(artifactDifferences(before, after), {artifacts: ["emitGo", "tables"], classes: []});
+  const lowered = {classArtifacts: {ZCL_DDIC: JSON.stringify({methods: [{name: "RUN"}]})},
+    artifacts: {broken: "[]", skipped: "[]", partial: "[]"}};
+  assert.doesNotThrow(() => assertDdicRun(lowered));
+  assert.throws(() => assertDdicRun({...lowered, artifacts: {...lowered.artifacts, skipped: '["ZCL_DDIC=>RUN: UnknownType"]'}}));
+  assert.throws(() => assertDdicRun({...lowered, classArtifacts: {}}));
 });
 
 test("seeded corpus and serialized edits reproduce exactly", () => {

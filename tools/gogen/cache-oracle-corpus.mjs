@@ -116,8 +116,8 @@ CLASS lcl_same IMPLEMENTATION. METHOD run. rv = value. ENDMETHOD. ENDCLASS.
   mutations.push({kind: "rename", edits: [{file: control, remove: true}, {file: "zcl_renamed.clas.abap", contents: original.replaceAll("zcl_control_0001", "zcl_renamed")}], addObjects: ["ZCL_RENAMED"]});
   edit("ddic-field", "zoracle_tab.tabl.xml", "<FIELDNAME>ID</FIELDNAME>", "<FIELDNAME>IDENT</FIELDNAME>");
   edit("ddic-type", "zoracle_num.doma.xml", "INT4", "INT8");
-  edit("ddic-key", "zoracle_tab.tabl.xml", "<KEYFLAG>X</KEYFLAG>", "<KEYFLAG></KEYFLAG>");
-  edit("ddic-data-element", "zoracle_num.dtel.xml", "<DOMNAME>ZORACLE_NUM</DOMNAME>", "<DATATYPE>INT8</DATATYPE><LENG>000019</LENG>");
+  edit("ddic-key", "zoracle_tab.tabl.xml", "<FIELDNAME>VALUE</FIELDNAME>", "<FIELDNAME>VALUE</FIELDNAME><KEYFLAG>X</KEYFLAG>");
+  edit("ddic-data-element", "zoracle_num.dtel.xml", "<DOMNAME>ZORACLE_NUM</DOMNAME><REFKIND>D</REFKIND>", "<DATATYPE>CHAR</DATATYPE><LENG>000010</LENG><REFKIND></REFKIND>");
   edit("class-macro", "zcl_local_macro.clas.macros.abap", "rv = 7", "rv = 9");
   edit("include-macro", "zoracle_macros.prog.abap", "rv = 7", "rv = 9");
   edit("pool-type", "zorc.type.abap", "TYPES zorc_value TYPE i", "TYPES zorc_value TYPE int8");

@@ -154,37 +154,38 @@ Every generated kind runs under its dedicated fault, even the uncovered ones.
 A covered row must produce at least one warm/cold **MISMATCH** for that kind;
 a zero-mismatch row without a documented reason fails the matrix. The CLI and
 local test enforce this rule. Each report saves the fault, both observations,
-cold changes, reuse lists, first differing artifact and runtime. The full matrix
-is a slower local mode; ordinary CI runs the normal oracle and the focused
+cold changes, reuse lists, all differing artifacts and class IR, first byte
+offset and runtime. The matrix names that evidence for every covered row.
+The full matrix is a slower local mode; ordinary CI runs the normal oracle and the focused
 `no-version` negative control under the three-minute oracle budget.
 
-| Kind | Fault | MISMATCH | Coverage / reason if not covered |
-| --- | --- | --- | --- |
-| comment-only | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: only owner's lines change; call consumers do not inline provider text. Owner hash stays guarded. |
-| whitespace | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: same source-line-only behavior. |
-| method-body | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: calls do not inline bodies; owner's source hash forces lowering. |
-| signature | `drop:^CLAS ZCL_CONTROL_0001$` | yes | Covered; dependent cold lowering changes. |
-| class-constant | `drop:^CLAS ZCL_DEFAULTS$` | yes | Covered; external constant consumer reuses stale value. |
-| parameter-default | `drop:^CLAS ZCL_DEFAULTS$` | yes | Covered; caller omits argument. |
-| superclass | `drop:^CLAS ZCL_(PARENT\|CHILD)` | yes | Covered; grandchild reads inherited storage with a different type. |
-| exception-superclass | `drop:^CLAS ZCX_` | no | Not covered: replay observes rebuilt hierarchy/program state and rejects stale entry. |
-| interface | `drop:^INTF` | yes | Covered. |
-| alias | `drop:^CLAS ZCL_INTERFACE$` | no | Not covered: used alias disappears, making edited class syntax-broken before replay. |
-| event | `drop:^CLAS ZCL_EVENTS$` | no | Not covered: declaration and consumers share an owner, whose hash invalidates. |
-| add-object | `drop:^CLAS ZCL_ADDED$` | yes | Covered: dropped recorded miss leaves cached absent-provider refusal. |
-| remove-object | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: dependent becomes syntax-broken before replay; dependent cold output does change. |
-| rename | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: same syntax exclusion as removal. |
-| ddic-field | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
-| ddic-type | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
-| ddic-key | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
-| ddic-data-element | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
-| class-macro | `drop:^CLAS ZCL_LOCAL_MACRO$` | no | Not covered: reader owns macro, so owner hash invalidates. |
-| include-macro | `drop:^PROG` | yes | Covered: provider lives in another object. |
-| pool-type | `drop:^TYPE` | yes | Covered: explicit and implicit consumers lower. |
-| pool-constant | `drop:^TYPE` | no | Not covered / unsupported: neither explicit nor implicit constant operand lowers. |
-| fugr-signature | `drop:^FUGR` | no | Not covered: caller never caches because its functionModules input contains circular registry/syntax graphs that cannot be fingerprinted; group lowering is outside class replay. |
-| same-object-local-definition | `no-version` | no | Not covered: reader owns definition, so its object hash invalidates even without global guard. |
-| file-order | `sorted-files` | yes | Covered; first-wins macro expansion changes. |
+| Kind | Fault | MISMATCH | Coverage / reason if not covered | Differing warm/cold artifacts; class IR |
+| --- | --- | --- | --- | --- |
+| comment-only | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: only owner's lines change; call consumers do not inline provider text. Owner hash stays guarded. | None |
+| whitespace | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: same source-line-only behavior. | None |
+| method-body | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: calls do not inline bodies; owner's source hash forces lowering. | None |
+| signature | `drop:^CLAS ZCL_CONTROL_0001$` | yes | Covered; dependent cold lowering changes. | `emitGo`, `emitJs`; `ZCL_CONTROL_0003`, `ZCL_CONTROL_READER` |
+| class-constant | `drop:^CLAS ZCL_DEFAULTS$` | yes | Covered; external constant consumer reuses stale value. | `emitGo`, `emitJs` |
+| parameter-default | `drop:^CLAS ZCL_DEFAULTS$` | yes | Covered; caller omits argument. | `emitGo`, `emitJs`; `ZCL_DEFAULT_READER` |
+| superclass | `drop:^CLAS ZCL_(PARENT\|CHILD)` | yes | Covered; grandchild reads inherited storage with a different type. | `emitGo`, `emitJs`; `ZCL_GRANDCHILD` |
+| exception-superclass | `drop:^CLAS ZCX_` | no | Not covered: `ZCL_CATCH` is reused with identical IR; CATCH checks the hierarchy at runtime. Only edited `ZCX_LEAF` IR and `exceptionSupers` (rebuilt outside replay) change. | None |
+| interface | `drop:^INTF` | yes | Covered. | `emitGo`, `emitJs`; `ZCL_INTERFACE` |
+| alias | `drop:^CLAS ZCL_INTERFACE$` | no | Not covered: used alias disappears, making edited class syntax-broken before replay. | None |
+| event | `drop:^CLAS ZCL_EVENTS$` | no | Not covered: declaration and consumers share an owner, whose hash invalidates. | None |
+| add-object | `drop:^CLAS ZCL_ADDED$` | yes | Covered: dropped recorded miss leaves cached absent-provider refusal. | `emitGo`, `emitJs`, `partial`; `ZCL_ABSENT_READER` |
+| remove-object | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: dependent becomes syntax-broken before replay; dependent cold output does change. | None |
+| rename | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: same syntax exclusion as removal. | None |
+| ddic-field | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. | `emitGo`, `emitJs`, `tables`; `ZCL_DDIC` |
+| ddic-type | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered for stale successful lowering versus unsupported INT8 SELECT refusal. | `emitGo`, `emitJs`, `partial`; `ZCL_DDIC` |
+| ddic-key | `drop:^(TABL\|DTEL\|DOMA)` | no | Cold coverage via final metadata: adds VALUE to the key while retaining ID. `ZCL_DDIC.RUN` lowers with identical class IR; `tables` and its Go emission change. Not covered for stale reuse: final metadata is rebuilt outside replay. | None |
+| ddic-data-element | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered: switches from a domain reference to built-in CHAR(10), clears REFKIND; warm and cold `ZCL_DDIC.RUN` must still lower without refusals. | `emitGo`, `emitJs`; `ZCL_DDIC` |
+| class-macro | `drop:^CLAS ZCL_LOCAL_MACRO$` | no | Not covered: reader owns macro, so owner hash invalidates. | None |
+| include-macro | `drop:^PROG` | yes | Covered: provider lives in another object. | `emitGo`, `emitJs`; `ZCL_INCLUDE_MACRO` |
+| pool-type | `drop:^TYPE` | yes | Covered: explicit and implicit consumers lower. | `emitGo`, `emitJs`; `ZCL_POOL_EXPLICIT`, `ZCL_POOL_IMPLICIT` |
+| pool-constant | `drop:^TYPE` | no | Not covered / unsupported: neither explicit nor implicit constant operand lowers. | None |
+| fugr-signature | `drop:^FUGR` | no | Not covered: caller never caches because its functionModules input contains circular registry/syntax graphs that cannot be fingerprinted; group lowering is outside class replay. | None |
+| same-object-local-definition | `no-version` | no | Not covered: reader owns definition, so its object hash invalidates even without global guard. | None |
+| file-order | `sorted-files` | yes | Covered; first-wins macro expansion changes. | `emitGo`, `emitJs`; `ZCL_ORDER_MACRO` |
 
 The former `same-position-definition` case is now truthfully titled
 `same-object-local-definition`, including its regression test. It changes local
@@ -197,7 +198,7 @@ named definitions get ordinary source-word/getObject dependencies. The
 location-only fingerprint gap therefore remains **not covered**, rather than
 being presented as a global-guard regression.
 
-### Fix-round measurements
+### Round-one measurements (historical)
 
 Local Node runs, seed 719, both line modes. The full oracle and matrix shared
 machine capacity; timings include fresh process startup and disk identity work.
@@ -217,6 +218,28 @@ The full run lowered 35,854 classes across mutation observations and reused
 1,150 (the two reverts). Unsupported pool-constant attempts are the difference
 between attempted and validated counts. The complete kind/fault/results matrix
 and reasons are above; JSON reports remain local under `.local/`.
+
+### Round-two measurements
+
+Seed 719, both line modes. The revised 25-kind sensitivity matrix has 12 covered
+kinds / 24 mismatches and 13 explicitly not covered kinds (149 s). The valid
+key edit changes final metadata but cannot expose stale class reuse. The
+exception row confirms catcher reuse and identical catcher IR, rather than
+replay rejection. Reports now name every differing artifact and class IR;
+the table above records this evidence even when emitted output changes without
+class IR changes (the external constant case).
+
+The separate local sensitivity test also passes in 150 s.
+All 47 focused tests pass in 115 s, including the normal CI oracle (58 attempts,
+56 validated, zero mismatches, 108 s) and the no-version negative control
+(two mismatches). The DDIC assertions reject absent/dropped RUN and any
+ZCL_DDIC broken/skipped/partial refusal; baseline, warm and cold must all pass.
+
+The full 300-control plus pinned open-abap-core/ajson oracle passes all
+62 attempts / 60 validated observations with zero mismatches in
+534.8 s. Edits reuse zero classes; each revert reuses 575 and lowers 22.
+Across mutation observations it lowers 35,854 classes and reuses
+1,150. Size-budget and changed-file leak checks pass.
 
 ## Why the global guard remains
 
