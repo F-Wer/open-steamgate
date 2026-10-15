@@ -1,0 +1,19 @@
+{
+  "format": "osd-trace/1",
+  "outputs": [
+    {
+      "file": "cockpit/zosd_fleet2_s/i18n/i18n.properties",
+      "lines": [
+        {
+          "lines": [1, 70],
+          "sources": [
+            {"file": "src/l2demo/fleet2.l3.yaml", "node": "set/fleet2/cockpit", "selector": "/"}
+          ],
+          "locations": [
+            {"recipe": "recipes/l3-cockpit/set/i18n.properties", "anchor": "<partial>", "offset": 0}
+          ]
+        }
+      ]
+    }
+  ]
+}
