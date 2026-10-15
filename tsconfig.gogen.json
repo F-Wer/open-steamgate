@@ -23,6 +23,7 @@
     "tools/gogen/emit-ownership.ts",
     "tools/gogen/emit-packedint.ts",
     "tools/gogen/emit-owned.ts",
+    "tools/gogen/frontend-session-types.ts",
     "tools/gogen/frontend-diagnostics.ts",
     "tools/gogen/frontend-literals.ts",
     "tools/gogen/frontend-boolx.ts",
