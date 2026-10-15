@@ -254,6 +254,100 @@ Local reports: `.local/step4a1-perf-base-recheck.json`,
 `.local/step4a1-profile-summary.json`, `.local/step4a1-compile-{none,cold}.cpuprofile`,
 `.local/step4a1-sensitivity.json`, and `.local/step4a1-hook-sensitivity.json`.
 
+### Recorder-cost follow-up: acceptance remains unmet
+
+The recorder follow-up on `perf/gogen-cache-recorder` retains opt-in recording.
+It improves storage, but the final paired timing batch still fails the default-on
+budget. No default-recording or selective-lookup change is enabled.
+
+The implemented changes intern repeated `getObject` tuples per owner/phase
+before allocating normalized arguments, result arrays and public query keys.
+The pinned core's pure `getABAPFiles` and class/interface `getDefinition`
+getters retain provider edges and recording-gap checks without an artifact
+frame. Other artifact adapters open/close frames directly, avoiding a callback
+allocation per invocation. Retained input comparisons use ordered filename/raw
+pairs instead of serializing both inventories; identical snapshots can be
+shared across recorder hooks. The shared provenance graph uses deflate level 4;
+entry payloads and the recording-off serialization path retain level 1.
+Existing immutable lowering bytes and shared graph storage are preserved.
+
+Three fresh Node 26.9.0 processes per version/setting/scenario, complete pinned
+open-abap-core + ajson, alternating version and recording order, pinned CPU 14,
+RAM scratch and the shared Go build cache. The reference is the unchanged
+`67358147` source snapshot. Each version's recording-on times are compared with
+**that same version's recording-off** times. Loading/normalization, parse, syntax,
+lowering/replay and cache finalization are timed; emission, public manifest
+expansion and full diagnostic digest inspection follow the timer. Values are
+medians in milliseconds; OFF / ON columns show the two settings.
+
+| Scenario | Before OFF / ON | Before overhead | After OFF / ON | After overhead | Budget | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| Uncached | 2,317.4 / 2,684.5 | +15.8% | 2,338.2 / 2,671.1 | +14.2% | +5% | FAIL |
+| cacheDir cold | 2,768.9 / 3,513.3 | +26.9% | 2,787.5 / 3,511.8 | +26.0% | +25% | FAIL |
+| cacheDir warm | 2,513.8 / 2,839.1 | +12.9% | 2,510.7 / 2,855.7 | +13.7% | +10% | FAIL |
+| Cache file bytes | 531,454 / 812,261 | 1.528x | 531,451 / 787,320 | 1.481x | 1.500x | PASS |
+
+Recording-off changes against the reference are **+0.9% / +0.7% / -0.1%**
+(uncached/cold/warm), within the requested ±3%. All **36 captures** have identical
+emitted-artifact/class-IR and resolved-digest hashes. Uncached/cold runs lower
+272 classes; warm runs reuse 251 and lower 21, with zero diagnostics. Earlier
+exploratory batches are retained locally; this isolated paired batch is the
+acceptance result. The historical Step 3 comparison above is a different baseline.
+
+Correctness gates:
+
+- **249 tests pass**, zero failures/skips, in the serial combined frontend/cache/
+  oracle command, including provenance, digests, freshness and both new canonical
+  comparison tests.
+- Default and `GOGEN_PROVENANCE=1` CI-sized oracles each pass all **seven tests**,
+  **62 observations / 60 validated mutations / zero mismatches**, both line modes.
+  Their no-version negative controls retain the expected mismatches.
+- The unchanged hook sweep kills **40 of 48** mutations, with the same eight
+  documented survivors as the parent branch.
+- The new `frontend-provenance-compare.mjs` compares all **344 oracle-corpus**
+  and **651 pinned-library** artifact manifests plus scheduling/final-output
+  manifests against the parent in uncached/cold/warm processes. All match,
+  together with raw emitted output and resolved digests. Query dictionaries and
+  row properties are canonicalized; ordered results/providers/arguments, phase,
+  policy, early stopping, misses, unknown markers and duplicate rows are retained.
+- Changed-path size budget (`--changed origin/main`), suite registration,
+  whitespace and the explicit changed-file/staged-file leak scans pass. The
+  inherited `go:charsearch` breach remains reported separately.
+
+The focused profiles start after imports and stop before emission or public
+inspection. After-change self samples total about **186 / 209 ms** in query
+recording/hooks/indexes and **32 / 36 ms** in ordered snapshots (uncached/cold).
+Cold resolved projection/hashing contributes **379 ms**, and cache/replay/
+serialization **215 ms**. GC contributes **256 / 287 ms**; these are whole-compile
+GC totals, not an estimate of recording-only GC. Profiler overhead is separate.
+The uncached diagnostic run sees about 49,000 named lookups but constructs
+normalized query inputs for only about 7,900 of them; intern-table work and
+other hooks consume much of the saving. The wall-time budget therefore remains
+**FAIL**.
+
+Next options are a core observer seam that reports resolver/artifact events
+without per-getter wrappers (while retaining cached-provider edges and unknown
+iteration detection), and compact interned query/owner/phase IDs for all query
+kinds. Cheaper resolved-digest projection could reduce cold cost, but cannot
+repair the uncached gate, which performs no digest work. Keep this foundation
+opt-in until a callback-based path meets all budgets; Step 4c remains blocked.
+
+Run the comparator through the established heavy-run wrapper. Record the parent,
+then compare the candidate; repeat both commands with `--real`:
+
+```sh
+node tools/gogen/frontend-provenance-compare.mjs --compiler <parent-checkout> \
+  --report .local/manifests-before.json
+node tools/gogen/frontend-provenance-compare.mjs \
+  --compare .local/manifests-before.json
+```
+
+Reports remain local in `.local/recorder-paired.json`,
+`.local/recorder-profile-summary.json`, `.local/recorder-profile-{before,after}-{none,cold}.cpuprofile`,
+`.local/manifests-{base,candidate}-{oracle,real}.json`, and
+`.local/recorder-hook-sensitivity.json`. Disposable compiler copies and cache
+scratch are removed after validation.
+
 ## Resolved-artifact digests (step 3)
 
 A cache/session compilation installs an empty digest memo after syntax checking.
