@@ -929,13 +929,13 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     "\treturn func(receiver any, m amc.Message) {", "\t\tswitch m.Type {", ...cases,
     "\t\tdefault:", "\t\t\tpanic(abap.NotCompiled(\"AMC delivery\", \"no receiver for a \"+m.Type+\" message in this program\"))", "\t\t}", "\t}", "}", ""];
 }
-function method(cls, m) {
+/** @param {import("./emit-go-types.ts").Class} cls @param {import("./emit-go-types.ts").Method} m @returns {string[]} */ function method(cls, m) {
   SYMBOLS?.(cls, m, m.static ? funcName(cls.name, m.name) : typeName(m.name), m.static ? null : typeName(cls.name));
   const lines = [...(LINES && m.pos ? [`//line ${m.pos.file}:${m.pos.row}`] : []), `${signature(cls, m)} {`, "\t_ = s"];
   if (m.static && m.name !== "CLASS_CONSTRUCTOR" && chainCctor(cls)) lines.push(`\tEnsure_${typeName(cls.name)}(s)`);
   if (!m.static) lines.push("\t_ = me");
-  if (m.name === "IF_MESSAGE~GET_TEXT" && exceptionClass(cls, CLASSES)) lines.push("\tif me.KernelException != nil { return me.KernelException.Text() }");
-  if (m.name === "IF_MESSAGE~GET_LONGTEXT" && exceptionClass(cls, CLASSES)) lines.push(`\tif me.KernelException != nil { panic(abap.NotCompiled("exception method GET_LONGTEXT", "kernel long texts are not implemented")) }`);
+  if (m.name === "IF_MESSAGE~GET_TEXT" && (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES)) lines.push("\tif me.KernelException != nil { return me.KernelException.Text() }");
+  if (m.name === "IF_MESSAGE~GET_LONGTEXT" && (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(cls, CLASSES)) lines.push(`\tif me.KernelException != nil { panic(abap.NotCompiled("exception method GET_LONGTEXT", "kernel long texts are not implemented")) }`);
   if (cls.hostReplaced) append(lines, hostMethod(cls, m));
   // a method that calls the AMC API: its class pool is who is calling while
   // it runs, for the SAMC authorities (go/amc Enter/Caller)
@@ -944,7 +944,7 @@ function method(cls, m) {
   // 00 bytes, d, t, n, p) starts at the type's initial value, as the JS
   // emitter's locals do; before (ultra/packs, ZCL_GOGEN_T_BYTECAT) an x never
   // assigned read as zero bytes long
-  const sunkLocals = sinkLocals(m);
+  const sunkLocals = (/** @type {import("./emit-go-types.ts").SinkLocals} */ (sinkLocals))(m);
   const localIndex = lines.length;
   // the RETURNING parameter starts at its initial value too (the JS emitter's
   // let r = zero(t)); Go's named result starts at Go's zero value
@@ -953,16 +953,16 @@ function method(cls, m) {
   // A method can touch the same static repeatedly in a hot loop. Retain its
   // stable class pointer instead of repeating the slot lookup. A store never
   // replaces an initialized slot, including when another class is initialized.
-  const staticStores = new Map();
-  const collectStatics = (node) => {
+  /** @type {Map<string, string>} */ const staticStores = new Map();
+  /** @param {unknown} node @returns {void} */ const collectStatics = (node) => {
     if (!node || typeof node !== "object") return;
-    if (node.e === "static" && !staticStores.has(node.owner)) staticStores.set(node.owner, `static_${typeName(node.owner)}`);
+    if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).e === "static" && !staticStores.has((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).owner)) staticStores.set((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).owner, `static_${typeName((/** @type {import("./emit-go-types.ts").WalkNode} */ (node)).owner)}`);
     for (const value of Object.values(node)) collectStatics(value);
   };
   collectStatics(m.body);
   if (staticStores.size) lines.push("\t// The store never replaces class pointers; cache them for this method call.");
   for (const [owner, store] of staticStores) lines.push(`\t${store} := St_${typeName(owner)}(s)`);
-  const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m, staticStores, sunkLocals, sinkSites: []};
+  /** @type {import("./emit-go-types.ts").MethodContext} */ const ctx = {cls, loop: 0, inCtor: m.name === "CONSTRUCTOR", method: m, staticStores, sunkLocals, sinkSites: []};
   const valueOutputs = m.params.filter((p) => p.dir !== "importing" && p.byValue);
   if (valueOutputs.length) {
     ctx.valueOutputs = new Set(valueOutputs.map((p) => p.name));
@@ -980,8 +980,8 @@ function method(cls, m) {
   // Inspect actual generated Go before adding any ABAP local declarations.
   // Method-wide bindings deliberately include descendants and enclosing
   // constructs: sinking must not change which slot generated code refers to.
-  const bindings = ctx.sinkSites.length ? generatedBindings(lines.join("\n")) : new Set();
-  const sunk = new Set();
+  const bindings = ctx.sinkSites.length ? (/** @type {import("./emit-go-types.ts").GeneratedBindings} */ (generatedBindings))(lines.join("\n")) : new Set();
+  /** @type {Set<import("./emit-go-types.ts").Local>} */ const sunk = new Set();
   for (const site of ctx.sinkSites) {
     site.locals = site.locals.filter(l => bindings && !bindings.has(ident(l.name)));
     for (const l of site.locals) sunk.add(l);
@@ -997,7 +997,7 @@ function method(cls, m) {
   return rendered;
 }
 
-function hostMethod(cls, m) {
+/** @param {import("./emit-go-types.ts").Class} cls @param {import("./emit-go-types.ts").Method} m @returns {string[]} */ function hostMethod(cls, m) {
   const field = m.name === "SESSION_ID" ? "SessionID" : m.name.split("_").map((part, i) => i === 0 ? part[0] + part.slice(1).toLowerCase() : part[0] + part.slice(1).toLowerCase()).join("");
   const hook = `hHostclass.${cls.name}.${field}`;
   const ret = m.returning;
@@ -1015,15 +1015,15 @@ function hostMethod(cls, m) {
   return lines;
 }
 
-function hostRaiseGlue(program, classes, layers) {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {readonly import("./emit-go-types.ts").Class[]} classes @param {import("./emit-go-types.ts").Layers | null} layers @returns {string[]} */ function hostRaiseGlue(program, classes, layers) {
   if (!classes.some((cls) => cls.hostReplaced)) return [];
-  const cases = [];
+  /** @type {[string, string][]} */ const cases = [];
   for (const cls of CLASSES.values()) {
     if (layers && !(layers.visibleClasses ?? new Set(classes.map((c) => c.name))).has(cls.name)) continue;
     for (const method of cls.methods) {
       if (!(program.exceptionSupers ?? {})[cls.name] || !method.static || method.returning?.type.k !== "ref"
         || !method.params.every((p) => p.suppliedOf || p.optional || p.default !== undefined)) continue;
-      cases.push([`${cls.name}=>${method.name}`, expr(omittedFactoryCall(program, cls, method), {cls})]);
+      cases.push([`${cls.name}=>${method.name}`, expr((/** @type {import("./emit-go-types.ts").OmittedFactoryCall} */ (omittedFactoryCall))(program, cls, method), {cls})]);
     }
   }
   const lines = ["// hostRaise turns a host's factory request into an ABAP exception.",
@@ -1037,7 +1037,7 @@ function hostRaiseGlue(program, classes, layers) {
   return lines;
 }
 
-const tab = (n) => "\t".repeat(n);
+/** @param {number} n @returns {string} */ const tab = (n) => "\t".repeat(n);
 
 /**
  * who a call on me goes to. In a class with subclasses a public or protected
@@ -1045,7 +1045,7 @@ const tab = (n) => "\t".repeat(n);
  * constructor, though: there ABAP calls the class's own implementation, the
  * subclass's part does not exist yet.
  */
-function self(ctx, methodName) {
+/** @param {import("./emit-go-types.ts").Context} ctx @param {string | null} methodName @returns {string} */ function self(ctx, methodName) {
   if (!POLY.has(ctx.cls.name)) return "me";
   // me as a value is the whole object, in a constructor too (New_ sets self first)
   if (methodName === null) return `me.${selfField(ctx.cls.name)}`;
@@ -1060,7 +1060,7 @@ function self(ctx, methodName) {
  * the innermost loop, so only one outside the TRY makes them leave it; EXIT
  * outside any loop leaves the method, as in ABAP
  */
-function leave(ctx, code) {
+/** @param {import("./emit-go-types.ts").Context} ctx @param {number} code @returns {string} */ function leave(ctx, code) {
   const top = ctx.tries?.at(-1);
   const escapes = top && (code === 1 || (ctx.loopLevel ?? 0) === top.level);
   if (escapes) {
@@ -1073,7 +1073,7 @@ function leave(ctx, code) {
 }
 
 /** an IMPORTING argument: a composite by reference goes as a pointer, by VALUE as a clone */
-function importingArg(a, ctx) {
+/** @param {import("./emit-go-types.ts").Argument} a @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function importingArg(a, ctx) {
   if (a.byValue === undefined || !composite(a.type)) return expr(a.value, ctx);
   if (!a.byValue) return addressable(a.value) ? `&${place(a.value, ctx)}` : `abap.Ptr(${expr(a.value, ctx)})`;
   return copied(expr(a.value, ctx), a.value.type, a.value);
@@ -1081,16 +1081,16 @@ function importingArg(a, ctx) {
 
 // A component of a temporary structure is readable but Go cannot take its
 // address. Keep the temporary alive in a box for a by-reference argument.
-function addressable(x) {
+/** @param {import("./emit-go-types.ts").Expr} x @returns {boolean} */ function addressable(x) {
   if (!PLACES.has(x.e)) return false;
   if (x.e === "field" || x.e === "row" || x.e === "row_key") return addressable(x.base);
   return true;
 }
 
-function place(p, ctx) {
+/** @param {import("./emit-go-types.ts").Expr} p @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function place(p, ctx) {
   switch (p.e) {
     case "var": return p.ref && !ctx.valueOutputs?.has(p.name) ? `(*${ident(p.name)})` : ident(p.name);
-    case "attr": return exceptionClass(ctx.cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(p.name)}).${ident(p.name)}` : `me.${ident(p.name)}`;
+    case "attr": return (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(ctx.cls, CLASSES) ? `abap.ExceptionRead(me, ${JSON.stringify(p.name)}).${ident(p.name)}` : `me.${ident(p.name)}`;
     case "static": {
       // The frontend resolves inherited attributes to the declaring class.
       const owner = p.owner;
@@ -1105,7 +1105,7 @@ function place(p, ctx) {
     case "field": return `${PLACES.has(p.base.e) || p.base.e === "const" ? place(p.base, ctx) : `(${expr(p.base, ctx)})`}.${ident(p.name)}`;
     case "dref_field": return `abap.DerefAs[${goType(p.struct)}](${expr(p.base, ctx)}, ${JSON.stringify(`->${p.name}`)}).${ident(p.name)}`;
     case "fs": return p.type.k === "data" ? ident(p.name) : p.type.k === "struct" ? `(*${ident(p.name)})` : `(*abap.CheckedRowPtr(${ident(p.name)}))`;
-    case "refattr": { const b = p.kernelRtti ? `abap.ObjectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : (p.base.type.intf || exceptionClass(CLASSES.get(p.base.type.name), CLASSES)) ? `abap.ExceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx); if (p.base.type.intf) return `(*${b}.${accessorName(p.name)}())`;
+    case "refattr": { const b = p.kernelRtti ? `abap.ObjectRttiRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : (p.base.type.intf || (/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(CLASSES.get(p.base.type.name), CLASSES)) ? `abap.ExceptionRead(${expr(p.base, ctx)}, ${JSON.stringify(p.name)})` : expr(p.base, ctx); if (p.base.type.intf) return `(*${b}.${accessorName(p.name)}())`;
       return POLY.has(p.base.type.name) && !p.base.type.intf ? `${b}.As_${typeName(p.base.type.name)}().${ident(p.name)}` : `${b}.${ident(p.name)}`; }
     case "row": {
       const b = place(p.base, ctx);
@@ -1127,42 +1127,42 @@ function place(p, ctx) {
  * JS. When a loop only ever appends to a local string, the loop gets a
  * strings.Builder for it and writes v back once after the loop.
  */
-const leftmost = (e) => { while (e?.e === "concat") e = e.l; return e; };
-const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !st.target.ref && st.target.type.k === "string"
+/** @param {import("./emit-go-types.ts").Expr} e @returns {import("./emit-go-types.ts").Expr} */ const leftmost = (e) => { while (e?.e === "concat") e = e.l; return e; };
+/** @param {import("./emit-go-types.ts").Stmt | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !st.target.ref && st.target.type.k === "string"
   && (name === undefined || st.target.name === name) && st.value.e === "concat" && leftmost(st.value).e === "var" && leftmost(st.value).name === st.target.name;
 
-function builders(body, ctx, outside = []) {
+/** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").Context} ctx @param {readonly unknown[]} [outside] @returns {string[]} */ function builders(body, ctx, outside = []) {
   const names = new Set();
-  const walk = (n) => {
+  /** @param {unknown} n @returns {void} */ const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if (isAppend(n)) names.add(n.target.name);
-    for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
+    if (isAppend(/** @type {import("./emit-go-types.ts").Stmt} */ (n))) names.add((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).target.name);
+    for (const k of Object.keys(n)) if (k !== "type") walk((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   walk(body);
   // ultra/events: a name the loop's own condition (WHILE, LOOP ... WHERE)
   // reads must stay current on every pass: no builder for it (a WHILE
   // strlen( v ) < 32 appending to v never ended, ZCL_OSD_TRAN_SESSION=>NEW_ID)
   const read = new Set();
-  const seen = (n) => {
+  /** @param {unknown} n @returns {void} */ const seen = (n) => {
     if (Array.isArray(n)) { n.forEach(seen); return; }
     if (!n || typeof n !== "object") return;
-    if (n.e === "var") read.add(n.name);
-    for (const k of Object.keys(n)) if (k !== "type") seen(n[k]);
+    if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).e === "var") read.add((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).name);
+    for (const k of Object.keys(n)) if (k !== "type") seen((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   seen(outside);
   return [...names].filter((name) => !read.has(name) && !ctx.builders?.has(name) && appendsOnly(body, name));
 }
 
-function appendsOnly(body, name) {
+/** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {string} name @returns {boolean} */ function appendsOnly(body, name) {
   let appends = 0;
   let refs = 0;
-  const walk = (n) => {
+  /** @param {unknown} n @returns {void} */ const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if (n.e === "var" && n.name === name) refs += 1;
-    if (isAppend(n, name)) appends += 1;
-    for (const k of Object.keys(n)) if (k !== "type") walk(n[k]);
+    if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).e === "var" && (/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).name === name) refs += 1;
+    if (isAppend(/** @type {import("./emit-go-types.ts").Stmt} */ (n), name)) appends += 1;
+    for (const k of Object.keys(n)) if (k !== "type") walk((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   walk(body);
   return appends > 0 && refs === 2 * appends;
@@ -1175,12 +1175,12 @@ function appendsOnly(body, name) {
  * ascending, equal keys newest first, as A4H orders them); sy-tabix is the
  * position in that order. A unique key that holds a value twice is refused.
  */
-function keyCmp(key, tb) {
+/** @param {import("./emit-go-types.ts").ResolvedKey} key @param {string} tb @returns {string} */ function keyCmp(key, tb) {
   const parts = key.comps.map((c) => `if c := abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[a].${ident(c.name)}, ${tb}[b].${ident(c.name)}); c != 0 {\n\t\treturn c\n\t}`);
   return `func(a, b int) int {\n\t${parts.join("\n\t")}\n\treturn 0\n}`;
 }
 
-function keyLoop(st, ctx, t, d) {
+/** @param {import("./emit-go-types.ts").KeyLoop} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {string} t @param {number} d @returns {string[]} */ function keyLoop(st, ctx, t, d) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const i = `ord${n}[k${n}]`;
@@ -1206,11 +1206,11 @@ function keyLoop(st, ctx, t, d) {
  * The temporaries are spelled kV/kI/kR, an upper case letter after the
  * first, which ident never produces, so no ABAP name can shadow them.
  */
-function keyValues(st, ctx, t, n) {
+/** @param {import("./emit-go-types.ts").KeyValues} st @param {import("./emit-go-types.ts").Context} ctx @param {string} t @param {number} n @returns {string[]} */ function keyValues(st, ctx, t, n) {
   return st.values.map((v, j) => `${t}\tkV${n}_${j} := ${expr(v, ctx)}`);
 }
 
-function keyEq(key, tb, n) {
+/** @param {import("./emit-go-types.ts").ResolvedKey} key @param {string} tb @param {number} n @returns {string} */ function keyEq(key, tb, n) {
   const eq = key.comps.map((c, j) => `abap.${c.num ? "CmpNum" : "CmpS"}(${tb}[kR].${ident(c.name)}, kV${n}_${j}) == 0`);
   return `func(kR int) bool { return ${eq.join(" && ")} }`;
 }
@@ -1221,7 +1221,7 @@ function keyEq(key, tb, n) {
  * position; not found, sy-tabix is where it would go and sy-subrc 4, or 8
  * past the last row, and the target is left alone (A4H 2026-09-24).
  */
-function readSecKey(st, ctx, t) {
+/** @param {import("./emit-go-types.ts").KeyRead} st @param {import("./emit-go-types.ts").Context} ctx @param {string} t @returns {string[]} */ function readSecKey(st, ctx, t) {
   const n = ctx.loop++;
   const tb = expr(st.table, ctx);
   const vals = st.values.map((v, j) => `${t}\tv${n}_${j} := ${expr(v, ctx)}`);
@@ -1241,7 +1241,7 @@ function readSecKey(st, ctx, t) {
     `${t}\ts.Sy.Subrc, s.Sy.Tabix = sub${n}, pos${n}`, `${t}}`];
 }
 
-function withBuilders(body, ctx, t, emitLoop, outside = []) {
+/** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").Context} ctx @param {string} t @param {() => string[]} emitLoop @param {readonly unknown[]} [outside] @returns {string[]} */ function withBuilders(body, ctx, t, emitLoop, outside = []) {
   // An exception can skip the loop's write-back, and code after ENDTRY can
   // read the appended value even when the handler does not.
   const names = ctx.tryBuilderBlocked ? [] : builders(body, ctx, outside);
@@ -1268,7 +1268,7 @@ function withBuilders(body, ctx, t, emitLoop, outside = []) {
 // a column as scanned, in the Go value of its kind (a RAW(n) column its n
 // bytes, go/abap dbraw.go), and moved into a field of type ft: a RAW column
 // into an x of another length cut or 00-padded (ultra/zvdb)
-function dbColumn(c, v, ft) {
+/** @param {import("./emit-go-types.ts").SqlColumn} c @param {string} v @param {import("./emit-go-types.ts").Type} ft @returns {string} */ function dbColumn(c, v, ft) {
   const k = c.type.k;
   const val = k === "i" ? `abap.DBI(${v})` : k === "string" ? `abap.DBStr(${v})` : k === "xstring" ? `abap.DBXStr(${v})`
     : k === "x" ? `abap.DBX(${v}, ${c.type.len ?? 1})` : k === "p" ? dbP(v, ft) : `abap.DBChar(${v})`;
@@ -1277,7 +1277,7 @@ function dbColumn(c, v, ft) {
 
 // the arguments of a statement lowered at build time: the logon client, a
 // host value (a c right-trimmed, as the column binds it), a literal
-function sqlArgs(args, ctx) {
+/** @param {readonly import("./emit-go-types.ts").SqlArgument[]} args @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function sqlArgs(args, ctx) {
   return `[]any{${args.map((a) => (a.fit !== undefined ? `abap.DBCFit(${expr(a.host, ctx)}, ${a.fit})`
     : a.xstring ? `abap.DBXString(${expr(a.host, ctx)})`
     : a.xhex !== undefined ? `abap.DBXHex(${expr(a.host, ctx)}, ${a.xhex})` : a.xexact !== undefined ? `abap.DBXSHex(${expr(a.host, ctx)}, ${a.xexact})`
@@ -1285,15 +1285,15 @@ function sqlArgs(args, ctx) {
     : a.mandt ? "abap.Mandt" : typeof a.value === "number" ? String(a.value) : JSON.stringify(String(a.value)))).join(", ")}}`;
 }
 
-const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len !== undefined ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`;
+/** @param {import("./emit-go-types.ts").WriteType} t @returns {string} */ const irTypeGo = (t) => `&abap.IRType{Abap: ${JSON.stringify(t.abap)}${t.len !== undefined ? `, Len: ${t.len}` : ""}${t.dec ? `, Dec: ${t.dec}` : ""}}`;
 
 // the ranges of a statement: where lower() put each marker, and the rows of
 // the ranges table as the Go values of their fields
-function hostPreds(preds, ctx) {
+/** @param {readonly import("./emit-go-types.ts").SqlPredicate[] | undefined} preds @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function hostPreds(preds, ctx) {
   if (!preds || preds.length === 0) return "nil";
   return `[]abap.HostPred{${preds.map((p) => {
     const fields = new Map((STRUCTDEFS.get(p.range.type.row.go)?.fields ?? []).map((f) => [String(f.name).toUpperCase(), f]));
-    const v = (nm) => (fields.get(nm).type.k === "i" ? `int64(r.${ident(fields.get(nm).name)})` : `r.${ident(fields.get(nm).name)}`);
+    /** @param {string} nm @returns {string} */ const v = (nm) => (fields.get(nm).type.k === "i" ? `int64(r.${ident(fields.get(nm).name)})` : `r.${ident(fields.get(nm).name)}`);
     const rows = `func() []abap.RangeRow { out := []abap.RangeRow{}; for _, r := range ${expr(p.range, ctx)} { out = append(out, abap.RangeRow{Sign: r.${ident(fields.get("SIGN").name)}, Option: r.${ident(fields.get("OPTION").name)}, Low: ${v("LOW")}, High: ${v("HIGH")}}) }; return out }()`;
     return `{ID: ${JSON.stringify(p.id)}, After: ${p.after}, Column: ${JSON.stringify(p.column)}, Type: ${irTypeGo(p.type)}, Kind: ${JSON.stringify(p.kind ?? "")}, LowLen: ${p.lowLen}, Rows: ${rows}}`;
   }).join(", ")}}`;
@@ -1303,13 +1303,13 @@ const RESET = "\u0000reset-position";
 // GOGEN_NOLINE=1 leaves the directives out, for debugging the emitter itself
 const LINES = !process.env.GOGEN_NOLINE;
 
-function localDeclaration(l, d) {
+/** @param {import("./emit-go-types.ts").Local} l @param {number} d @returns {string[]} */ function localDeclaration(l, d) {
   const z = OWNERSHIP.declarations.has(l) && l.type.k === "x" ? `${ownedType(l)}{}` : zero(l.type);
   return [isGoZero(z) ? `${tab(d)}var ${ident(l.name)} ${ownedType(l)}` : `${tab(d)}var ${ident(l.name)} ${ownedType(l)} = ${z}`, `${tab(d)}_ = ${ident(l.name)}`];
 }
 
-function stmtList(body, ctx, d) {
-  const lines = [];
+/** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").MethodContext} ctx @param {number} d @returns {string[]} */ function stmtList(body, ctx, d) {
+  /** @type {string[]} */ const lines = [];
   const locals = ctx.sunkLocals?.get(body);
   if (locals?.length) {
     lines.push(`\u0000sink:${ctx.sinkSites.length}`);
@@ -1327,10 +1327,10 @@ function stmtList(body, ctx, d) {
   return lines;
 }
 
-function stmt(st, ctx, d) {
+/** @param {import("./emit-go-types.ts").Stmt} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {number} d @returns {string[]} */ function stmt(st, ctx, d) {
   const loop = st.s === "loop" || st.s === "loop_data";
   if (loop) (ctx.loopStack ??= []).push(st);
-  let lines;
+  /** @type {string[]} */ let lines;
   try { lines = stmtLines(st, ctx, d); } finally { if (loop) ctx.loopStack.pop(); }
   // Instrument the actual routing decisions. These values belong to the
   // router table / registered model, never the parsed request's segments.
@@ -1351,9 +1351,9 @@ function stmt(st, ctx, d) {
   return lines;
 }
 
-function stmtLines(st, ctx, d) {
+/** @param {import("./emit-go-types.ts").Stmt} st @param {import("./emit-go-types.ts").MethodContext} ctx @param {number} d @returns {string[]} */ function stmtLines(st, ctx, d) {
   const t = tab(d);
-  const owned = ownedStatement(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue, helper: helperFn});
+  const owned = (/** @type {import("./emit-go-types.ts").OwnedStatement} */ (ownedStatement))(st, ctx, t, {ownership: OWNERSHIP, expr, place, rowValue, helper: helperFn});
   if (owned) return owned;
   switch (st.s) {
     case "assign":
@@ -1367,7 +1367,7 @@ function stmtLines(st, ctx, d) {
         return [`${t}${place(st.target.base, ctx)} = hSubwrite.X(${expr(st.target.base, ctx)}, ${st.target.off ? expr(st.target.off, ctx) : "0"}, ${expr(st.target.len, ctx)}, ${expr(st.value, ctx)})`];
       }
       if (ctx.builders?.has(st.target.name) && isAppend(st, st.target.name)) {
-        const parts = [];
+        /** @type {import("./emit-go-types.ts").Expr[]} */ const parts = [];
         for (let e = st.value; e.e === "concat"; e = e.l) parts.unshift(e.r);
         return parts.map((x) => `${t}${ctx.builders.get(st.target.name)}.WriteString(${expr(x, ctx)})`);
       }
@@ -1376,7 +1376,7 @@ function stmtLines(st, ctx, d) {
       return [...(st.target.type.k === "table" ? [`${t}abap.BumpTable(&${place(st.target, ctx)})`] : []), `${t}${place(st.target, ctx)} = ${zero(st.target.type)}`];
     case "append": {
       const tb = place(st.table, ctx);
-      const unique = (st.table.type.secondary ?? []).filter((k) => k.unique);
+      /** @type {readonly import("./ir.ts").SecondaryKey[]} */ const unique = (st.table.type.secondary ?? []).filter(/** @param {import("./ir.ts").SecondaryKey} k */ (k) => k.unique);
       if (unique.length) {
         // a unique secondary key (ultra/json): a row that would repeat a key
         // value is refused, not added -- A4H raises the catchable
@@ -1435,7 +1435,7 @@ function stmtLines(st, ctx, d) {
     }
     case "call": {
       if (st.call.e === "nop_call") return [];
-      const c = st.call;
+      /** @type {import("./emit-go-types.ts").CallExpr} */ const c = st.call;
       const run = c.receiving ? `${place(c.receiving, ctx)} = ${expr(c, ctx)}` : expr(c, ctx);
       const quit = c.owner === "CL_ABAP_UNIT_ASSERT" ? c.args.find((a) => a.name === "QUIT" && a.supplied) : null;
       const marked = quit ? `abap.WithAssertQuit(${expr(quit.value, ctx)}, func() { ${run} })` : run;
@@ -1458,10 +1458,10 @@ function stmtLines(st, ctx, d) {
     case "get_timestamp": return [`${t}${place(st.target, ctx)} = abap.TimeStamp(${st.dec})`];
     // AMC on the Go host (go/amc; the bodies frontend.mjs AMC_HOST gives)
     case "amc": {
-      const a = (k) => expr(st.args[k], ctx);
+      /** @param {string} k @returns {string} */ const a = (k) => expr(st.args[k], ctx);
       const err = place(st.err, ctx);
       const at = "amc.Endpoint{Session: s, Program: amc.Current().Caller(s), Client: abap.Mandt, Username: abap.UName}";
-      const refuse = (e) => [`${t}if ${e} != nil {`, `${t}\t${err} = ${e}.Error()`, ...stmt(st.raise, ctx, d + 1), `${t}}`];
+      /** @param {string} e @returns {string[]} */ const refuse = (e) => [`${t}if ${e} != nil {`, `${t}\t${err} = ${e}.Error()`, ...stmt(st.raise, ctx, d + 1), `${t}}`];
       const ret = ctx.method.returning ? ident(ctx.method.returning.name) : null;
       switch (st.op) {
         case "create_producer":
@@ -1579,7 +1579,7 @@ function stmtLines(st, ctx, d) {
     case "raise_classic":
       return [`${t}panic(abap.ClassicException{Name: ${JSON.stringify(st.name)}, Method: ${JSON.stringify(st.method)}})`];
     case "if": {
-      const lines = [];
+      /** @type {string[]} */ const lines = [];
       st.branches.forEach((b, i) => {
         lines.push(`${t}${i === 0 ? "if" : "} else if"} ${cond(b.cond, ctx)} {`);
         append(lines, stmtList(b.body, ctx, d + 1));
@@ -1680,7 +1680,7 @@ function stmtLines(st, ctx, d) {
       // TRY is a closure, so RETURN, EXIT and CONTINUE inside it come out as
       // a code (1, 2, 3) and are done again after it
       const n = ctx.loop++;
-      const frame = {level: ctx.loopLevel ?? 0, mode: "body", used: new Set()};
+      /** @type {import("./emit-go-types.ts").TryFrame} */ const frame = {level: ctx.loopLevel ?? 0, mode: "body", used: new Set()};
       (ctx.tries ??= []).push(frame);
       const priorTryBuilderBlocked = ctx.tryBuilderBlocked;
       ctx.tryBuilderBlocked = priorTryBuilderBlocked || st.catches.length > 0 || !!st.cleanup;
@@ -1731,7 +1731,7 @@ function stmtLines(st, ctx, d) {
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
       const out = [`${t}{`, `${t}	src${n} := ${expr(st.src, ctx)}`, `${t}	lo${n}, hi${n} := 1, len(src${n})`];
-      const bound = (v, name, set) => [`${t}	if b := int(${expr(v, ctx)}); b <= 0 {`,
+      /** @param {import("./emit-go-types.ts").Expr} v @param {string} name @param {string} set @returns {string[]} */ const bound = (v, name, set) => [`${t}	if b := int(${expr(v, ctx)}); b <= 0 {`,
         `${t}		panic(abap.ArithmeticError{Class: "TABLE_INVALID_INDEX", Op: "APPEND LINES OF ... ${name} " + abap.FmtI(int32(b))})`, `${t}	} else ${set}`];
       if (st.from) out.push(...bound(st.from, "FROM", `{
 ${t}		lo${n} = b
@@ -1755,7 +1755,7 @@ ${t}	}`));
     case "insert_sorted": {
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
-      const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
+      /** @param {string} r @param {import("./ir.ts").SortKey} k @returns {string} */ const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
       const cmp = st.keys.map((k) => `if a, b := ${get(`r${n}`, k)}, ${get(`v${n}`, k)}; a != b { if a > b { c${n} = 1 } else { c${n} = -1 }; goto done${n} }`);
       return [`${t}{`, `${t}	v${n} := ${st.value.e === "lrow" && needsCopy(st.value.type) ? `${cloneName(st.value.type)}(${rowValue(st.table.type, expr(st.value, ctx))})` : copied(st.value.e === "lrow" ? rowValue(st.table.type, expr(st.value, ctx)) : expr(st.value, ctx), st.value.type, st.value)}`, `${t}	pos${n} := len(${tb})`, `${t}	s.Sy.Subrc = 0`,
         `${t}	for i${n}, r${n} := range ${tb} {`, `${t}		c${n} := 0`, ...cmp.map((x) => `${t}		${x}`), `${t}	done${n}:`,
@@ -1845,7 +1845,7 @@ ${t}	}`));
       const p = place(st.target, ctx);
       return [`${t}if len(${p}) > 0 {`, `${t}\t${p} = ${p}[1:] + ${p}[:1]`, `${t}}`];
     }
-    case "concat_bytes": return emitByteConcat(st, ctx, t, {expr, place, rowValue});
+    case "concat_bytes": return (/** @type {import("./emit-go-types.ts").EmitByteConcat} */ (emitByteConcat))(st, ctx, t, {expr, place, rowValue});
     case "condense": {
       const p = place(st.target, ctx);
       return [`${t}${p} = abap.Condense(${p}, ${st.noGaps})`];
@@ -1885,7 +1885,7 @@ ${t}	}`));
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.line ? "r" : `r.${ident(a.field)}`} = ${dbColumn(st.cols[i], `c${i}_${n}`, a.type)}`)).filter(Boolean);
       const keyedRow = () => {
-        const ty = st.target.type;
+        /** @type {import("./emit-go-types.ts").TableType} */ const ty = st.target.type;
         const saved = ctx.lrow;
         ctx.lrow = "r";
         const value = {e: "lrow", type: ty.row};
@@ -1944,7 +1944,7 @@ ${t}	}`));
     case "select_dyn": {
       // dynamic Open SQL (go/abap selectdyn.go): the parts given at run time
       // as strings, the target as generic data
-      const strs = (v) => (v === null ? "nil" : v.e === "strlist" ? `[]string{${v.values.map((x) => JSON.stringify(x)).join(", ")}}`
+      /** @param {import("./emit-go-types.ts").Expr | null} v @returns {string} */ const strs = (v) => (v === null ? "nil" : v.e === "strlist" ? `[]string{${v.values.map((x) => JSON.stringify(x)).join(", ")}}`
         : v.type.k === "table" ? expr(v, ctx) : `[]string{${expr(v, ctx)}}`);
       return [`${t}abap.SelectDyn(s, abap.DynSelect{Table: ${expr(st.table, ctx)}, Fields: ${strs(st.fields)}, Star: ${st.fields === null}, ` +
         `Where: ${st.where === null ? `""` : expr(st.where, ctx)}, HasWhere: ${st.where !== null}, GroupBy: ${strs(st.groupBy)}, OrderBy: ${strs(st.orderBy)}, ` +
@@ -1958,7 +1958,7 @@ ${t}	}`));
       const tgt = st.target === null ? null : place(st.target, ctx);
       const vars = st.cols.map((c, i) => `c${i}_${n} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`);
       // a character field takes the column cut to its length
-      const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
+      /** @param {string} v @param {import("./emit-go-types.ts").Type} ft @returns {string} */ const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
       const moves = st.assign.map((a, i) => (a === null ? null
         : `${a.place ? place(a.place, ctx) : a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(dbColumn(st.cols[i], `c${i}_${n}`, a.type), a.type)}`)).filter(Boolean);
       return [`${t}if abap.Select(s, ${JSON.stringify(st.sql)}, ${sqlArgs(st.args, ctx)}, ${hostPreds(st.preds, ctx)}, func(scan func(dest ...any) error) {`,
@@ -1974,8 +1974,8 @@ ${t}	}`));
       // or 4 and 0 when there was no row and the work area is untouched
       const n = ctx.loop++;
       const tgt = st.target === null ? null : place(st.target, ctx);
-      const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
-      const val = (i) => dbColumn(st.cols[i], `q${n}.c${i}`, st.assign[i]?.type ?? st.cols[i].type);
+      /** @param {string} v @param {import("./emit-go-types.ts").Type} ft @returns {string} */ const fit = (v, ft) => (ft.k === "c" ? `abap.CFit(${v}, ${ft.len ?? 1})` : ft.k === "d" ? `abap.CFit(${v}, 8)` : ft.k === "t" ? `abap.CFit(${v}, 6)` : v);
+      /** @param {number} i @returns {string} */ const val = (i) => dbColumn(st.cols[i], `q${n}.c${i}`, st.assign[i]?.type ?? st.cols[i].type);
       const moves = st.assign.map((a, i) => (a === null ? null : `${a.place ? place(a.place, ctx) : a.line ? tgt : `${tgt}.${ident(a.field)}`} = ${fit(val(i), a.type)}`)).filter(Boolean);
       return [`${t}{`,
         `${t}\ttype selrow${n} struct {`, ...st.cols.map((c, i) => `${t}\t\tc${i} ${c.type.k === "i" ? "abap.DBInt" : "abap.DBString"}`), `${t}\t}`,
@@ -2013,7 +2013,7 @@ ${t}	}`));
       const n = ctx.loop++;
       const spec = `abap.WriteSpec{Table: ${JSON.stringify(st.table)}, Cols: []abap.WriteCol{${st.cols.map((c) => `{Name: ${JSON.stringify(c.name)}, Type: ${irTypeGo(c.ir)}}`).join(", ")}}, Key: ${goStrings(st.key)}}`;
       const fields = STRUCTDEFS.get((st.fromTable ? st.value.type.row : st.value.type).go)?.fields ?? [];
-      const value = (c, i) => {
+      /** @param {import("./ir.ts").WriteColumn} c @param {number} i @returns {string} */ const value = (c, i) => {
         if (c.client) return "abap.Mandt";
         const f = `r${n}.${ident(fields[i].name)}`;
         return c.kind === "c" ? `abap.DBC(${f})` : c.kind === "i" ? `int64(${f})` : f;
@@ -2036,8 +2036,8 @@ ${t}	}`));
       const bind = st.fs ? `${ident(st.fs)} = ${boundRow(st.table.type, tb, `i${n}`)}` : st.refInto ? `${place(st.into, ctx)} = ${rowRef(st.table.type, tb, `${tb}[i${n}]`)}` : st.into ? `${place(st.into, ctx)} = ${copied(rowValue(st.table.type, `r${n}`), st.into.type)}` : null;
       // ultra/events (fix round): a SORTED table, see read_key in frontend.mjs
       if (st.sorted) {
-        const kv = (j) => `k${n}_${j}`;
-        const get = (k) => (k.line ? `r${n}` : `r${n}.${ident(k.name)}`);
+        /** @param {number} j @returns {string} */ const kv = (j) => `k${n}_${j}`;
+        /** @param {import("./ir.ts").TableKey} k @returns {string} */ const get = (k) => (k.line ? `r${n}` : `r${n}.${ident(k.name)}`);
         const all = st.keys.map((k, j) => `${get(k)} == ${kv(j)}`).join(" && ");
         const decl = st.keys.flatMap((k, j) => [`${t}\t${kv(j)} := ${expr(k.value, ctx)}`, `${t}\t_ = ${kv(j)}`]);
         const found = [...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = int32(i${n} + 1)`, `${t}\t\t\thit${n} = true`, `${t}\t\t\tbreak`];
@@ -2062,10 +2062,10 @@ ${t}	}`));
         ...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = ${st.hashed ? "0" : `int32(i${n} + 1)`}`,
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
-    case "replace_chars": HELPER_IMPORTS.add("charsection"); return emitByteStatement(st, ctx, t, {expr, place});
+    case "replace_chars": HELPER_IMPORTS.add("charsection"); return (/** @type {import("./emit-go-types.ts").EmitByteStatement} */ (emitByteStatement))(st, ctx, t, {expr, place});
     case "find_bytes":
     case "replace_bytes":
-    case "find_bytes_all": return emitByteStatement(st, ctx, t, {expr, place});
+    case "find_bytes_all": return (/** @type {import("./emit-go-types.ts").EmitByteStatement} */ (emitByteStatement))(st, ctx, t, {expr, place});
     case "find": {
       // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
       const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length}${st.pcre ? ", true" : ""})`
@@ -2089,7 +2089,7 @@ ${t}	}`));
       const f = st.f;
       const rowGo = goType(st.row);
       const subGo = goType(st.sub);
-      const fill = (r) => [`${t}\t\t${r}.${ident(f.LINE)} = 0`, `${t}\t\t${r}.${ident(f.OFFSET)} = fm${n}[0]`, `${t}\t\t${r}.${ident(f.LENGTH)} = fm${n}[1]`,
+      /** @param {string} r @returns {string[]} */ const fill = (r) => [`${t}\t\t${r}.${ident(f.LINE)} = 0`, `${t}\t\t${r}.${ident(f.OFFSET)} = fm${n}[0]`, `${t}\t\t${r}.${ident(f.LENGTH)} = fm${n}[1]`,
         `${t}\t\t${r}.${ident(f.SUBMATCHES)} = nil`,
         `${t}\t\tfor g := 2; g+1 < len(fm${n}); g += 2 {`,
         `${t}\t\t\t${r}.${ident(f.SUBMATCHES)} = append(${r}.${ident(f.SUBMATCHES)}, ${subGo}{${ident(f.SOFFSET)}: fm${n}[g], ${ident(f.SLENGTH)}: fm${n}[g+1]})`,
@@ -2188,15 +2188,15 @@ ${t}	}`));
 }
 
 // a DEC column read into a p field, rounded to the field's decimals
-const dbP = (v, ft) => `abap.DBP(${v}, ${ft.len ?? 8}, ${ft.dec ?? 0})`;
+/** @param {string} v @param {import("./emit-go-types.ts").Type} ft @returns {string} */ const dbP = (v, ft) => `abap.DBP(${v}, ${ft.len ?? 8}, ${ft.dec ?? 0})`;
 
-const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
-const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
-const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
-const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
+/** @type {Record<string, string>} */ const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
+/** @type {Record<string, string>} */ const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
+/** @type {Record<string, string>} */ const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
+/** @type {Record<string, string>} */ const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
 
-function expr(e, ctx) {
-  const owned = ownedExpression(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
+/** @param {import("./emit-go-types.ts").Expr} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function expr(e, ctx) {
+  const owned = (/** @type {import("./emit-go-types.ts").OwnedExpression} */ (ownedExpression))(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
   if (owned !== null) return owned;
   switch (e.e) {
     case "static": return place(e, ctx);
@@ -2241,7 +2241,7 @@ function expr(e, ctx) {
       if (e.type.k === "xstring") return `abap.BitXS(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "p") return `${P_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
-      if (e.type.k === "int8") return `${I8_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
+      if (e.type.k === "int8") return `${(/** @type {Readonly<Record<string, string>>} */ (I8_OPS))[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
@@ -2279,8 +2279,8 @@ function expr(e, ctx) {
     case "call": {
       const args = ["s", ...e.args.map((a) => (a.dir === "importing" ? importingArg(a, ctx)
         : a.wrap ? `&${expr(a.wrap, ctx)}` : a.place === null ? `new(${goType(a.type)})` : `&${place(a.place, ctx)}`))];
-      let call;
-      if (e.receiver) call = `${exceptionClass(CLASSES.get(e.receiver.type.name), CLASSES) ? `abap.ExceptionRead(${expr(e.receiver, ctx)}, "")` : expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
+      /** @type {string} */ let call;
+      if (e.receiver) call = `${(/** @type {import("./emit-go-types.ts").ExceptionClass} */ (exceptionClass))(CLASSES.get(e.receiver.type.name), CLASSES) ? `abap.ExceptionRead(${expr(e.receiver, ctx)}, "")` : expr(e.receiver, ctx)}.${typeName(e.method)}(${args.join(", ")})`;
       else if (e.owner) call = `${funcName(e.owner, e.method)}(${args.join(", ")})`;
       else if (e.static) call = `${funcName(ctx.cls.name, e.method)}(${args.join(", ")})`;
       else if (e.sup) call = `me.${typeName(e.sup)}.${typeName(e.method)}(${args.join(", ")})`;
@@ -2331,20 +2331,20 @@ function expr(e, ctx) {
 }
 
 /** a generic value read into a typed one: an i, or a string fitted to a c's length */
-function unwrapTo(t, d) {
+/** @param {import("./emit-go-types.ts").Type} t @param {string} d @returns {string} */ function unwrapTo(t, d) {
   if (t.k === "i") return `abap.DataI(${d})`;
   if (t.k === "c") return `abap.CFit(abap.DataString(${d}), ${t.len})`;
   if (t.k === "p") return `abap.PFit(abap.DataP(${d}), ${t.len}, ${t.dec ?? 0}, false)`;
   return `abap.DataString(${d})`;
 }
 
-function templatePart(v, ctx, opts) {
+/** @param {import("./emit-go-types.ts").Expr} v @param {import("./emit-go-types.ts").Context} ctx @param {import("./emit-go-types.ts").TemplateOptions} opts @returns {string} */ function templatePart(v, ctx, opts) {
   let out = templateValue(v, ctx, opts);
   if (opts.width !== undefined) out = `abap.Pad(${out}, ${opts.width}, ${JSON.stringify(opts.align ?? "LEFT")}, ${JSON.stringify(opts.pad ?? " ")})`;
   return out;
 }
 
-function templateValue(v, ctx, opts) {
+/** @param {import("./emit-go-types.ts").Expr} v @param {import("./emit-go-types.ts").Context} ctx @param {import("./emit-go-types.ts").TemplateOptions} opts @returns {string} */ function templateValue(v, ctx, opts) {
   const x = expr(v, ctx);
   if (opts.decimals !== undefined) return v.type.k === "p" ? `abap.FmtPDec(${x}, ${opts.decimals})` : `abap.FmtFDec(${x}, ${opts.decimals})`;
   switch (v.type.k) {
@@ -2359,8 +2359,8 @@ function templateValue(v, ctx, opts) {
   }
 }
 
-function conv(e, ctx) {
-  const fast = emitPackedInt8(e, (n) => expr(n, ctx), helperFn);
+/** @param {import("./emit-go-types.ts").Conversion} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function conv(e, ctx) {
+  const fast = (/** @type {import("./emit-go-types.ts").EmitPackedInt8} */ (emitPackedInt8))(e, (n) => expr(n, ctx), helperFn);
   if (fast !== null) return fast;
   const x = expr(e.x, ctx);
   const from = e.from.k;
@@ -2424,15 +2424,15 @@ function conv(e, ctx) {
   throw new Error(`no Go for conversion ${e.kind} ${from}->${to}`);
 }
 
-function fn(e, ctx) {
-  return emitBuiltinGo(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
+/** @param {import("./emit-go-types.ts").Builtin} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function fn(e, ctx) {
+  return (/** @type {import("./emit-go-types.ts").EmitBuiltinGo} */ (emitBuiltinGo))(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
 }
 
 // an initial reference: the frontend decided it from the static type
 // (frontend.mjs upcastable)
 
-function cond(c, ctx) {
-  const fast = emitPackedComparison(c, (n) => expr(n, ctx));
+/** @param {import("./emit-go-types.ts").Condition} c @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function cond(c, ctx) {
+  const fast = (/** @type {import("./emit-go-types.ts").EmitPackedComparison} */ (emitPackedComparison))(c, (n) => expr(n, ctx));
   if (fast !== null) return fast;
   switch (c.c) {
     case "num_data_cmp": return `abap.CmpData(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
@@ -2449,7 +2449,7 @@ function cond(c, ctx) {
       // a generic operand (frontend compareValues, unwrap_chars): the pair
       // decides the comparison type, so both go to abap.CmpData as data
       if (c.l.e === "unwrap_chars" || c.r.e === "unwrap_chars") {
-        const side = (x) => (x.e === "unwrap_chars" ? expr(x.x, ctx) : `abap.StrData(${expr(x, ctx)})`);
+        /** @param {import("./emit-go-types.ts").Expr} x @returns {string} */ const side = (x) => (x.e === "unwrap_chars" ? expr(x.x, ctx) : `abap.StrData(${expr(x, ctx)})`);
         if (c.op === "=" || c.op === "<>") return `${c.op === "=" ? "" : "!"}abap.DataEq(${side(c.l)}, ${side(c.r)})`;
         return `abap.CmpData(${side(c.l)}, ${side(c.r)}) ${c.op} 0`;
       }
@@ -2499,7 +2499,7 @@ function cond(c, ctx) {
 }
 
 /** Call(name, session, args) for the numeric harness: numbers in, a number out */
-function dispatcher(classes) {
+/** @param {readonly import("./emit-go-types.ts").Class[]} classes @returns {string[]} */ function dispatcher(classes) {
   const lines = ["// Call runs one static method by name with numeric arguments, for the harness.",
     "func Call(name string, s *abap.Session, args []float64) float64 {", "\tswitch name {"];
   for (const cls of classes) {
