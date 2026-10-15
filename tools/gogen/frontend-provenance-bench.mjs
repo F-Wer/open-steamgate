@@ -36,8 +36,10 @@ function child({folders, objects, recording, mode = "none", cacheDir}) {
       const entry = unknown.get(site); entry.queries.add(JSON.stringify(q)); entry.owners++;
     }
   }
-  return {recording, mode, frontendMs, resolvedArtifacts: artifactDigestStats(program),
-    resolvedDigest: createHash("sha256").update(JSON.stringify([...artifactDigestsOf(program)].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))).digest("hex"), cacheBytes: mode === "none" ? 0 : treeBytes(cacheDir), reused: program.frontendCounts.reused, digest, objects: [...program.reg.getObjects()].length,
+  const resolvedArtifacts = artifactDigestStats(program) ?? {objects: 0, nodes: 0, milliseconds: 0, errors: {}};
+  const inspected = [...artifactDigestsOf(program)].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return {recording, mode, frontendMs, resolvedArtifacts, inspectedArtifacts: artifactDigestStats(program),
+    resolvedDigest: createHash("sha256").update(JSON.stringify(inspected)).digest("hex"), cacheBytes: mode === "none" ? 0 : treeBytes(cacheDir), reused: program.frontendCounts.reused, digest, objects: [...program.reg.getObjects()].length,
     lowered: program.frontendCounts.lowered, diagnostics: program.diagnostics.length,
     manifestObjects: manifests.size, queryRows,
     unknownScans: [...unknown.values()].map(({site, queries, owners}) => ({site, uniqueQueries: queries.size, manifestOccurrences: owners}))};
@@ -83,7 +85,9 @@ function main() {
         const result = run({folders, objects, recording, mode, cacheDir});
         runs.push(result);
         if (new Set(runs.map((r) => r.resolvedDigest)).size !== 1) throw new Error("resolved artifact digest mismatch");
-        if (result.resolvedArtifacts.objects !== result.objects || Object.keys(result.resolvedArtifacts.errors).length) throw new Error("incomplete resolved digests");
+        if (result.inspectedArtifacts.objects !== result.objects || Object.keys(result.inspectedArtifacts.errors).length)
+          throw new Error("incomplete resolved digest inspection");
+        if (mode === "none" && result.resolvedArtifacts.objects !== 0) throw new Error("uncached compile performed digest work");
         if (new Set(runs.map((r) => r.digest)).size !== 1) throw new Error("recording/cache mode byte mismatch");
       }
     }

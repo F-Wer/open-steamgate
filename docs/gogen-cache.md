@@ -35,9 +35,14 @@ Neither source words nor lowering-time reads cover every semantic dependency.
 
 ## Resolved-artifact digests (step 3)
 
-Every compilation computes one `gogen-resolved-artifact-1` SHA-256 digest
-per registry object after syntax checking, before lowering. This is always on,
-including without a cache. `frontend-artifact-digests.mjs` owns the projections
+A cache/session compilation installs an empty digest memo after syntax checking.
+The ordered replay seam requests a `gogen-resolved-artifact-2` SHA-256 digest
+only when fingerprinting a read that contains a definition; repeated reads reuse
+that owner's digest. Unread owners are never projected on the normal compile path.
+Without cacheDir or a recording session, compilation does no digest work.
+Explicit inspection (`artifactDigestsOf` / the digest CLI) requests a full
+snapshot after compilation; diagnostic dependency metadata requests its hit
+owners separately when provenance recording is enabled. `frontend-artifact-digests.mjs` owns the projections
 and stores them in a registry-keyed weak table; no digest fields enter IR or
 replay-tracked program state. A new table replaces the previous compile's memo.
 
@@ -56,7 +61,11 @@ Dictionary keys use code-point sorting; arrays preserve semantic/source order.
 Filenames strip directory prefixes. Expanded statements, definitions and
 recursively shared types are projected and hashed once within a compile.
 Statement hashes include token text and real/virtual positions; structure
-projections reuse those hashes instead of repeating token graphs. Parent links, registries,
+projections reuse those hashes instead of repeating token graphs. Source
+expressions use their token sequence (including parentheses) so the transpiler's
+in-place arithmetic precedence regrouping cannot change a digest according to
+whether its owner has been lowered or replayed. This canonicalization is the
+format-2 change; the rest of the resolved projection is retained. Parent links, registries,
 object identities, parser caches and Map insertion order never enter this
 format. The digest is a snapshot of what core actually resolved, including
 Unknown/Void types, rather than a claim that resolution succeeded. Unsupported
@@ -69,17 +78,21 @@ A same-name/file/start definition with changed semantic contents rejects replay
 atomically. Repeated reads reuse the owner's digest rather than serializing its
 graph. Definitions without a registry/owner digest refuse persistence.
 
-Disk builds record provenance internally even when public reporting is off,
-so every new entry has `gogen-dependency-digests-1` metadata: owner/entry name,
-owner artifact digest, a sorted `dependencyDigests` dictionary from the final
-expanded provenance manifest's **hits**, and `provenanceComplete`. Filename hits
-map back to their owning artifact. Writes finish after lowering/final metadata
-passes, so later provider observations are included. This metadata describes
-what the entry was built against; it is **not in the key or a replacement for
-miss/scan guards**. Unknown scans or unavailable digests make completeness
-false. Existing entries that predate metadata are labelled unavailable by the
-inspection command. Public `provenanceOf()` remains opt-in; cache builds collect
-the internal transcript regardless of the reporting setting.
+Disk builds record `gogen-dependency-digests-1` metadata only with provenance
+recording (`GOGEN_PROVENANCE=1` / `provenance: true`, or an explicit enclosing
+`recordProvenance` session). Explicit `provenance: false` overrides the environment.
+Metadata contains the owner/entry name, owner digest, a sorted
+`dependencyDigests` dictionary from the final expanded manifest's **hits**, and
+`provenanceComplete`. Filename hits map back to their owning artifact. These
+opt-in diagnostic reads request digests on demand as well; dense manifests can
+request most of the registry. Writes wait until final metadata passes and freeze
+the lowering snapshot so later mutations cannot change it. Without recording,
+writes persist immediately without cloning, provenance hooks or dependency
+metadata. Metadata is **not in the key or a replacement for miss/scan guards**.
+Unknown scans or unavailable digests make completeness false. Inspection labels
+entries without metadata unavailable, including entries built with recording off.
+Enabling recording while reusing such an entry retains the explicit
+`lowering-built-before-recording` marker; it does not invent a transcript.
 
 ```sh
 # All current artifact digests, or one artifact (no cache needed).
@@ -109,7 +122,7 @@ cold Go/JS. The within-object first-wins macro reorder remains in the oracle.
 These gates use fresh registries/processes and compare warm with fresh cold;
 they do not implement retained-registry parser invalidation.
 
-### Step 3 validation and cost
+### Initial step 3 validation and cost (before the performance round)
 
 The combined sequential frontend/cache/CI-oracle run passes **221 tests**.
 The latest digest/CI recheck passes **16 tests**, followed by three focused
@@ -168,15 +181,88 @@ Reports remain local: `.local/digest-perf-parent-ram.json`,
 `.local/digest-sensitivity-final.json`. Scratch/cache copies are removed; the
 pinned library checkouts are unchanged.
 
+### Step 3 performance round
+
+Three fresh Node processes per scenario and recording setting, medians on
+Node 26.9.0, complete pinned open-abap-core + ajson, same RAM scratch and shared
+Go build cache. Parent `543b1053` was remeasured in an isolated source copy;
+"initial step 3" is the preceding round's recorded measurement at `025f26c2`.
+The frontend timer includes loading, parsing, syntax, lowering/replay and cache
+writes. Full digest inspection and emission occur after the timer. The benchmark
+checks all inspection results for completeness/unsupported shapes separately from
+its lazy compile counters, and rejects any uncached digest projection.
+
+| Recording off | Parent, remeasured | Initial step 3 | Lazy step 3 | Over parent |
+| --- | --- | --- | --- | --- |
+| No cache | 1,458.8 ms | 1,807.0 ms | 1,427.7 ms | -2.1% |
+| cacheDir cold | 1,721.8 ms | 3,344.6 ms | 1,820.5 ms | +5.7% |
+| cacheDir warm | 1,535.0 ms | 2,415.3 ms | 1,599.3 ms | +4.2% |
+| Cache file bytes | 526,839 | 6,436,245 | 531,461 | 1.009x |
+
+All requested default-path limits pass. Uncached compilation has **zero** digest
+projections. Cold and warm each fingerprint **five of 651 owners**, projecting
+5,355 shared nodes in 76.2 / 75.7 ms (including the sub-millisecond filename
+inventory). Median owner costs are roughly AJSON 31 ms, SXML reader 16–18 ms,
+JSON 11–13 ms, ZIP 10 ms and Unit assertions 5 ms. Each owner is projected once
+per compile; 1,000 repeated fingerprints reuse its memo. Resetting a retained
+registry's compile discards that memo, and an uncached compile removes it.
+
+A fresh cold CPU profile attributes approximately 35% of classified samples to
+registry parsing, 16% to syntax checks, 26% to lowering/final metadata, 12% to
+disk-cache/replay work, 4% to digests, 4% to GC and 3% to loading. Parser
+combinators remain the largest individual parser site. Cache costs include
+fingerprint JSON, portable validation, compression and serialization; further
+work there is independent of selective cache keys. Profiles are diagnostic
+samples rather than additional timing runs.
+
+| Recording on | Total | Added over recording off | Digest projection | Cache bytes |
+| --- | --- | --- | --- | --- |
+| No cache | 1,793.2 ms | 365.5 ms (+25.6%) | 0 ms | 0 |
+| cacheDir cold | 3,458.6 ms | 1,638.0 ms (+90.0%) | 348.0 ms | 6,550,285 |
+| cacheDir warm | 2,217.2 ms | 617.9 ms (+38.6%) | 87.3 ms | 6,550,285 |
+
+Provenance diagnostics retain their separate cost: a cold recorded build requests
+492 owners through dense dependency-hit metadata. Its profile is dominated by
+manifest expansion, metadata assembly, snapshot cloning and serialization/write
+work; these operations are absent from ordinary cache writes. A warm recorded
+build requests the five fingerprint owners and reuses stored metadata. The
+metadata remains conservative, incomplete where unknown scans exist, and outside
+the key. Recording is an explicit diagnostic choice.
+
+All 18 candidate captures have identical emitted-artifact/class-IR hashes,
+matching all 18 parent captures. Full post-compile digest inspection also agrees
+across all 18 candidate runs, including provenance on/off and cold/warm/no-cache.
+Every warm run reuses 251 classes and lowers 21; cold/no-cache lower 272, with
+zero diagnostics. Arithmetic regrouping has an explicit regression so lazy
+snapshots cannot depend on whether lowering has visited their owner.
+
+The complete sequential frontend/cache/CI-oracle check passes **225 tests**, with
+zero failures or skips. The obsolete always-record regression now decodes cache
+files to assert that recording-off entries have neither transcript nor metadata,
+and that recorded replay marks them incomplete; its 25-test suite passes.
+The CI oracle has **62 observations / 60 validated mutations, zero mismatches**.
+The full sensitivity matrix passes 14 covered rows / 28 expected mismatches,
+with 13 documented coverage limits. The cross-object semantic fingerprint
+remains EQUAL under `no-version`, while
+location-only fingerprints give MISMATCH in both line modes. All **651** real
+objects agree across eight fresh Node/Bun processes (two per runtime and
+provenance setting). The isolated unedited `543b1053` typing-proof record compares
+byte-for-byte: **239 raw artifacts in each of six modes**. Changed-file budgets,
+explicit-path leak scan, whitespace and suite registration pass; `frontend.mjs`
+remains **7,055 lines**. The budget command also reports the existing unrelated
+`go:charsearch` breach on origin/main; no changed path exceeds its budget.
+
+Reports are local: `.local/digest-lazy-parent-perf-final.json`,
+`.local/digest-lazy-perf-final.json`, and `.local/digest-lazy-profile-{off,on}.json`.
+
 ## Semantic provenance (step 2)
 
 `compileProgram({provenance: true, ...})` records semantic resolution before
 `reg.parse()`, through global definition passes, syntax checking and lowering.
-Public reporting is **off by default**. Disk builds now collect an internal
-transcript for step 3 metadata. Enable public reporting with
+Recording is **off by default**, including disk builds. Enable it with
 `provenance: true` or `GOGEN_PROVENANCE=1`; explicit `provenance: false`
-overrides the environment for public reporting. Builds without a disk cache
-keep recording opt-in.
+overrides the environment. An explicit enclosing `recordProvenance` session
+also enables recording.
 Provenance remains observational: it supplies step 3 metadata, without changing
 cache keys, source hashes or the whole-registry version guard. Selective
 per-entry keys remain step 4.
@@ -242,8 +328,8 @@ An artifact subsequently built with recording off gets an `untraced-artifact`
 marker on its owner, even when a retained syntax session bypasses checking.
 Artifacts first encountered after they were built receive
 `artifact-built-before-recording`. Memory/disk replay without an own-row
-transcript receives `lowering-built-before-recording`. Public reporting being off with `cacheDir`
-still activates the internal recorder in step 3.
+transcript receives `lowering-built-before-recording`. Disk builds with recording off store no transcript; subsequent recorded replay
+marks such entries `lowering-built-before-recording`.
 
 Inventory snapshots copy filenames and SHA-256 content hashes; they do not
 retain core's mutable file array. Replacing, adding or removing a file, or

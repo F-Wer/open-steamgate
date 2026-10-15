@@ -263,15 +263,22 @@ test("session lowering built while recording was off has an explicit marker", ()
   assert.ok(marker(reg, "CLAS ZCL_A", "lowering-built-before-recording"));
 });
 
-test("disk metadata records internally while public provenance is off", () => {
+test("disk entries built without recording omit metadata and mark subsequent recorded replay incomplete", () => {
   const dir = mkdtempSync(join(tmpdir(), "prov-lowering-"));
   try {
     writeFileSync(join(dir, "zcl_a.clas.abap"), classSource("zcl_a"));
     const options = {folders: [dir], objects: ["ZCL_A"], cacheDir: join(dir, "cache")};
-    compileProgram({...options, provenance: false});
+    const off = compileProgram({...options, provenance: false});
+    assert.equal(provenanceOf(off, {internal: true}).size, 0, "no internal recorder either");
+    const entries = diskFiles(options.cacheDir).filter((f) => f.endsWith(".bin"))
+      .map((f) => deserialize(inflateRawSync(readFileSync(f).subarray(65))));
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].metadata, undefined, "no dependency digest metadata");
+    assert.equal(entries[0].value.provenance, undefined, "no own-row transcript");
     const p = compileProgram({...options, provenance: true});
     assert.ok(p.frontendCounts.reusedClasses.includes("ZCL_A"));
-    assert.equal(marker(p.reg, "CLAS ZCL_A", "lowering-built-before-recording"), false);
+    assert.ok(marker(p.reg, "CLAS ZCL_A", "lowering-built-before-recording"));
+    assert.equal(emitGo(p), emitGo(compileProgram({...options, cacheDir: undefined, provenance: true})));
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 

@@ -17,7 +17,7 @@ export function cacheDigestMetadata(root, name) {
         if (bytes.subarray(0, 64).toString() !== createHash("sha256").update(payload).digest("hex")) continue;
         const entry = deserialize(inflateRawSync(payload));
         if (entry.value.name === name.toUpperCase() || entry.metadata?.owner === name.toUpperCase())
-          found.push({version, file, ...(entry.metadata ?? {entry: entry.value.name, unavailable: "entry predates digest metadata"})});
+          found.push({version, file, ...(entry.metadata ?? {entry: entry.value.name, unavailable: "provenance recording was off or entry predates digest metadata"})});
       } catch { /* Same corruption/missing-entry fallback as compilation. */ }
     }
   }

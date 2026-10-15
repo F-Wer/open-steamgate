@@ -1,4 +1,4 @@
-// Resolved snapshots, never registry graphs. A new table is built per compile;
+// Resolved snapshots, never registry graphs. A lazy table is installed per compile;
 // definitions and types are projected/hash-consed once within that table.
 import {createHash} from "node:crypto";
 import {basename} from "node:path";
@@ -23,14 +23,21 @@ const location = (id) => [id.constructor.name, id.getName(), portableFilename(id
 class Digests {
   constructor(registry) {
     this.registry = registry;
-    this.objects = new Map([...registry.getObjects()].map((o) => [artifactKey(o), o]));
-    this.owners = new Map();
-    for (const [key, obj] of this.objects) for (const f of obj.getFiles()) this.owners.set(f.getFilename(), key);
     this.memo = new WeakMap();
     this.building = new WeakSet();
     this.values = new Map();
     this.errors = new Map();
-    this.stats = {objects: 0, nodes: 0, milliseconds: 0};
+    this.timings = new Map();
+    this.stats = {objects: 0, nodes: 0, milliseconds: 0, inventoryMilliseconds: 0};
+  }
+  inventory() {
+    if (this.objects) return;
+    const start = performance.now();
+    this.objects = new Map([...this.registry.getObjects()].map((o) => [artifactKey(o), o]));
+    this.owners = new Map();
+    for (const [key, obj] of this.objects) for (const f of obj.getFiles()) this.owners.set(f.getFilename(), key);
+    this.stats.inventoryMilliseconds = performance.now() - start;
+    this.stats.milliseconds += this.stats.inventoryMilliseconds;
   }
   memoized(value, project) {
     if (!value) return null;
@@ -50,6 +57,12 @@ class Digests {
         const inner = n.get?.();
         // The pinned parser also produces TokenNodeRegex, with empty children.
         if (typeof inner?.getStr === "function") return this.token(inner);
+        // Rearranger mutates Source expression grouping in place during lowering.
+        // Tokens (including parentheses and positions) canonically describe the
+        // same expression before/after precedence regrouping, without cloning or
+        // walking unread owners. Types/resolution are projected separately below.
+        if (n.constructor.name === "ExpressionNode" && inner?.constructor.name === "Source")
+          return ["Source", n.getTokens().map((t) => this.token(t))];
         // Structure and statement inventories share statements. Hash each once,
         // without allocating a hash/memo entry for every expression and token.
         if (n !== node && n.constructor.name === "StatementNode") return ["statement", this.syntax(n)];
@@ -114,6 +127,7 @@ class Digests {
   }
   get(key) {
     if (this.values.has(key)) return this.values.get(key);
+    this.inventory();
     const obj = this.objects.get(key);
     if (!obj) return null;
     const start = performance.now();
@@ -127,36 +141,46 @@ class Digests {
       // no parsedType cache. It may recursively consume already-resolved types.
       const type = typeof obj.parseType === "function" ? obj.parseType(this.registry) : undefined;
       const scopes = obj.syntaxResult?.spaghetti?.getTop();
-      digest = hash(["gogen-resolved-artifact-1", key, files, expanded, def ? this.definition(def) : null,
+      digest = hash(["gogen-resolved-artifact-2", key, files, expanded, def ? this.definition(def) : null,
         scopes ? this.scope(scopes) : null, type ? this.type(type) : null]);
     } catch (error) {
       // Unknown shapes are inspectable and cannot yield a semantic fingerprint.
       this.errors.set(key, `${error.name}: ${error.message}`); digest = null;
     }
-    this.values.set(key, digest); this.stats.objects++; this.stats.milliseconds += performance.now() - start;
+    this.values.set(key, digest); this.stats.objects++; this.timings.set(key, performance.now() - start); this.stats.milliseconds += this.timings.get(key);
     return digest;
   }
 }
 
-export function prepareArtifactDigests(registry) {
-  const start = performance.now();
+// Reset even for retained registries; a previous compile's memo must never leak.
+// The ordinary uncached path only deletes a possible old table: no inventory,
+// hashing, syntax or type projection takes place.
+export function prepareArtifactDigests(registry, enabled = true) {
+  if (!enabled) { tables.delete(registry); return; }
   const table = new Digests(registry);
   tables.set(registry, table);
-  for (const key of table.objects.keys()) table.get(key);
-  table.stats.milliseconds = performance.now() - start;
   return table;
 }
+const registryOf = (value) => value?.reg ?? value?.registry ?? value;
+const tableOf = (registry) => tables.get(registry) ?? prepareArtifactDigests(registry);
+// Explicit inspection requests a complete snapshot, outside normal compilation.
 export function artifactDigestsOf(value) {
-  const table = tables.get(value?.reg ?? value?.registry ?? value);
-  return table ? new Map(table.values) : new Map();
+  const table = tableOf(registryOf(value));
+  table.inventory();
+  for (const key of table.objects.keys()) table.get(key);
+  return new Map(table.values);
+}
+export function artifactDigestOf(value, key) {
+  return tableOf(registryOf(value)).get(key);
 }
 export function artifactDigestStats(value) {
   const table = tables.get(value?.reg ?? value?.registry ?? value);
-  return table ? {...table.stats, errors: Object.fromEntries(table.errors)} : undefined;
+  return table ? {...table.stats, owners: Object.fromEntries(table.timings), errors: Object.fromEntries(table.errors)} : undefined;
 }
 export function definitionFingerprint(registry, def) {
-  const table = tables.get(registry);
-  const owner = table?.owners.get(def.getFilename());
+  const table = tableOf(registry);
+  table.inventory();
+  const owner = table.owners.get(def.getFilename());
   const digest = owner && table.get(owner);
   if (!digest) throw new TypeError("definition has no resolved owner digest");
   return {definition: [def.constructor.name, def.getName(), portableFilename(def.getFilename()), def.getStart().getRow(), def.getStart().getCol()], owner, digest};

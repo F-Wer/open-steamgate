@@ -169,7 +169,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   // the actual registered object; retain every other syntax diagnostic.
   const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session)
     .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
-  prepareArtifactDigests(reg);
+  prepareArtifactDigests(reg, !!session);
   if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
   if (broken.size > 0) wanted = wanted.filter((w) => !broken.has(w));

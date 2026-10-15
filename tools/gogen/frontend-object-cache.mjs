@@ -1,4 +1,4 @@
-import {artifactLowering, storedProvenance, inheritStoredProvenance, provenanceOf} from "./frontend-provenance.mjs";
+import {artifactLowering, storedProvenance, inheritStoredProvenance, provenanceOf, recordingProvenance} from "./frontend-provenance.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
@@ -8,7 +8,7 @@ import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, st
 import {join, resolve} from "node:path";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
-import {artifactDigestsOf} from "./frontend-artifact-digests.mjs";
+import {artifactDigestOf} from "./frontend-artifact-digests.mjs";
 import {sourceKeys} from "./frontend-source-key.mjs";
 
 const here = import.meta.dirname, home = resolve(here, "../..");
@@ -209,7 +209,7 @@ export function objectCache(registry, root) {
       }
     },
     write(owner, value, reads, program) {
-      if (!program.reg) { cache.persist({owner, value, reads, program}); return; }
+      if (!recordingProvenance() || !program.reg) { cache.persist({owner, value, reads, program}); return; }
       // Freeze the lowering now, as the old immediate writer did. Later owners
       // may mutate shared IR/effect values before final provenance is available.
       try {
@@ -221,19 +221,22 @@ export function objectCache(registry, root) {
     },
     finish(program) {
       if (!pending.length) return;
-      const manifests = provenanceOf(program, {internal: true}), digests = artifactDigestsOf(registry);
+      const manifests = provenanceOf(program, {internal: true});
       const fileOwners = new Map([...registry.getObjects()].flatMap((o) => o.getFiles().map((f) => [f.getFilename(), `${o.getType()} ${o.getName().toUpperCase()}`])));
+      const owners = new Set(fileOwners.values());
       for (const entry of pending.splice(0)) {
         const manifest = manifests.get(entry.owner), keys = new Set();
         for (const hit of manifest?.hits ?? []) for (const result of hit.result) {
-          const key = digests.has(result) ? result : fileOwners.get(result);
+          const key = owners.has(result) ? result : fileOwners.get(result);
           if (key) keys.add(key);
         }
+        const dependencies = [...keys].sort().map((key) => [key, artifactDigestOf(registry, key)]);
+        const ownerDigest = artifactDigestOf(registry, entry.owner);
         entry.metadata = {format: "gogen-dependency-digests-1", owner: entry.owner, entry: entry.value.name,
-          artifactDigest: digests.get(entry.owner) ?? null,
-          dependencyDigests: Object.fromEntries([...keys].sort().map((key) => [key, digests.get(key)])),
+          artifactDigest: ownerDigest,
+          dependencyDigests: Object.fromEntries(dependencies),
           provenanceComplete: !!manifest && manifest.unknownScans.length === 0
-            && !!digests.get(entry.owner) && [...keys].every((key) => !!digests.get(key))};
+            && !!ownerDigest && dependencies.every(([, digest]) => !!digest)};
         cache.persist(entry);
       }
     },

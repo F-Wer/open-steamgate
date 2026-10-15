@@ -9,7 +9,9 @@ import {artifactDigestsOf, artifactDigestStats, prepareArtifactDigests, definiti
 import {objectCache} from "./frontend-object-cache.mjs";
 import {cacheDigestMetadata} from "./frontend-artifact-digests-cli.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
+import {provenanceOf, recordProvenance} from "./frontend-provenance.mjs";
 import {orderedRegistry, artifactsOf, compareArtifacts} from "./cache-oracle-capture.mjs";
+import {classSource} from "./cache-oracle-corpus.mjs";
 import {syntheticCorpus, runOracle} from "./cache-oracle.mjs";
 const scratch = (run) => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-digests-"));
@@ -77,9 +79,11 @@ test("borrowed global definition checks semantics at the same coordinates and me
   const c = corpus(dir);
   const state = (p) => ({reg: p.reg, definitions: new Map([["borrowed", p.reg.getObject("CLAS", "ZCL_BORROW_PROVIDER").getDefinition()]])});
   const first = build(dir, c), a = state(first), d = a.definitions.get("borrowed");
+  assert.equal(artifactDigestStats(first), undefined, "uncached compile does no digest work");
   const cached = recordLowering(a, (p) => p.definitions.get("borrowed").getAttributes().getConstants()[0].getValue());
   assert.ok(cached.replay);
   const stats = artifactDigestStats(first);
+  assert.equal(stats.objects, 1, "only the borrowed definition owner was projected");
   for (let i = 0; i < 1000; i++) definitionFingerprint(first.reg, d);
   assert.deepEqual(artifactDigestStats(first), stats);
   assert.ok(replayLowering(state(build(dir, c)), cached.replay), "fresh identities replay");
@@ -90,25 +94,44 @@ test("borrowed global definition checks semantics at the same coordinates and me
   assert.equal(replayLowering(changed, cached.replay), false);
 }));
 
-test("cache metadata stores final provenance-hit digests with public recording on and off; CLI reads them", () => scratch((dir) => {
+test("cache dependency metadata and provenance are opt-in; CLI explains unavailable metadata", () => scratch((dir) => {
   const c = corpus(dir), cacheDir = join(dir, "cache");
   const off = build(dir, c, {cacheDir, provenance: false});
-  const metadata = cacheDigestMetadata(cacheDir, "ZCL_DDIC");
+  assert.equal(provenanceOf(off).size, 0, "cacheDir alone installs no recorder");
+  assert.equal(cacheDigestMetadata(cacheDir, "ZCL_DDIC")[0].unavailable, "provenance recording was off or entry predates digest metadata");
+  const onDir = join(dir, "recorded");
+  const on = build(dir, c, {cacheDir: onDir, provenance: true});
+  const metadata = cacheDigestMetadata(onDir, "ZCL_DDIC");
   assert.equal(metadata.length, 1);
   for (const key of ["TABL ZORACLE_TAB", "DTEL ZORACLE_NUM", "DOMA ZORACLE_NUM"])
-    assert.equal(metadata[0].dependencyDigests[key], artifactDigestsOf(off).get(key), key);
+    assert.equal(metadata[0].dependencyDigests[key], artifactDigestsOf(on).get(key), key);
   assert.equal(metadata[0].provenanceComplete, false, "unknown orchestration remains fail-closed");
-  const on = build(dir, c, {cacheDir, provenance: true});
   assert.deepEqual(artifactDigestsOf(on), artifactDigestsOf(off));
-  assert.ok(on.frontendCounts.reusedClasses.includes("ZCL_DDIC"));
-  const cli = JSON.parse(execFileSync(process.execPath, ["tools/gogen/frontend-artifact-digests-cli.mjs", "--cache-dir", cacheDir, "--entry", "ZCL_DDIC"], {encoding: "utf8"}));
+  const warm = build(dir, c, {cacheDir: onDir, provenance: true});
+  assert.ok(warm.frontendCounts.reusedClasses.includes("ZCL_DDIC"));
+  const cli = JSON.parse(execFileSync(process.execPath, ["tools/gogen/frontend-artifact-digests-cli.mjs", "--cache-dir", onDir, "--entry", "ZCL_DDIC"], {encoding: "utf8"}));
   assert.deepEqual(cli, metadata);
+}));
+
+test("cache/session compilation leaves unread owners lazy and resets memo on retained-registry compiles", () => scratch((dir) => {
+  const c = corpus(dir), session = {};
+  const first = build(dir, c, {session});
+  const d = first.reg.getObject("CLAS", "ZCL_BORROW_PROVIDER").getDefinition();
+  const before = artifactDigestStats(first)?.objects ?? 0;
+  definitionFingerprint(first.reg, d);
+  assert.equal(artifactDigestStats(first).objects, before + 1);
+  const next = compileProgram({folders: [], registry: first.reg, objects: [], session, tolerant: true});
+  assert.equal(artifactDigestStats(next).objects, 0, "new compile starts with an empty memo");
+  definitionFingerprint(next.reg, d);
+  assert.equal(artifactDigestStats(next).objects, 1);
+  compileProgram({folders: [], registry: first.reg, objects: [], tolerant: true});
+  assert.equal(artifactDigestStats(next), undefined, "uncached compilation discards the old memo");
 }));
 
 test("deferred metadata preserves the lowering snapshot when a later owner mutates shared values", () => scratch((dir) => {
   const c = corpus(dir), program = build(dir, c), cache = objectCache(program.reg, join(dir, "cache"));
   const value = {name: "ZCL_CONTROL_0001", ir: {constant: 1}}, reads = [];
-  cache.write("CLAS ZCL_CONTROL_0001", value, reads, program);
+  recordProvenance(() => cache.write("CLAS ZCL_CONTROL_0001", value, reads, program));
   value.ir.constant = 2; reads.push("CLAS MISSING");
   cache.finish(program);
   assert.equal(cache.read("CLAS ZCL_CONTROL_0001", value.name, program).ir.constant, 1);
@@ -137,6 +160,19 @@ test("global definition order preserves per-object digests and warm matches that
   const warm = compileProgram({folders: [dir], objects: c.objects, tolerant: true, cacheDir, registry: orderedRegistry([dir], [...order].reverse())});
   assert.equal(warm.frontendCounts.reused, 0, "registry inventory order remains globally guarded");
   assert.ok(compareArtifacts(artifactsOf(warm), artifactsOf(b)).equal);
+}));
+
+test("arithmetic syntax digests survive in-place rearrangement and fresh cache replay", () => scratch((dir) => {
+  writeFileSync(join(dir, "zcl_arithmetic.clas.abap"), classSource("zcl_arithmetic",
+    "rv = 1 + 2 * 3 - CONV i( 4 ) / 2 + ( 5 - 1 )."));
+  const reg = orderedRegistry([dir], []);
+  reg.findIssues();
+  const before = artifactDigestsOf(reg);
+  const options = {folders: [dir], objects: ["ZCL_ARITHMETIC"], tolerant: true};
+  const cold = compileProgram({...options, registry: reg});
+  assert.deepEqual(artifactDigestsOf(cold), before, "projection ignores arithmetic regrouping");
+  const cacheDir = join(dir, "cache");
+  for (let i = 0; i < 2; i++) assert.deepEqual(artifactDigestsOf(compileProgram({...options, cacheDir})), before);
 }));
 
 test("canonical dictionaries ignore insertion order; unsupported shapes refuse definition fingerprints", () => {

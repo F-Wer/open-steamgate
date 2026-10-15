@@ -141,7 +141,7 @@ export function recordProvenance(run, {expose = true} = {}) {
   }
 }
 
-/** Public diagnostics remain opt-in. Disk metadata always records internally. */
+/** Recording and dependency metadata are opt-in, including for disk builds. */
 export function withProvenance(compile) {
   return (options) => {
     const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
@@ -149,7 +149,7 @@ export function withProvenance(compile) {
       if (options.registry && active) active.inventory(options.registry, [...registryObjects.call(options.registry)]);
       return compile(options);
     };
-    return expose || options.cacheDir ? recordProvenance(run, {expose}) : run();
+    return expose ? recordProvenance(run, {expose}) : run();
   };
 }
 
@@ -163,6 +163,8 @@ export function artifactLowering(lower) {
 
 // Disk IR replay performs no lowering lookups. Carry its stored observation
 // transcript too, without using it to validate or change any cache key.
+export const recordingProvenance = () => !!active;
+
 export function storedProvenance(reg, obj) {
   if (!active) return;
   const state = active.state(reg), entry = active.entry(state, keyOf(obj.obj ?? obj));
