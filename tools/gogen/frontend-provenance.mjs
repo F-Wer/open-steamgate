@@ -7,7 +7,7 @@ const require = createRequire(import.meta.url);
 const coreRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
 const core = coreRequire("@abaplint/core");
 const registryObjects = core.Registry.prototype.getObjects;
-const registries = new WeakMap(), results = new WeakMap();
+const registries = new WeakMap(), results = new WeakMap(), published = new WeakMap();
 let active;
 const keyOf = (obj) => obj?.getType ? `${obj.getType()} ${obj.getName().toUpperCase()}` : undefined;
 const empty = () => ({queries: new Map(), edges: new Set()});
@@ -18,7 +18,8 @@ const fileSnapshot = (obj) => obj.getFiles().map((f) => [f.getFilename(),
   createHash("sha256").update(f.getRaw()).digest("hex")]);
 
 class Recorder {
-  constructor() {
+  constructor(expose) {
+    this.expose = expose;
     this.stack = [];
     this.contexts = [];
     this.states = new Set();
@@ -30,6 +31,15 @@ class Recorder {
       state = {reg, config: reg.getConfig(), entries: new Map(), global: empty(), files: new Map(), artifacts: new Map()};
       registries.set(reg, state);
     }
+    // Internal disk observation must not mutate an already published manifest.
+    if (!this.expose && state.exposed && !this.states.has(state)) {
+      const copy = (entry) => ({queries: new Map(entry.queries), edges: new Set(entry.edges)});
+      state = {...state, entries: new Map([...state.entries].map(([k, e]) => [k, copy(e)])),
+        global: copy(state.global), files: new Map(state.files), artifacts: new Map(state.artifacts)};
+      registries.set(reg, state);
+    }
+    state.exposed = this.expose;
+    if (this.expose) published.set(reg, state);
     this.states.add(state);
     return state;
   }
@@ -114,14 +124,14 @@ class Recorder {
 }
 
 /** Scope hooks synchronously and restore every descriptor even on a refusal. */
-export function recordProvenance(run) {
+export function recordProvenance(run, {expose = true} = {}) {
   if (active) return run();
-  const recorder = new Recorder();
+  const recorder = new Recorder(expose);
   const restore = installHooks(core, coreRequire, recorder);
   active = recorder;
   try {
     const value = run();
-    if (value && typeof value === "object") results.set(value, recorder.states);
+    if (value && typeof value === "object") results.set(value, {states: recorder.states, exposed: recorder.expose});
     return value;
   } finally {
     for (const state of recorder.states) for (const obj of registryObjects.call(state.reg)) {
@@ -131,15 +141,16 @@ export function recordProvenance(run) {
   }
 }
 
-/** Recording is opt-in until step 4 consumes it; cache guards are unchanged. */
+/** Recording and dependency metadata are opt-in, including for disk builds. */
 export function withProvenance(compile) {
-  return (options) => options.provenance ?? (process.env.GOGEN_PROVENANCE === "1")
-    ? recordProvenance(() => {
-      // A supplied session may bypass findIssues(), including our inventory
-      // hook. Inspect it before any cached scope/IR can be served.
-      if (options.registry) active.inventory(options.registry, [...registryObjects.call(options.registry)]);
+  return (options) => {
+    const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
+    const run = () => {
+      if (options.registry && active) active.inventory(options.registry, [...registryObjects.call(options.registry)]);
       return compile(options);
-    }) : compile(options);
+    };
+    return expose ? recordProvenance(run, {expose}) : run();
+  };
 }
 
 export function withArtifact(ctx, obj, run, phase = "lowering") {
@@ -152,6 +163,8 @@ export function artifactLowering(lower) {
 
 // Disk IR replay performs no lowering lookups. Carry its stored observation
 // transcript too, without using it to validate or change any cache key.
+export const recordingProvenance = () => !!active;
+
 export function storedProvenance(reg, obj) {
   if (!active) return;
   const state = active.state(reg), entry = active.entry(state, keyOf(obj.obj ?? obj));
@@ -223,13 +236,17 @@ export function expandProgramSelection(reg, wanted, abaplint) {
 /** No fields are added to IR, abaplint objects or replay-tracked program state.
  * Queries stay on their original owner; expand edges at inspection time so
  * cached definitions/types/scopes inherit even subsequently collected reads. */
-export function provenanceOf(value) {
+export function provenanceOf(value, {internal = false} = {}) {
   // Source normalization can create temporary registries for the same object.
   // A program/session manifest belongs only to its actual compiler registry.
-  const state = registries.get(value?.reg ?? value?.registry ?? value);
-  const states = state ? new Set([state]) : results.get(value) ?? new Set();
+  const reg = value?.reg ?? value?.registry ?? value;
+  const result = results.get(value);
+  const state = (internal || active ? registries : published).get(reg);
+  const states = internal || active ? (state ? new Set([state]) : new Set())
+    : result ? (result.exposed ? result.states : new Set()) : state ? new Set([state]) : new Set();
   const output = new Map();
-  for (const state of states) for (const owner of state.entries.keys()) {
+  for (const state of states) if ((!value?.reg && !value?.registry || state.reg === reg)
+      && (internal || state.exposed)) for (const owner of state.entries.keys()) {
     const seen = new Set(), queries = new Map(state.global.queries);
     const visit = (key) => {
       if (seen.has(key)) return;

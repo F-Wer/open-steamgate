@@ -1,3 +1,4 @@
+import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
 import {isSourceIdentity} from "../osd-source-identity.mjs";
 import {append} from "./append.ts";
@@ -120,9 +121,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
   const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
-  // every file of the folders is loaded, so a class sees what it refers to;
-  // only the objects named are compiled, and only their syntax errors count
-  // a namespace is written # in a file name and / in the object's name
+  // Load every file for resolution; lower and report diagnostics for selected objects.
   const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
   const ddls = [];
@@ -170,7 +169,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   // the actual registered object; retain every other syntax diagnostic.
   const diagnostics = syntaxDiagnostics(reg, (fn) => wanted.includes(objName(fn)), objName, session)
     .filter((d) => !d.message.endsWith("RAISE EXCEPTION, must be object reference, got GenericObjectReferenceType"));
-  // Tolerant surveys leave broken objects out, retaining their diagnostics.
+  prepareArtifactDigests(reg, !!session);
   if (diagnostics.length && !tolerant) throw new Error(diagnostics.map((d) => d.message).join("\n"));
   const broken = new Set(diagnostics.map((d) => d.object.toLowerCase()));
   if (broken.size > 0) wanted = wanted.filter((w) => !broken.has(w));
@@ -272,6 +271,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   program.tables = tableRegistry(reg, program);
   program.lockObjects = lockObjectRegistry(reg, program);
   finishSession(session, reg);
+  session?.disk?.finish(program);
   return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg)});
 });
 

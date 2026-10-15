@@ -33,16 +33,252 @@ back to lowering. Final interfaces, RTTI, tables and other metadata are rebuilt.
 Neither source words nor lowering-time reads cover every semantic dependency.
 
 
+## Resolved-artifact digests (step 3)
+
+A cache/session compilation installs an empty digest memo after syntax checking.
+The ordered replay seam requests a `gogen-resolved-artifact-2` SHA-256 digest
+only when fingerprinting a read that contains a definition; repeated reads reuse
+that owner's digest. Unread owners are never projected on the normal compile path.
+Without cacheDir or a recording session, compilation does no digest work.
+Explicit inspection (`artifactDigestsOf` / the digest CLI) requests a full
+snapshot after compilation; diagnostic dependency metadata requests its hit
+owners separately when provenance recording is enabled. `frontend-artifact-digests.mjs` owns the projections
+and stores them in a registry-keyed weak table; no digest fields enter IR or
+replay-tracked program state. A new table replaces the previous compile's memo.
+
+The digest hashes canonical JSON tuples containing the uppercase `TYPE NAME`,
+ordered effective files (portable filenames, raw-source hashes), expanded
+syntax tree shapes and token text/positions (including macro virtual positions),
+global/local definitions, typed scopes and resolved DDIC types through core's
+`parseType(registry)` contract. Definitions include resolved parameter,
+attribute, constant and named types, parameter directions/defaults/optional
+flags, visibility, aliases, superclass/interfaces/friends, method flags and
+events/handler parameters. Scopes include local/inline types, deferred names
+and symbolic resolution references. Object-reference types use symbolic
+locations rather than recursively importing another definition's graph.
+
+Dictionary keys use code-point sorting; arrays preserve semantic/source order.
+Filenames strip directory prefixes. Expanded statements, definitions and
+recursively shared types are projected and hashed once within a compile.
+Statement hashes include token text and real/virtual positions; structure
+projections reuse those hashes instead of repeating token graphs. Source
+expressions use their token sequence (including parentheses) so the transpiler's
+in-place arithmetic precedence regrouping cannot change a digest according to
+whether its owner has been lowered or replayed. This canonicalization is the
+format-2 change; the rest of the resolved projection is retained. Parent links, registries,
+object identities, parser caches and Map insertion order never enter this
+format. The digest is a snapshot of what core actually resolved, including
+Unknown/Void types, rather than a claim that resolution succeeded. Unsupported
+shapes produce a `null` digest plus an inspection error; definitions belonging
+to such an owner decline replay. The global source/version guard remains
+unchanged, including for unknown or incomplete provenance.
+
+Replay definition fingerprints now contain location **plus** `{owner, digest}`.
+A same-name/file/start definition with changed semantic contents rejects replay
+atomically. Repeated reads reuse the owner's digest rather than serializing its
+graph. Definitions without a registry/owner digest refuse persistence.
+
+The definition fingerprint is **owner-local**. A DEFAULT naming another object's
+constant projects its token text symbolically, as lowering uses it. Inherited
+members are represented only by superclass name, and an exception superclass is
+also a symbolic edge. These external semantics are covered only by provenance
+dependencies: step 4 must key on dependency digests as well as the fingerprint.
+
+Resetting the digest memo does not repair parser artifacts in a retained registry.
+A provider TYPE edit left its consumer's IntegerType in a retained registry;
+a fresh registry resolved Integer8Type. Step 4 must use a fresh registry after
+edits. Core also does not resolve READ-ONLY on DATA attributes: only the tokens
+and raw-source hash carry it. Step 6 must account for that resolution boundary.
+
+
+Disk builds record `gogen-dependency-digests-1` metadata only with provenance
+recording (`GOGEN_PROVENANCE=1` / `provenance: true`, or an explicit enclosing
+`recordProvenance` session). Explicit `provenance: false` overrides the environment.
+Metadata contains the owner/entry name, owner digest, a sorted
+`dependencyDigests` dictionary from the final expanded manifest's **hits**, and
+`provenanceComplete`. Filename hits map back to their owning artifact. These
+opt-in diagnostic reads request digests on demand as well; dense manifests can
+request most of the registry. Writes wait until final metadata passes and freeze
+the lowering snapshot so later mutations cannot change it. Without recording,
+writes persist immediately without cloning, provenance hooks or dependency
+metadata. Metadata is **not in the key or a replacement for miss/scan guards**.
+Unknown scans or unavailable digests make completeness false. Inspection labels
+entries without metadata unavailable, including entries built with recording off.
+Enabling recording while reusing such an entry retains the explicit
+`lowering-built-before-recording` marker; it does not invent a transcript.
+
+```sh
+# All current artifact digests, or one artifact (no cache needed).
+node tools/gogen/frontend-artifact-digests-cli.mjs src --show 'CLAS ZCL_READER'
+# Inspect the dependency digests stored for an entry, across retained versions.
+node tools/gogen/frontend-artifact-digests-cli.mjs --cache-dir .local/cache --entry ZCL_READER
+node --test tools/gogen/frontend-artifact-digests.test.mjs
+```
+
+The cross-object gate uses a real global class definition and a separate reader
+at the ordered replay/cache seam. The provider's constant changes `1` to `9`
+without changing filename, name or start. The reader borrows the pre-resolved
+definition through a program map, without source-word or lowering lookup edges.
+Under `no-version`, semantic fingerprints give EQUAL in both line modes;
+`no-version,fingerprint-location-only` gives MISMATCH on the supplemental
+`borrowedDefinitionReplay` artifact. The corpus also contains an ordinary global
+constant reader whose Go/JS cold output changes. This controlled seam is
+explicitly **not a normal cross-object local-class lowering path**: local
+class names are `OWNER:LOCAL`, local interfaces are `OWNER|LOCAL`, and ABAP local
+names resolve within their own class pool. No cross-pool local-definition read
+has been constructed. The seam isolates the fingerprint invariant that ordinary
+global word/getObject guards would otherwise mask.
+
+An eight-interface forward type chain exercises repeated global-definition
+passes and its unchanged class reader. A terminal type mutation must change
+cold Go/JS. The within-object first-wins macro reorder remains in the oracle.
+These gates use fresh registries/processes and compare warm with fresh cold;
+they do not implement retained-registry parser invalidation.
+
+### Initial step 3 validation and cost (before the performance round)
+
+The combined sequential frontend/cache/CI-oracle run passes **221 tests**.
+The latest digest/CI recheck passes **16 tests**, followed by three focused
+checks for snapshot preservation, the cross-object fault, and backward-compatible
+`drop:` regular expressions containing commas. All have zero failures/skips.
+The CI oracle has **62 observations / 60 validated mutations, zero mismatches**,
+with lines on/off. The full 27-kind sensitivity matrix has 14 covered fault
+rows / 28 expected mismatches and 13 documented uncovered rows. The strengthened
+cross-object control is EQUAL under `no-version` in both line modes. Global type
+passes and first-wins macro order are covered; reversing global-definition
+candidate insertion preserves per-object digests, and the changed inventory's
+warm output matches its own fresh cold output under the retained global guard.
+
+The typing-proof record was captured on `543b1053` before implementation edits.
+Comparison passes **239 raw artifacts in each of six modes** (sink 0/1 times
+no-cache/cold/warm), with no normalization. Digest stability passes on both the
+small oracle corpus and all **651** real-library objects: two fresh processes
+per Node 26.9.0 / Bun 1.4.2 and provenance-off/on combination, eight processes per corpus.
+The real runs have no unsupported digest shapes. Size budget
+`--changed origin/main`, explicit-path leak scan, whitespace and suite-list
+checks exit zero; `frontend.mjs` remains **7,055 lines**, zero net growth.
+
+Three fresh-process runs per scenario/reporting setting, medians on Node
+26.9.0, pinned open-abap-core + ajson, every real class selected. Both the parent
+and candidate use `OSD_HEAVY_TMP=/mnt/ram/stoker`, with the shared Go build cache.
+The parent is an isolated source copy of `543b1053`. Digests are always on in
+the candidate; disk builds also collect internal provenance. Times include
+source loading, normalization, parse, syntax, digest projection, lowering,
+replay and final dependency-metadata expansion; emission and public report
+inspection are outside the frontend timer. Digest cost includes snapshot setup
+and is measured directly, rather than inferred from total-time subtraction.
+
+| Scenario, public reporting off | Parent total | Step 3 total | Digest projection | Total overhead |
+| --- | --- | --- | --- | --- |
+| No cache | 1,448.6 ms | 1,807.0 ms | 413.1 ms | +24.7% |
+| cacheDir cold | 1,697.6 ms | 3,344.6 ms | 375.2 ms | +97.0% |
+| cacheDir warm | 1,485.5 ms | 2,415.3 ms | 372.4 ms | +62.6% |
+
+With public provenance reporting on, candidate totals are
+2,155.9 / 3,399.6 / 2,516.3 ms
+(no-cache/cold/warm); direct digest costs are
+373.5 / 371.0 / 376.7 ms.
+All 18 candidate captures have identical resolved digests and emitted artifacts /
+class IR, and their emitted-artifact/IR hash equals all 18 parent captures.
+Every warm run reuses 251 classes and lowers 21, matching the parent; there are
+272 lowered classes in cold/no-cache runs and zero diagnostics.
+
+Cache file bytes grow from 526,839 to 6,436,245
+with public reporting off, and from 694,040 to 6,534,884
+with it on. The dependency dictionaries conservatively include registry-level
+hits inherited by every manifest, so they are dense. Warm caching remains slower
+than cache-disabled compilation on this corpus. These measurements leave the
+cost visible for step 4; no selective-reuse or performance-benefit claim follows.
+Reports remain local: `.local/digest-perf-parent-ram.json`,
+`.local/digest-perf-ram-final.json`, `.local/digest-real-stability.json`, and
+`.local/digest-sensitivity-final.json`. Scratch/cache copies are removed; the
+pinned library checkouts are unchanged.
+
+### Step 3 performance round
+
+Three fresh Node processes per scenario and recording setting, medians on
+Node 26.9.0, complete pinned open-abap-core + ajson, same RAM scratch and shared
+Go build cache. Parent `543b1053` was remeasured in an isolated source copy;
+"initial step 3" is the preceding round's recorded measurement at `025f26c2`.
+The frontend timer includes loading, parsing, syntax, lowering/replay and cache
+writes. Full digest inspection and emission occur after the timer. The benchmark
+checks all inspection results for completeness/unsupported shapes separately from
+its lazy compile counters, and rejects any uncached digest projection.
+
+| Recording off | Parent, remeasured | Initial step 3 | Lazy step 3 | Over parent |
+| --- | --- | --- | --- | --- |
+| No cache | 1,458.8 ms | 1,807.0 ms | 1,427.7 ms | -2.1% |
+| cacheDir cold | 1,721.8 ms | 3,344.6 ms | 1,820.5 ms | +5.7% |
+| cacheDir warm | 1,535.0 ms | 2,415.3 ms | 1,599.3 ms | +4.2% |
+| Cache file bytes | 526,839 | 6,436,245 | 531,461 | 1.009x |
+
+All requested default-path limits pass. Uncached compilation has **zero** digest
+projections. Cold and warm each fingerprint **five of 651 owners**, projecting
+5,355 shared nodes in 76.2 / 75.7 ms (including the sub-millisecond filename
+inventory). Median owner costs are roughly AJSON 31 ms, SXML reader 16–18 ms,
+JSON 11–13 ms, ZIP 10 ms and Unit assertions 5 ms. Each owner is projected once
+per compile; 1,000 repeated fingerprints reuse its memo. Resetting a retained
+registry's compile discards that memo, and an uncached compile removes it.
+
+A fresh cold CPU profile attributes approximately 35% of classified samples to
+registry parsing, 16% to syntax checks, 26% to lowering/final metadata, 12% to
+disk-cache/replay work, 4% to digests, 4% to GC and 3% to loading. Parser
+combinators remain the largest individual parser site. Cache costs include
+fingerprint JSON, portable validation, compression and serialization; further
+work there is independent of selective cache keys. Profiles are diagnostic
+samples rather than additional timing runs.
+
+| Recording on | Total | Added over recording off | Digest projection | Cache bytes |
+| --- | --- | --- | --- | --- |
+| No cache | 1,793.2 ms | 365.5 ms (+25.6%) | 0 ms | 0 |
+| cacheDir cold | 3,458.6 ms | 1,638.0 ms (+90.0%) | 348.0 ms | 6,550,285 |
+| cacheDir warm | 2,217.2 ms | 617.9 ms (+38.6%) | 87.3 ms | 6,550,285 |
+
+Provenance diagnostics retain their separate cost: a cold recorded build requests
+492 owners through dense dependency-hit metadata. Its profile is dominated by
+manifest expansion, metadata assembly, snapshot cloning and serialization/write
+work; these operations are absent from ordinary cache writes. A warm recorded
+build requests the five fingerprint owners and reuses stored metadata. The
+metadata remains conservative, incomplete where unknown scans exist, and outside
+the key. Recording is an explicit diagnostic choice.
+
+All 18 candidate captures have identical emitted-artifact/class-IR hashes,
+matching all 18 parent captures. Full post-compile digest inspection also agrees
+across all 18 candidate runs, including provenance on/off and cold/warm/no-cache.
+Every warm run reuses 251 classes and lowers 21; cold/no-cache lower 272, with
+zero diagnostics. Arithmetic regrouping has an explicit regression so lazy
+snapshots cannot depend on whether lowering has visited their owner.
+
+The complete sequential frontend/cache/CI-oracle check passes **225 tests**, with
+zero failures or skips. The obsolete always-record regression now decodes cache
+files to assert that recording-off entries have neither transcript nor metadata,
+and that recorded replay marks them incomplete; its 25-test suite passes.
+The CI oracle has **62 observations / 60 validated mutations, zero mismatches**.
+The full sensitivity matrix passes 14 covered rows / 28 expected mismatches,
+with 13 documented coverage limits. The cross-object semantic fingerprint
+remains EQUAL under `no-version`, while
+location-only fingerprints give MISMATCH in both line modes. All **651** real
+objects agree across eight fresh Node/Bun processes (two per runtime and
+provenance setting). The isolated unedited `543b1053` typing-proof record compares
+byte-for-byte: **239 raw artifacts in each of six modes**. Changed-file budgets,
+explicit-path leak scan, whitespace and suite registration pass; `frontend.mjs`
+remains **7,055 lines**. The budget command also reports the existing unrelated
+`go:charsearch` breach on origin/main; no changed path exceeds its budget.
+
+Reports are local: `.local/digest-lazy-parent-perf-final.json`,
+`.local/digest-lazy-perf-final.json`, and `.local/digest-lazy-profile-{off,on}.json`.
+
 ## Semantic provenance (step 2)
 
 `compileProgram({provenance: true, ...})` records semantic resolution before
 `reg.parse()`, through global definition passes, syntax checking and lowering.
-Recording is **off by default**, including with `cacheDir`. Enable it with
+Recording is **off by default**, including disk builds. Enable it with
 `provenance: true` or `GOGEN_PROVENANCE=1`; explicit `provenance: false`
-overrides the environment. This stays opt-in until step 4 consumes the data.
-This is observation only: cache keys, source hashes, replay validation and the
-whole-registry version guard are unchanged. Resolved-artifact digests and
-selective per-entry keys remain steps 3 and 4.
+overrides the environment. An explicit enclosing `recordProvenance` session
+also enables recording.
+Provenance remains observational: it supplies step 3 metadata, without changing
+cache keys, source hashes or the whole-registry version guard. Selective
+per-entry keys remain step 4.
 
 The implementation lives in `frontend-provenance.mjs` and its version-specific
 `frontend-provenance-hooks.mjs` adapters. Scoped synchronous hooks restore the
@@ -93,9 +329,9 @@ Artifact reads add edges even when an abaplint getter or `SyntaxLogic.run()`
 returns a cached result. Manifests expand these stored edges at inspection
 time, inheriting the provider's queries with their original owner/phase.
 A second cached TABL consumer therefore still shows the DTEL's DOMA lookup.
-Disk IR and memory-session entries carry only the owner's own rows and edges:
-`{rows: [...], edges: ["TYPE NAME", ...]}`. They never persist a transitive
-closure. Replay restores these rows/edges, and `provenanceOf()` expands them
+The disk IR and memory-session `provenance` field carries only the owner's own rows and edges:
+`{rows: [...], edges: ["TYPE NAME", ...]}`. It never persists a transitive query
+closure; step 3 separately saves the deduplicated dependency digests. Replay restores these rows/edges, and `provenanceOf()` expands them
 against the current registry's provider artifacts on demand. The transcript
 still does not participate in cache validation.
 
@@ -105,7 +341,8 @@ An artifact subsequently built with recording off gets an `untraced-artifact`
 marker on its owner, even when a retained syntax session bypasses checking.
 Artifacts first encountered after they were built receive
 `artifact-built-before-recording`. Memory/disk replay without an own-row
-transcript receives `lowering-built-before-recording`.
+transcript receives `lowering-built-before-recording`. Disk builds with recording off store no transcript; subsequent recorded replay
+marks such entries `lowering-built-before-recording`.
 
 Inventory snapshots copy filenames and SHA-256 content hashes; they do not
 retain core's mutable file array. Replacing, adding or removing a file, or
@@ -152,7 +389,7 @@ unknown scans and exception-safe restoration. On/off comparisons include Go,
 JS or its refusal, class IR, diagnostics/refusals/missing members and all final
 metadata compared by the cache oracle.
 
-### Fix-round validation and recording cost
+### Fix-round validation and recording cost (historical step 2)
 
 The focused regression gates cover opt-in/environment precedence, own-row disk
 storage/replay, recording gaps in syntax/DDIC/memory/disk lowering, immutable
@@ -342,7 +579,7 @@ correctness. `typing-proof.mjs` was unavailable on the Step 1 base; the capture
 module uses the same fresh-process, byte-comparison pattern described in its
 review, without importing an absent file.
 
-The cache alone reads `GOGEN_CACHE_ORACLE_FAULT`. Its exact accepted values are
+The cache and replay instrumentation read `GOGEN_CACHE_ORACLE_FAULT`. Its exact accepted values are
 **test-only**:
 
 - `no-version`: omit registry sources from the version digest.
@@ -350,6 +587,9 @@ The cache alone reads `GOGEN_CACHE_ORACLE_FAULT`. Its exact accepted values are
   regular expression from word-graph dependency edges and recorded `getObject`
   reads, including misses. Keys use uppercase `TYPE NAME`; the regex has no
   flags. The owner's own source hash and replay checks remain intact.
+- `fingerprint-location-only`: restore the old location-only definition
+  fingerprint. It may be combined with `no-version` as
+  `no-version,fingerprint-location-only` to expose the borrowed-definition seam.
 - `sorted-files`: retain the global guard but restore the old sorted-by-filename
   object hash, hiding within-object file-order edits.
 
@@ -404,6 +644,8 @@ The full matrix is a slower local mode; ordinary CI runs the normal oracle and t
 | pool-constant | `drop:^TYPE` | no | Not covered / unsupported: neither explicit nor implicit constant operand lowers. | None |
 | fugr-signature | `drop:^FUGR` | no | Not covered: caller never caches because its functionModules input contains circular registry/syntax graphs that cannot be fingerprinted; group lowering is outside class replay. | None |
 | same-object-local-definition | `no-version` | no | Not covered: reader owns definition, so its object hash invalidates even without global guard. | None |
+| cross-object-same-position-definition | `no-version,fingerprint-location-only` | yes | Covered at the controlled replay seam with a real global definition; strengthened fingerprints stay EQUAL under `no-version`. No cross-pool local borrowing path exists. | `borrowedDefinitionReplay` |
+| global-definition-passes | `drop:^INTF ZIF_PASS_` | yes | Covered: eight global interface type passes; terminal resolved type changes unchanged reader lowering. | `emitGo`, `emitJs`; `ZCL_PASS_READER` |
 | file-order | `sorted-files` | yes | Covered; first-wins macro expansion changes. | `emitGo`, `emitJs`; `ZCL_ORDER_MACRO` |
 
 The former `same-position-definition` case is now truthfully titled
@@ -413,9 +655,9 @@ invalidation both with the global guard and under `no-version`. This establishes
 owner-source invalidation only. A cross-object borrowed local-definition
 fixture has not been established: frontend local definitions are qualified as
 `OWNER:LOCAL` and ABAP local names resolve in their owning class pool. Global
-named definitions get ordinary source-word/getObject dependencies. The
-location-only fingerprint gap therefore remains **not covered**, rather than
-being presented as a global-guard regression.
+named definitions get ordinary source-word/getObject dependencies. Step 3 covers the fingerprint invariant at the controlled global-definition
+replay seam described above; the unavailable cross-pool local path remains
+explicitly outside that claim.
 
 ### Round-one measurements (historical)
 
@@ -473,7 +715,7 @@ material and is not distributed in a clean checkout.
 | FUGR scans | Function-module names differ from group names; ownership resolution scans groups without `getObject`. |
 | CDS aliases | SQL-view aliases are resolved by scanning DDLS providers. |
 | BAdI definitions | ENHS/BAdI lookup is a type-wide scan and can affect syntax acceptance before gogen refuses a statement. |
-| Definition fingerprints | Replay fingerprints include name/file/start position, not semantic contents. Borrowed definitions need a semantic guard; cross-object oracle coverage is not established. |
+| Definition fingerprints | Step 3 now guards the owner's semantic digest alongside location; controlled cross-object global-definition replay coverage is established. Normal cross-pool local borrowing remains unavailable. This alone does not cover incomplete provenance. |
 
 Cached DDIC types/scopes can also hide earlier reads, and global OO resolution
 passes make stopping/order behavior a semantic input. Passing mutation tests
@@ -488,8 +730,9 @@ does not prove that an incomplete dependency manifest is safe.
 2. **Semantic provenance and resolution queries before parsing.** Implemented: attribute
    named lookups, misses, filename/alias/scan resolution and cached-artifact reads
    to their owners. Unknown paths fail closed.
-3. **Resolved-artifact digests and stronger definition fingerprints.** Include
-   semantic contents alongside location and guard global resolution/order effects.
+3. **Resolved-artifact digests and stronger definition fingerprints.** Implemented:
+   resolved semantic snapshots, location plus owner digest, dependency digest
+   metadata and inspection; global resolution/order and replay sensitivity gates.
 4. **Per-entry schema-v3 keys for complete manifests.** Keep global guards for
    incomplete entries. Require the fresh-process oracle and exact control reuse
    assertions (for example, ten dependent classes lower while 290 others reuse).
@@ -499,5 +742,5 @@ does not prove that an incomplete dependency manifest is safe.
    Test retained registries against fresh cold after multi-edit/inventory/config
    sequences; narrow body/interface hashes only after dedicated cases pass.
 
-Steps 3–6 are plans. Step 2 adds observation and deliberately implements no
-selective per-class reuse across different registry versions.
+Steps 4–6 remain plans. Steps 2–3 add provenance, resolved digests and stronger
+replay guards; they implement no selective reuse across registry versions.

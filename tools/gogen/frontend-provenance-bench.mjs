@@ -1,3 +1,4 @@
+import {artifactDigestStats, artifactDigestsOf} from "./frontend-artifact-digests.mjs";
 // Fresh-process no-cache/cold/warm timings, cache size and output byte parity.
 import {execFileSync} from "node:child_process";
 import {createHash} from "node:crypto";
@@ -35,7 +36,10 @@ function child({folders, objects, recording, mode = "none", cacheDir}) {
       const entry = unknown.get(site); entry.queries.add(JSON.stringify(q)); entry.owners++;
     }
   }
-  return {recording, mode, frontendMs, cacheBytes: mode === "none" ? 0 : treeBytes(cacheDir), reused: program.frontendCounts.reused, digest, objects: [...program.reg.getObjects()].length,
+  const resolvedArtifacts = artifactDigestStats(program) ?? {objects: 0, nodes: 0, milliseconds: 0, errors: {}};
+  const inspected = [...artifactDigestsOf(program)].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
+  return {recording, mode, frontendMs, resolvedArtifacts, inspectedArtifacts: artifactDigestStats(program),
+    resolvedDigest: createHash("sha256").update(JSON.stringify(inspected)).digest("hex"), cacheBytes: mode === "none" ? 0 : treeBytes(cacheDir), reused: program.frontendCounts.reused, digest, objects: [...program.reg.getObjects()].length,
     lowered: program.frontendCounts.lowered, diagnostics: program.diagnostics.length,
     manifestObjects: manifests.size, queryRows,
     unknownScans: [...unknown.values()].map(({site, queries, owners}) => ({site, uniqueQueries: queries.size, manifestOccurrences: owners}))};
@@ -80,6 +84,10 @@ function main() {
         // Warm follows a fresh-process cold prime for this round/recording mode.
         const result = run({folders, objects, recording, mode, cacheDir});
         runs.push(result);
+        if (new Set(runs.map((r) => r.resolvedDigest)).size !== 1) throw new Error("resolved artifact digest mismatch");
+        if (result.inspectedArtifacts.objects !== result.objects || Object.keys(result.inspectedArtifacts.errors).length)
+          throw new Error("incomplete resolved digest inspection");
+        if (mode === "none" && result.resolvedArtifacts.objects !== 0) throw new Error("uncached compile performed digest work");
         if (new Set(runs.map((r) => r.digest)).size !== 1) throw new Error("recording/cache mode byte mismatch");
       }
     }
@@ -87,7 +95,8 @@ function main() {
     const scenarios = ["none", "cold", "warm"].map((mode) => {
       const subset = (on) => runs.filter((r) => r.mode === mode && r.recording === on);
       const offMs = med(subset(false).map((r) => r.frontendMs)), onMs = med(subset(true).map((r) => r.frontendMs));
-      return {mode, offMs, onMs, overheadPercent: (onMs / offMs - 1) * 100,
+      return {mode, offMs, onMs, offDigestMs: med(subset(false).map((r) => r.resolvedArtifacts.milliseconds)),
+        onDigestMs: med(subset(true).map((r) => r.resolvedArtifacts.milliseconds)), overheadPercent: (onMs / offMs - 1) * 100,
         offBytes: med(subset(false).map((r) => r.cacheBytes)), onBytes: med(subset(true).map((r) => r.cacheBytes))};
     });
     const result = {corpus: real ? "open-abap-core + ajson" : "oracle 300 controls + feature fixtures", rounds,

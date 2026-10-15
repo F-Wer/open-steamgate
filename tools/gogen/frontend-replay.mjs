@@ -1,17 +1,19 @@
+import {definitionFingerprint} from "./frontend-artifact-digests.mjs";
 // Record the program inputs a lowering actually reads and its ordered effects.
 // Registry/file identity is guarded by the enclosing immutable session.
 const context = new Set(["currentClass", "currentOwner", "currentTypes"]);
 const ignored = new Set(["reg", "frontendCounts"]);
-// An abaplint class or interface definition is parsed from registry sources
-// the cache version already covers, so where it was defined names it. Encoding
-// its whole graph instead was most of the recording time and of the entries'
-// size (a local class definition is read once per method that uses it).
+// Definitions borrow their owning artifact's resolved semantics as well as location.
 const definitions = new Set(["ClassDefinition", "InterfaceDefinition"]);
 const definition = (v) => v && typeof v === "object" && definitions.has(v.constructor?.name)
   && typeof v.getName === "function" && typeof v.getFilename === "function" && typeof v.getStart === "function";
-function fingerprint(value) {
+function fingerprint(value, registry) {
+  const fault = process.env.GOGEN_CACHE_ORACLE_FAULT;
+  const locationOnly = fault === "fingerprint-location-only" || fault === "no-version,fingerprint-location-only";
   return JSON.stringify(value, (_, v) => v instanceof Map ? {map: [...v]} : v instanceof Set ? {set: [...v]}
-    : definition(v) ? {definition: [v.constructor.name, v.getName(), v.getFilename(), v.getStart().getRow(), v.getStart().getCol()]} : v);
+    : definition(v) ? locationOnly
+      ? {definition: [v.constructor.name, v.getName(), v.getFilename(), v.getStart().getRow(), v.getStart().getCol()]}
+      : definitionFingerprint(registry, v) : v);
 }
 const clone = (v) => v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? [...v] : v;
 function copy(program) {
@@ -27,7 +29,7 @@ export function replayLowering(program, cached) {
         if (trial[op.key]?.[op.method] !== op.value) return false;
       } else if (op.kind === "read") {
         const value = op.method ? trial[op.key]?.[op.method](...op.args) : trial[op.key];
-        if (fingerprint(value) !== op.value) return false;
+        if (fingerprint(value, program.reg) !== op.value) return false;
       } else if (op.kind === "assign") trial[op.key] = clone(op.value);
       else trial[op.key][op.method](...op.args);
     }
@@ -41,7 +43,7 @@ export function recordLowering(program, lower) {
   let safe = true;
   const read = (key, method, args, value) => {
     try {
-      const encoded = fingerprint(value);
+      const encoded = fingerprint(value, program.reg);
       ops.push({kind: "read", key, method, args, value: encoded});
       if (value && typeof value === "object") {
         if (!borrowed.has(value)) borrowed.set(value, encoded);
@@ -95,7 +97,7 @@ export function recordLowering(program, lower) {
   const ir = lower(proxy);
   // Nested changes cannot be represented by collection effects. Retry those
   // lowerings, rather than replaying an incomplete mutation transcript.
-  try { for (const [v, encoded] of borrowed) if (fingerprint(v) !== encoded) { safe = false; break; } }
+  try { for (const [v, encoded] of borrowed) if (fingerprint(v, program.reg) !== encoded) { safe = false; break; } }
   catch { safe = false; }
   return {ir, replay: safe ? {ops, written} : undefined};
 }

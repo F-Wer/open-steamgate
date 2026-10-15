@@ -108,22 +108,15 @@ test("collections changed and restored between reads still guard the second read
   assert.equal(recordLowering({x}, (p) => { p.x.type = "i"; return p.x.type; }).replay, undefined);
 });
 
-test("an abaplint definition is read as where it was defined", () => {
+test("a definition without a resolved owning artifact declines replay", () => {
   class ClassDefinition {
-    constructor(file, row, body) { Object.assign(this, {file, row, body}); }
     getName() { return "LCL_X"; }
-    getFilename() { return this.file; }
-    getStart() { return {getRow: () => this.row, getCol: () => 7}; }
+    getFilename() { return "zcl_a.clas.locals_imp.abap"; }
+    getStart() { return {getRow: () => 3, getCol: () => 7}; }
   }
-  const program = (def) => ({localDefs: new Map([["ZCL_A:LCL_X", def]])});
-  const cached = recordLowering(program(new ClassDefinition("zcl_a.clas.locals_imp.abap", 3, "big graph")),
+  const cached = recordLowering({localDefs: new Map([["ZCL_A:LCL_X", new ClassDefinition()]])},
     (p) => p.localDefs.get("ZCL_A:LCL_X").getName());
-  const reads = cached.replay.ops.filter((op) => op.kind === "read");
-  assert.deepEqual(reads.map((op) => op.value), ['{"definition":["ClassDefinition","LCL_X","zcl_a.clas.locals_imp.abap",3,7]}']);
-  // the same definition parsed again (a fresh process) replays; another place does not
-  assert.ok(replayLowering(program(new ClassDefinition("zcl_a.clas.locals_imp.abap", 3, "same source, new objects")), cached.replay));
-  assert.equal(replayLowering(program(new ClassDefinition("zcl_a.clas.locals_imp.abap", 9, "")), cached.replay), false);
-  assert.equal(replayLowering(program(new ClassDefinition("zcl_b.clas.locals_imp.abap", 3, "")), cached.replay), false);
+  assert.equal(cached.replay, undefined);
 });
 
 test("assigning a collection refuses replay, including a first chained write", () => {

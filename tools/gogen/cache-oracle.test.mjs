@@ -8,6 +8,7 @@ import {pathToFileURL} from "node:url";
 import {artifactDifferences, assertDdicRun} from "./cache-oracle-capture.mjs";
 import {home} from "./home.mjs";
 import {compareArtifacts, runOracle, syntheticCorpus} from "./cache-oracle.mjs";
+import {objectCache} from "./frontend-object-cache.mjs";
 import {sensitivityFault, notCovered, uncacheableFeatures} from "./cache-oracle-coverage.mjs";
 
 test("artifact comparison reports the first byte offset, including UTF-8 and missing artifacts", () => {
@@ -66,6 +67,27 @@ test("test-only no-version fault produces a real warm/cold pool mismatch", {time
     assert.equal(row.artifact, "emitGo");
     assert.ok(row.offset > 0);
     assert.ok(row.reusedClasses.includes("ZCL_POOL_IMPLICIT"));
+  }
+});
+
+test("oracle faults preserve drop regex quantifiers containing commas and reject unknown combinations", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-faults-")), previous = process.env.GOGEN_CACHE_ORACLE_FAULT;
+  const registry = {getObjects: () => [], getConfig: () => ({get: () => ({})}), getObject: () => undefined};
+  try {
+    process.env.GOGEN_CACHE_ORACLE_FAULT = "drop:^TYPE Z[A-Z]{1,4}$";
+    const cache = objectCache(registry, dir);
+    assert.deepEqual(cache.record(() => registry.getObject("TYPE", "ZAB")).reads, []);
+    for (const fault of ["fingerprint-location-only", "no-version,fingerprint-location-only"]) {
+      process.env.GOGEN_CACHE_ORACLE_FAULT = fault;
+      assert.doesNotThrow(() => objectCache(registry, dir));
+    }
+    for (const fault of ["no-version,sorted-files", "unknown", "drop:["]) {
+      process.env.GOGEN_CACHE_ORACLE_FAULT = fault;
+      assert.throws(() => objectCache(registry, dir));
+    }
+  } finally {
+    if (previous === undefined) delete process.env.GOGEN_CACHE_ORACLE_FAULT; else process.env.GOGEN_CACHE_ORACLE_FAULT = previous;
+    rmSync(dir, {recursive: true, force: true});
   }
 });
 
