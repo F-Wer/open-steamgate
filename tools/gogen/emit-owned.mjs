@@ -1,4 +1,4 @@
-import {packedChecksum} from "./emit-packedint.mjs";
+import {packedChecksum} from "./emit-packedint.ts";
 // Owned xstring emission leaves types, signatures and generic descriptors alone.
 export function ownedExpression(e, ctx, h) {
   const {ownership, expr, place} = h;

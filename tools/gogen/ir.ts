@@ -111,7 +111,7 @@ export type Expr = ExprMetadata & (
   | { readonly e: 'nop_call'; readonly type: Type }
   | { readonly e: 'unwrap_calc'; readonly x: Expr; readonly type: Type }
   | { readonly e: 'unwrap'; readonly x: Expr; readonly type: Type }
-  | { readonly e: 'conv'; readonly kind: string; readonly from: Type; readonly to: Type; readonly x: Expr; readonly type: Type; readonly fields?: readonly { readonly name: string; readonly len: number }[]; readonly pairs?: readonly (readonly [string, string])[]; readonly row?: Expr }
+  | { readonly e: 'conv'; readonly arith?: boolean; readonly kind: string; readonly from: Type; readonly to: Type; readonly x: Expr; readonly type: Type; readonly fields?: readonly { readonly name: string; readonly len: number }[]; readonly pairs?: readonly (readonly [string, string])[]; readonly row?: Expr }
   | { readonly e: 'upcast'; readonly x: Expr; readonly type: Type }
   | { readonly e: 'cast'; readonly x: Expr; readonly type: Type }
   | { readonly e: 'unwrap_chars'; readonly x: Expr; readonly type: Type }
