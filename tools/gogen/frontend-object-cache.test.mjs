@@ -11,6 +11,10 @@ import {emitGo} from "./emit-go.mjs";
 import {home} from "./home.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 import {captureInChild, syntheticCorpus} from "./cache-oracle.mjs";
+import {core, setCdsInputs, cdsInputDigest} from "./frontend-inventory.mjs";
+import crypto from "node:crypto";
+import {syncBuiltinESMExports} from "node:module";
+import {provenanceOf} from "./frontend-provenance.mjs";
 import {orderedRegistry} from "./cache-oracle-capture.mjs";
 
 const source = (name, body) => `CLASS ${name} DEFINITION PUBLIC.
@@ -111,7 +115,7 @@ test("session without cacheDir preserves main's scalar entries and fast path", (
     // origin/main's elementary entry stores own signatures and diagnostics,
     // without an observed-read transcript or disk-cache session fields.
     assert.deepEqual(Object.keys(session).sort(),
-      ["registry", "config", "files", "classes", "issues", "ownershipSafety"].sort());
+      ["registry", "config", "files", "classes", "issues", "ownershipSafety", "cdsInputs"].sort());
     assert.deepEqual([...session.classes.keys()], ["ZCL_SCALAR"]);
     const entry = session.classes.get("ZCL_SCALAR");
     assert.deepEqual(Object.keys(entry).sort(),
@@ -386,3 +390,187 @@ test("a fresh process initializes tracked context before supplied-parameter disc
     assert.equal(child.status, 0, child.stderr);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
+
+for (const edit of ["unparseable", "sql-view-name", "added", "removed", "raw-only", "renamed"]) {
+  test(`DDLS ${edit} invalidates mapping readers, warm equals cold`, () => {
+    const dir = mkdtempSync(join(tmpdir(), "gogen-ddls-key-")), input = join(dir, "input"), cacheDir = join(dir, "cache");
+    const previous = process.env.GOGEN_CACHE_SHADOW_VALIDATE;
+    process.env.GOGEN_CACHE_SHADOW_VALIDATE = "1";
+    try {
+      mkdirSync(input);
+      for (const name of ["zgogen_t_dbw.tabl.xml", "zgogen_t_dbwc.view.xml", "zgogen_t_dbwv.view.xml"])
+        writeFileSync(join(input, name), readFileSync(new URL(`./testdata/${name}`, import.meta.url)));
+      writeFileSync(join(input, "zcl_cdsq.clas.abap"), source("zcl_cdsq",
+        "DATA lt TYPE STANDARD TABLE OF zgogen_t_dbwc WITH DEFAULT KEY. SELECT * FROM zgogen_t_dbwc INTO TABLE lt. rv = lines( lt )."));
+      writeFileSync(join(input, "zcl_other.clas.abap"), source("zcl_other", "rv = 3."));
+      const file = join(input, "zgogen_t_dbwc.ddls.asddls");
+      const ddls = "@AbapCatalog.sqlViewName: 'ZGOGEN_T_DBWV'\ndefine view ZGOGEN_T_DBWC as select from zgogen_t_dbw { key id, val as amount }";
+      if (edit !== "added") writeFileSync(file, ddls);
+      const args = {folders: [input], objects: ["ZCL_CDSQ", "ZCL_OTHER"], tolerant: true};
+      const first = compileProgram({...args, cacheDir});
+      const unchanged = compileProgram({...args, cacheDir});
+      assert.deepEqual(unchanged.frontendCounts.reusedClasses, args.objects);
+      assert.equal(unchanged.frontendCounts.shadowV3.entries.every(e => e.wouldReuseV3), true);
+      if (edit === "removed") rmSync(file);
+      else writeFileSync(file, edit === "unparseable" ? "unparseable text" : edit === "sql-view-name" ? ddls.replace("'ZGOGEN_T_DBWV'", "'ZCHANGED'") : ddls);
+      if (edit === "raw-only") writeFileSync(file, ddls + "\n// raw input edit");
+      if (edit === "renamed") { rmSync(file); writeFileSync(join(input, "ZRENAMED.DDLS.ASDDLS"), ddls); }
+      const warm = compileProgram({...args, cacheDir}), cold = compileProgram(args);
+      assert.equal(emitGo(warm), emitGo(cold));
+      assert.deepEqual(warm.cdsViews, cold.cdsViews);
+      assert.deepEqual(warm.partial, cold.partial);
+      const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+        import {compileProgram} from ${JSON.stringify(new URL("frontend.mjs", import.meta.url).href)};
+        import {emitGo} from ${JSON.stringify(new URL("emit-go.mjs", import.meta.url).href)};
+        const p = compileProgram(${JSON.stringify({...args, cacheDir})});
+        console.log(JSON.stringify({go: emitGo(p), counts: p.frontendCounts}));
+      `], {encoding: "utf8", maxBuffer: 5e6});
+      assert.equal(child.status, 0, child.stderr);
+      const fresh = JSON.parse(child.stdout);
+      assert.equal(fresh.go, emitGo(cold));
+      assert.deepEqual(fresh.counts.reusedClasses, args.objects);
+      if (edit === "unparseable") {
+        assert.match(JSON.stringify(first.partial), /client-dependent.*without MANDT/);
+        assert.match(JSON.stringify(cold.partial), /DDLS view mapping could not be read/);
+      }
+      assert.deepEqual(warm.frontendCounts.reusedClasses, []);
+      const rows = warm.frontendCounts.shadowV3.entries;
+      assert.equal(rows.find(e => e.name === "ZCL_CDSQ").wouldReuseV3, false);
+      assert.equal(rows.find(e => e.name === "ZCL_OTHER").wouldReuseV3, true);
+      assert.deepEqual(compileProgram({...args, cacheDir}).frontendCounts.reusedClasses, args.objects);
+      if (edit === "unparseable") {
+        warm.reg.updateFile(new core.MemoryFile("zcl_other.clas.abap", source("zcl_other", "rv = 4.")));
+        const refreshed = compileProgram({...args, registry: warm.reg, cacheDir, provenance: true});
+        assert.notEqual(refreshed.reg, warm.reg);
+        assert.match(JSON.stringify(refreshed.partial), /DDLS view mapping could not be read/);
+        const manifest = provenanceOf(refreshed).get("CLAS ZCL_CDSQ");
+        assert.ok([...manifest.hits, ...manifest.misses].some(q => q.kind === "cds-mapping"));
+      }
+    } finally {
+      if (previous === undefined) delete process.env.GOGEN_CACHE_SHADOW_VALIDATE;
+      else process.env.GOGEN_CACHE_SHADOW_VALIDATE = previous;
+      rmSync(dir, {recursive: true, force: true});
+    }
+  });
+}
+
+test("DDLS digests are lazy and memoised", () => {
+  const original = crypto.createHash;
+  let hashes = 0;
+  crypto.createHash = (...args) => { hashes++; return original(...args); };
+  syncBuiltinESMExports();
+  try {
+    const reg = new core.Registry();
+    setCdsInputs(reg, ["first source"]);
+    assert.equal(hashes, 0, "retaining inputs must not hash them");
+    const first = cdsInputDigest(reg);
+    assert.equal(hashes, 1);
+    assert.equal(cdsInputDigest(reg), first);
+    assert.equal(hashes, 1, "digest must be memoised");
+    setCdsInputs(reg, ["first source"]);
+    assert.equal(cdsInputDigest(reg), first);
+    assert.equal(hashes, 1, "unchanged input must retain its memoised digest");
+    setCdsInputs(reg, ["second source"]);
+    assert.equal(hashes, 1, "edits must also wait for a digest reader");
+    assert.notEqual(cdsInputDigest(reg), first);
+  } finally { crypto.createHash = original; syncBuiltinESMExports(); }
+});
+
+test("DDLS digest string inputs match named inputs and reject malformed shapes", () => {
+  const reg = new core.Registry(), other = new core.Registry();
+  setCdsInputs(reg, ["first source"]);
+  const first = cdsInputDigest(reg);
+  setCdsInputs(reg, ["second source"]);
+  assert.notEqual(cdsInputDigest(reg), first, "string inputs must not become null pairs");
+  setCdsInputs(other, [{filename: "gogen_0.ddls.asddls", source: "second source"}]);
+  assert.equal(cdsInputDigest(other), cdsInputDigest(reg));
+  assert.throws(() => setCdsInputs(reg, [{}]), /filename.*source/);
+});
+
+test("default compile with DDLS does not hash its inputs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "gogen-ddls-lazy-"));
+  const original = crypto.createHash;
+  let hashes = 0;
+  try {
+    for (const name of ["zgogen_t_dbw.tabl.xml", "zgogen_t_dbwc.view.xml", "zgogen_t_dbwv.view.xml"])
+      writeFileSync(join(dir, name), readFileSync(new URL(`./testdata/${name}`, import.meta.url)));
+    writeFileSync(join(dir, "zcl_lazy.clas.abap"), source("zcl_lazy",
+      "DATA lt TYPE STANDARD TABLE OF zgogen_t_dbwc WITH DEFAULT KEY. SELECT * FROM zgogen_t_dbwc INTO TABLE lt. rv = lines( lt )."));
+    writeFileSync(join(dir, "zgogen_t_dbwc.ddls.asddls"), "unparseable text");
+    crypto.createHash = (...args) => { hashes++; return original(...args); };
+    syncBuiltinESMExports();
+    const program = compileProgram({folders: [dir], objects: ["ZCL_LAZY"], tolerant: true, provenance: false});
+    assert.match(JSON.stringify(program.partial), /DDLS view mapping could not be read/);
+    assert.equal(hashes, 0);
+  } finally {
+    crypto.createHash = original; syncBuiltinESMExports();
+    rmSync(dir, {recursive: true, force: true});
+  }
+});
+
+for (const editOther of [false, true]) {
+  test(`supplied registry re-reads edited DDLS (replace registry: ${editOther})`, () => {
+    const dir = mkdtempSync(join(tmpdir(), "gogen-ddls-retained-"));
+    try {
+      for (const name of ["zgogen_t_dbw.tabl.xml", "zgogen_t_dbwc.view.xml", "zgogen_t_dbwv.view.xml"])
+        writeFileSync(join(dir, name), readFileSync(new URL(`./testdata/${name}`, import.meta.url)));
+      writeFileSync(join(dir, "zcl_cdsq.clas.abap"), source("zcl_cdsq",
+        "DATA lt TYPE STANDARD TABLE OF zgogen_t_dbwc WITH DEFAULT KEY. SELECT * FROM zgogen_t_dbwc INTO TABLE lt. rv = lines( lt )."));
+      writeFileSync(join(dir, "zcl_other.clas.abap"), source("zcl_other", "rv = 3."));
+      const file = join(dir, "zgogen_t_dbwc.ddls.asddls"), cacheDir = join(dir, "cache");
+      writeFileSync(file, "@AbapCatalog.sqlViewName: 'ZGOGEN_T_DBWV'\ndefine view ZGOGEN_T_DBWC as select from zgogen_t_dbw { key id, val as amount }");
+      const args = {folders: [dir], objects: ["ZCL_CDSQ", "ZCL_OTHER"], tolerant: true};
+      const first = compileProgram({...args, cacheDir});
+      const firstDigest = cdsInputDigest(first.reg);
+      assert.match(JSON.stringify(first.partial), /without MANDT/);
+      writeFileSync(file, "unparseable text");
+      if (editOther) {
+        const edited = source("zcl_other", "rv = 4.");
+        first.reg.updateFile(new core.MemoryFile("zcl_other.clas.abap", edited));
+        writeFileSync(join(dir, "zcl_other.clas.abap"), edited);
+      }
+      const warm = compileProgram({...args, registry: first.reg, cacheDir});
+      const cold = compileProgram(args);
+      assert.equal(warm.reg === first.reg, !editOther);
+      assert.equal(emitGo(warm), emitGo(cold));
+      assert.deepEqual(warm.cdsViews, cold.cdsViews);
+      assert.deepEqual(warm.partial, cold.partial);
+      assert.match(JSON.stringify(warm.partial), /DDLS view mapping could not be read/);
+      assert.notEqual(cdsInputDigest(warm.reg), firstDigest);
+      assert.equal(cdsInputDigest(warm.reg), cdsInputDigest(cold.reg));
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+}
+
+for (const mode of ["automatic disk", "explicit memory", "explicit memory direct"]) {
+  test(`DDLS edits invalidate the session's own inputs (${mode})`, () => {
+    const dir = mkdtempSync(join(tmpdir(), "gogen-ddls-interleaved-"));
+    try {
+      for (const name of ["zgogen_t_dbw.tabl.xml", "zgogen_t_dbwc.view.xml", "zgogen_t_dbwv.view.xml"])
+        writeFileSync(join(dir, name), readFileSync(new URL(`./testdata/${name}`, import.meta.url)));
+      writeFileSync(join(dir, "zcl_cdsq.clas.abap"), source("zcl_cdsq",
+        "DATA lt TYPE STANDARD TABLE OF zgogen_t_dbwc WITH DEFAULT KEY. SELECT * FROM zgogen_t_dbwc INTO TABLE lt. rv = lines( lt )."));
+      const file = join(dir, "zgogen_t_dbwc.ddls.asddls");
+      writeFileSync(file, "@AbapCatalog.sqlViewName: 'ZGOGEN_T_DBWV'\ndefine view ZGOGEN_T_DBWC as select from zgogen_t_dbw { key id, val as amount }");
+      const args = {folders: [dir], objects: ["ZCL_CDSQ"], tolerant: true};
+      const caching = mode === "automatic disk" ? {cacheDir: join(dir, "cache")} : {session: {}};
+      const first = compileProgram({...args, ...caching});
+      assert.match(JSON.stringify(first.partial), /without MANDT/);
+      const unchanged = compileProgram({...args, ...caching, registry: first.reg});
+      assert.deepEqual(unchanged.frontendCounts.reusedClasses, ["ZCL_CDSQ"]);
+      writeFileSync(file, "unparseable text");
+      if (mode !== "explicit memory direct") {
+        const intervening = compileProgram({...args, registry: first.reg});
+        assert.match(JSON.stringify(intervening.partial), /DDLS view mapping could not be read/);
+      }
+      const warm = compileProgram({...args, ...caching, registry: first.reg});
+      const cold = compileProgram(args);
+      assert.equal(warm.reg, first.reg);
+      assert.deepEqual(warm.partial, cold.partial);
+      assert.equal(emitGo(warm), emitGo(cold));
+      assert.match(JSON.stringify(warm.partial), /DDLS view mapping could not be read/);
+      assert.deepEqual(warm.frontendCounts.reusedClasses, []);
+      assert.deepEqual(compileProgram({...args, ...caching, registry: first.reg}).frontendCounts.reusedClasses, ["ZCL_CDSQ"]);
+    } finally { rmSync(dir, {recursive: true, force: true}); }
+  });
+}

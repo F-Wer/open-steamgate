@@ -9,7 +9,7 @@ import {join, resolve} from "node:path";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {dependencyGraph} from "./frontend-provenance-metadata.mjs";
-import {inputSnapshot} from "./frontend-inventory.mjs";
+import {inputSnapshot, cdsInputDigest} from "./frontend-inventory.mjs";
 import {sourceKeys} from "./frontend-source-key.mjs";
 import {shadowCache, borrowedOwners} from "./frontend-v3-shadow.mjs";
 import {hashV3, graphRawFiles} from "./frontend-v3-key.mjs";
@@ -184,7 +184,7 @@ export function objectCache(registry, root) {
   // Selection and supplied/program state still pass replay guards. Source
   // positions stay in the IR for both emission line modes.
   const version = digest(JSON.stringify(["gogen-global-content-1", toolIdentity(), registry.getConfig().get(),
-    fault === "no-version" || drop ? [] : semanticInputs]));
+    fault === "no-version" || drop ? [] : semanticInputs, cdsInputDigest(registry)]));
   const sourceKey = sourceKeys(objects, byName, version, drop);
   const shadow = recordingProvenance() ? shadowCache(registry, root,
     () => hashV3(["gogen-entry-3", toolIdentity(true), registry.getConfig().get()]), portable) : undefined;

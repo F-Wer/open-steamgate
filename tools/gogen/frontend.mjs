@@ -37,7 +37,7 @@ import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
-import {samcOf, cdsSqlViews, cdsMappingError, rearrangedClass, inlineTableLocals, nativeMethodBody} from "./frontend-analysis.mjs";
+import {samcOf, cdsMappingError, rearrangedClass, inlineTableLocals, nativeMethodBody} from "./frontend-analysis.mjs";
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
@@ -84,7 +84,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
       else if (isSourceIdentity(e.name) || skip(path)) continue;
       else if (e.name.toLowerCase().endsWith(".clas.testclasses.abap") && includeTests !== true
           && !includeTests?.has?.(objName(e.name).toUpperCase())) continue;
-      else if (/\.(abap|xml)$/i.test(e.name)) {
+      else if (/\.(abap|xml)$/i.test(e.name) && !registry) {
         const source = readFileSync(path, "utf8");
         // Later rounds can select any loaded object. Normalize once before
         // parsing so newly selected app classes match a fresh final registry.
@@ -95,16 +95,15 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push({filename: path, source: readFileSync(path, "utf8")});
     }
   };
-  if (!registry) {
-    for (const folder of folders) walk(folder);
-    reg.parse();
-    cdsViewsByRegistry.set(reg, cdsSqlViews(ddls));
-  }
+  for (const folder of folders) walk(folder);
+  if (!registry) reg.parse();
+  require("./frontend-inventory.mjs").prepareCdsRegistry(reg, ddls, !registry || folders.length > 0, cdsViewsByRegistry);
   REG = reg;
   // Load cache code and its module state only for an explicit opt-in.
   const diskFrontend = cacheDir ? require("./frontend-object-cache.mjs") : undefined;
+  if (diskFrontend) session = diskFrontend.cacheSession(session, reg, cacheDir);
+  const cdsIdentity = require("./frontend-inventory.mjs").prepareCdsSession(session, reg);
   if (diskFrontend) {
-    session = diskFrontend.cacheSession(session, reg, cacheDir);
     auditedBookkeeping("session-prepare", () => diskFrontend.prepareDiskSession(session, reg)); // Input guards only.
   } else {
     if (session?.disk) {
@@ -115,6 +114,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
     }
     auditedBookkeeping("session-prepare", () => prepareSession(session, reg)); // Input guards only.
   }
+  if (session) session.cdsInputs = cdsIdentity;
   const compile = diskFrontend ? diskFrontend.compileDiskClass : compileClass;
   // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
   // its generic REF TO object sibling. The dynamic raise path below checks

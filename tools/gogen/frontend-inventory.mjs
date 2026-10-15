@@ -103,3 +103,60 @@ export function rttiLocalSupers(classSupers, program) {
   for (const cls of program.classes) if (cls.name.includes(":")) classSupers.set(cls.name, cls.super);
   return classSupers;
 }
+
+// Sources intentionally kept outside abaplint's registry. Preserve the exact
+// load order and raw text, including malformed sources and empty inventories.
+const cdsInputs = new WeakMap();
+export function setCdsInputs(reg, sources) {
+  const ordered = sources.map((input, index) => {
+    const {filename, source} = typeof input === "string"
+      ? {filename: `gogen_${index}.ddls.asddls`, source: input} : input;
+    if (typeof filename !== "string" || typeof source !== "string")
+      throw new TypeError("CDS inputs require string filename and source");
+    return [filename, source];
+  });
+  const origin = inputOrigin(reg), previous = cdsInputs.get(origin);
+  if (previous?.ordered.length === ordered.length && ordered.every(([file, source], i) =>
+    previous.ordered[i][0] === file && previous.ordered[i][1] === source)) return false;
+  cdsInputs.set(origin, {ordered});
+  return true;
+}
+// Stable until the ordered raw inputs change; sessions retain their own identity.
+export function cdsInputIdentity(reg) {
+  const origin = inputOrigin(reg);
+  if (!cdsInputs.has(origin)) cdsInputs.set(origin, {ordered: []});
+  return cdsInputs.get(origin);
+}
+export function cdsInputDigest(reg) {
+  const inputs = cdsInputIdentity(reg);
+  // Keep absolute filenames in the digest: refusal messages embed them.
+  return inputs.digest ??= hash(JSON.stringify(inputs.ordered));
+}
+
+export function prepareCdsRegistry(reg, ddls, refresh, cdsViewsByRegistry) {
+  const {cdsSqlViews, bindCdsRegistry} = require("./frontend-analysis.mjs");
+  // An empty folder list with a supplied registry reuses its complete inputs.
+  const origin = inputOrigin(reg), changedCds = refresh && setCdsInputs(reg, ddls);
+  if (changedCds || !cdsViewsByRegistry.has(origin)) {
+    cdsViewsByRegistry.set(origin, cdsSqlViews(ddls));
+  }
+  const views = cdsViewsByRegistry.get(origin);
+  cdsViewsByRegistry.set(reg, views);
+  const {recordingProvenance, semanticQuery} = require("./frontend-provenance.mjs");
+  bindCdsRegistry(views, (name) => {
+    if (recordingProvenance()) semanticQuery(reg, "cds-mapping", [name], [],
+      {descriptor: cdsInputDigest(reg), policy: "ordered-raw-ddls"});
+  });
+}
+
+export function prepareCdsSession(session, reg) {
+  const cdsIdentity = cdsInputIdentity(reg);
+  if (session && session.cdsInputs !== cdsIdentity) {
+    // Compare what this session cached, even if another compile updated the origin.
+    const root = session.cacheDir;
+    for (const key of Object.keys(session)) delete session[key];
+    if (root) session.cacheDir = root;
+  }
+  // Preparation can clear session fields, so the caller retains this identity afterwards.
+  return cdsIdentity;
+}
