@@ -216,7 +216,9 @@ function main() {
   try {
     prepareInputs();
     const output = join(scratch, "output");
-    for (const sink of ["0", "1"]) {
+    // GOGEN_TYPING_SINKS narrows the sink-locals modes (CI runs the default "1";
+    // a conversion PR's parent proof runs both).
+    for (const sink of (process.env.GOGEN_TYPING_SINKS ?? "0,1").split(",")) {
       const cache = join(scratch, `cache-${sink}`);
       for (const mode of ["none", "cold", "warm"]) {
         const dir = join(output, `sink-${sink}`, mode);
