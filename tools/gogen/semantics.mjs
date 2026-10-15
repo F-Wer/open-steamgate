@@ -287,8 +287,8 @@ const EXPECT = {
   ZCL_GOGEN_T_PCREEMPTYQUOTE: {Go: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q at zcl_gogen_t_pcreemptyquote.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q"},
   ZCL_GOGEN_T_PCREQUOTE: {Go: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q at zcl_gogen_t_pcrequote.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: unsupported quoting escape \\Q"},
   ZCL_GOGEN_T_PCRENEGPOSIX: {Go: "ERROR NOT_COMPILED in FIND PCRE: an unsupported POSIX class: ^alpha at zcl_gogen_t_pcrenegposix.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: an unsupported POSIX class: ^alpha"},
-  // Unmeasured: Round 4 absolute PCRE anchors; A4H not run.
-  ZCL_GOGEN_T_PCREANCHORS: "start:0/0 count:1/0 end:2/0 newline:4 literal:1/0 replace:abX/0",
+  // Absolute PCRE anchors: Node u/s oracle for lookaround spellings; A4H not run.
+  ZCL_GOGEN_T_PCREANCHORS: "start:0/0 count:1/0 end:2/0 newline:4 literal:1/0 replace:abX/0 first:0/0/2 all:0/1 end:0/3/2 replace:0/2/1 empty:0/0/0",
   ZCL_GOGEN_T_PCREANCHORCLASS: {Go: "ERROR NOT_COMPILED in FIND PCRE: unsupported anchor escape in character class \\A at zcl_gogen_t_pcreanchorclass.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: unsupported anchor escape in character class \\A"},
   ZCL_GOGEN_T_PCREANCHORZ: {Go: "ERROR NOT_COMPILED in FIND PCRE: \\Z is not in Go's RE2: \\Z at zcl_gogen_t_pcreanchorz.clas.abap:9", JS: "ERROR NOT_COMPILED in FIND PCRE: \\Z is not in Go's RE2: \\Z"},
   ZCL_GOGEN_T_FINDPCRE: "alt:2[1,1;3,1;] grp:1[0,4(0,1)(1,3);] empty:4[0,0;1,2;3,0;4,0;] wb:2[0,2;7,2;] opt:1[1,1(-1,0);] lazy:3[0,1;1,1;2,1;] ic:2[1,2;3,2;]",

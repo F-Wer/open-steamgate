@@ -81,6 +81,20 @@ export function extendedPCRE(p, anchors) {
         continue;
       }
     }
+    // At a syntax position: names, classes, escapes and x comments were skipped.
+    let absolute;
+    for (const prefix of ["(?<!", "(?!"]) {
+      for (const pair of ["sS", "Ss", "dD", "Dd", "wW", "Ww"]) {
+        const token = prefix + "[\\" + pair[0] + "\\" + pair[1] + "])";
+        if (p.startsWith(token, i)) absolute = [prefix === "(?<!" ? "A" : "z", token.length];
+      }
+    }
+    if (absolute) {
+      anchors.push([out.length, absolute[0]]);
+      out += "\\" + absolute[0];
+      i += absolute[1] - 1;
+      continue;
+    }
     out += c;
   }
   return out;

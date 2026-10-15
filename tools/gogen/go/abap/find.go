@@ -299,7 +299,8 @@ func plainResults(s, p string, all bool) [][]int32 {
 }
 
 // pcreRefused are the PCRE constructs Go's RE2 does not have: refused by
-// name rather than read as something else
+// name rather than read as something else. Absolute (?<![\s\S]) / (?![\s\S])
+// spellings (including complementary d/D and w/W pairs) are rewritten first.
 var pcreRefused = []struct {
 	re   *regexp.Regexp
 	what string
@@ -470,6 +471,11 @@ func extendedPCRE(p string) string {
 				}
 				continue
 			}
+		}
+		if anchor, size := pcregeneric.AbsoluteAnchor(p, i); size > 0 {
+			out.WriteString(anchor)
+			i += size - 1
+			continue
 		}
 		out.WriteByte(c)
 	}

@@ -135,6 +135,7 @@ test("plain PCRE FIND and REPLACE lower in both emitters", () => {
 test("PCRE keeps REGEX's section and byte form restrictions", () => {
   for (const statement of [
     "FIND PCRE p IN SECTION OFFSET 1 OF xs MATCH OFFSET m.",
+    ...[0, 1].map(off => `FIND PCRE ` + "`(?<![\\s\\S])ab`" + ` IN SECTION OFFSET ${off} OF xs MATCH OFFSET m.`),
     "REPLACE FIRST OCCURRENCE OF PCRE p IN SECTION OFFSET 1 OF xs WITH p.",
     "FIND PCRE p IN xs IN BYTE MODE MATCH OFFSET m.",
     "FIND ALL OCCURRENCES OF PCRE p IN xs MATCH OFFSET m MATCH LENGTH m MATCH COUNT m.",
@@ -443,4 +444,45 @@ test("PCRE class tokenizer refuses unmodeled items by name", async () => {
     [String.raw`[[.a.]\s]`, /collating or equivalence item/],
     [String.raw`[[:space:]-a]`, /POSIX class as a character range endpoint/],
   ]) assert.throws(() => a.FindResults("a", p, "P", false, true), reason, p);
+});
+
+// Node's native assertions are an independent oracle for subject boundaries.
+test("PCRE lookaround absolute anchors agree with native u/s assertions", async () => {
+  const a = await import("./js/abap.mjs");
+  const {extendedPCRE} = await import("./js/pcre.mjs");
+  for (const pair of ["sS", "Ss", "dD", "Dd", "wW", "Ww"]) {
+    const start = `(?<![\\${pair[0]}\\${pair[1]}])`, end = `(?![\\${pair[0]}\\${pair[1]}])`;
+    for (const s of ["", "ab", "abab", "ab\nab", "ab\n", "\nab", "Ab"]) {
+      for (const p of [start, end, start + end, start + "ab", "ab" + end, start + "ab" + end, "(?:" + start + "ab)"]) {
+        for (const icase of [false, true]) for (const all of [false, true]) {
+          const re = new RegExp(p, "gdsu" + (icase ? "i" : ""));
+          const matches = [...s.matchAll(re)];
+          const selected = all ? matches : matches.slice(0, 1);
+          assert.deepEqual(a.FindResults(s, p, "P", icase, all), selected.map(m => [m.index, m[0].length]), `${s} ${p}`);
+          const expected = s.replace(new RegExp(p, "dsu" + (all ? "g" : "") + (icase ? "i" : "")), "X");
+          assert.deepEqual(a.ReplaceStmt(s, p, "X", true, all, icase, 0, a.NoLength, -1, true), [expected, matches.length ? 0 : 4]);
+        }
+      }
+    }
+  }
+  // V8's native lookbehind oracle reports a spurious empty match inside a
+  // surrogate pair for start+end; pin scalar boundary semantics independently.
+  assert.deepEqual(a.FindResults("😀ab", String.raw`(?<![\s\S])(?![\s\S])`, "P", false, true), []);
+  assert.deepEqual(a.FindResults("😀ab", String.raw`ab(?![\s\S])`, "P", false, true), [[2, 2]]);
+  for (const p of [String.raw`\(?<![\s\S])`, String.raw`[(?<![\s\S])]`, String.raw`\(?![\s\S])`, String.raw`[(?![\s\S])]`]) {
+    const anchors = [];
+    assert.doesNotMatch(extendedPCRE(p, anchors), /\\[Az]/);
+    assert.deepEqual(anchors, []);
+  }
+  assert.equal(extendedPCRE("ab # (?<![\\s\\S]) (?![\\s\\S])\n", []), "ab");
+  for (const [p, reason] of [[String.raw`(?!\*)`, "a negative lookahead (?!...)"], ["(?<=a)", "a lookbehind (?<=...)"], ["(?<!.)", "a negative lookbehind (?<!...)"], ["(?!.)", "a negative lookahead (?!...)"]]) {
+    assert.throws(() => a.FindResults("a", p, "P", false, true), e => e.message === `NOT_COMPILED in FIND PCRE: ${reason} is not in Go's RE2: ${p}`);
+  }
+});
+
+
+test("matches with PCRE remains outside the frontend subset", () => {
+  const p = compile("IF matches( val = xs pcre = `(?<![\\s\\S])ab(?![\\s\\S])` ). ENDIF.", "DATA xs TYPE string.");
+  assert.equal(p.partial.length, 1);
+  assert.match(p.partial[0], /comparison matches/);
 });

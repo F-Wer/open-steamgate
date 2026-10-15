@@ -63,3 +63,20 @@ func Syntax(p string, escapes bool, refuse func(string)) string {
 	}
 	return out.String()
 }
+
+// AbsoluteAnchor recognizes only the exact complementary-class assertions.
+// Call at a syntax position, after skipping names, escapes, classes and comments.
+func AbsoluteAnchor(p string, i int) (string, int) {
+	for _, prefix := range []string{"(?<!", "(?!"} {
+		for _, class := range []string{`[\s\S]`, `[\S\s]`, `[\d\D]`, `[\D\d]`, `[\w\W]`, `[\W\w]`} {
+			token := prefix + class + ")"
+			if strings.HasPrefix(p[i:], token) {
+				if prefix == "(?<!" {
+					return `\A`, len(token)
+				}
+				return `\z`, len(token)
+			}
+		}
+	}
+	return "", 0
+}
