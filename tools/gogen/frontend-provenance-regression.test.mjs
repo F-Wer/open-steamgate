@@ -454,3 +454,61 @@ for (const method of ["storedProvenance", "inheritStoredProvenance", "provenance
     `;
     execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
   });
+
+
+for (const method of ["provenanceOf", "compilationProvenanceOf"])
+  test(`idle ${method} preserves argument reads and exceptions before and after recorder loading`, () => {
+    const code = `
+      import assert from 'node:assert/strict';
+      import {createRequire} from 'node:module';
+      import * as facade from './tools/gogen/frontend-provenance.mjs';
+      const require = createRequire(import.meta.url);
+      const recorder = require.resolve('./tools/gogen/frontend-provenance-recorder.mjs');
+      const expected = ${method === "provenanceOf" ? "new Map()" : "{scheduling: [], finalOutput: []}"};
+      const sentinel = new Error('getter sentinel');
+      const check = () => {
+        for (const property of ['reg', 'registry']) {
+          const reads = [];
+          const value = {
+            get reg() { reads.push('reg'); if (property === 'reg') throw sentinel; return null; },
+            get registry() { reads.push('registry'); throw sentinel; },
+          };
+          assert.throws(() => facade.${method}(value), error => error === sentinel);
+          assert.deepEqual(reads, property === 'reg' ? ['reg'] : ['reg', 'registry']);
+        }
+        for (const reg of [undefined, null, {}, false, 0, '']) {
+          const reads = [];
+          const value = {
+            get reg() { reads.push('reg'); return reg; },
+            get registry() { reads.push('registry'); return undefined; },
+          };
+          assert.deepEqual(facade.${method}(value), expected);
+          assert.deepEqual(reads, reg == null ? ['reg', 'registry'] : ['reg']);
+        }
+        for (const value of [null, undefined]) assert.deepEqual(facade.${method}(value), expected);
+      };
+      check();
+      assert.equal(require.cache[recorder], undefined);
+      facade.recordProvenance(() => {});
+      assert.ok(require.cache[recorder]);
+      check();
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+  });
+
+for (const method of ["provenanceGraph", "storedProvenance", "inheritStoredProvenance"])
+  test(`idle ${method} avoids argument reads before and after recorder loading`, () => {
+    const code = `
+      import assert from 'node:assert/strict';
+      import {createRequire} from 'node:module';
+      import * as facade from './tools/gogen/frontend-provenance.mjs';
+      const require = createRequire(import.meta.url);
+      const recorder = require.resolve('./tools/gogen/frontend-provenance-recorder.mjs');
+      const value = new Proxy({}, {get() { throw new Error('unexpected argument read'); }});
+      assert.equal(facade.${method}(value, value, value), undefined);
+      assert.equal(require.cache[recorder], undefined);
+      facade.recordProvenance(() => {});
+      assert.equal(facade.${method}(value, value, value), undefined);
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+  });

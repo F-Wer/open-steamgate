@@ -125,7 +125,10 @@ function loadRecorder() {
 }
 
 /** @param {import('./frontend-session-types.ts').ProvenanceInput} value @param {{internal?: boolean}} options @returns {Map<string, import('./frontend-session-types.ts').Manifest>} */ export function provenanceOf(value, {internal = false} = {}) {
-  return recorder?.provenanceOf(value, {internal}) ?? new Map();
+  if (recorder) return recorder.provenanceOf(value, {internal});
+  // Preserve normalization reads and getter exceptions even without recorded state.
+  void (value?.reg ?? value?.registry ?? value);
+  return new Map();
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').Role} role @param {(obj: import('./frontend-session-types.ts').ArtifactObject) => boolean} predicate @returns {import('./frontend-session-types.ts').ArtifactObject[]} */ export function enumerateObjects(reg, kind, args = [], role = "scheduling", predicate = () => true) {
@@ -157,7 +160,9 @@ function loadRecorder() {
 }
 
 /** @param {import('./frontend-session-types.ts').ProvenanceInput} value @returns {{scheduling: import('./frontend-session-types.ts').QueryRow[], finalOutput: import('./frontend-session-types.ts').QueryRow[]}} */ export function compilationProvenanceOf(value) {
-  return recorder?.compilationProvenanceOf(value) ?? {scheduling: [], finalOutput: []};
+  if (recorder) return recorder.compilationProvenanceOf(value);
+  void (value?.reg ?? value?.registry ?? value);
+  return {scheduling: [], finalOutput: []};
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @returns {import('./frontend-session-types.ts').ProvenanceGraph | undefined} */ export function provenanceGraph(reg) {
