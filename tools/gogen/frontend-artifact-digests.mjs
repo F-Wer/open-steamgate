@@ -1,5 +1,6 @@
 // Resolved snapshots, never registry graphs. A lazy table is installed per compile;
 // definitions and types are projected/hash-consed once within that table.
+import {inputSnapshot} from "./frontend-inventory.mjs";
 import {createHash} from "node:crypto";
 import {basename} from "node:path";
 const tables = new WeakMap();
@@ -33,9 +34,10 @@ class Digests {
   inventory() {
     if (this.objects) return;
     const start = performance.now();
-    this.objects = new Map([...this.registry.getObjects()].map((o) => [artifactKey(o), o]));
-    this.owners = new Map();
-    for (const [key, obj] of this.objects) for (const f of obj.getFiles()) this.owners.set(f.getFilename(), key);
+    // AUDITED digest inventory: shared source ownership, no semantic scan.
+    const snapshot = inputSnapshot(this.registry);
+    this.objects = new Map([...snapshot.objects].map(([key, {obj}]) => [key, obj]));
+    this.owners = snapshot.fileOwners;
     this.stats.inventoryMilliseconds = performance.now() - start;
     this.stats.milliseconds += this.stats.inventoryMilliseconds;
   }
@@ -133,7 +135,7 @@ class Digests {
     const start = performance.now();
     let digest;
     try {
-      const files = obj.getFiles().map((f) => [portableFilename(f.getFilename()), hash(f.getRaw())]);
+      const files = inputSnapshot(this.registry).objects.get(key).sources.map((s) => [portableFilename(s.name), s.artifactHash]);
       const expanded = (obj.getABAPFiles?.() ?? []).map((f) => [portableFilename(f.getFilename()),
         this.syntax(f.getStructure()), f.getStatements().map((s) => this.syntax(s))]);
       const def = obj.def ?? obj.definition;

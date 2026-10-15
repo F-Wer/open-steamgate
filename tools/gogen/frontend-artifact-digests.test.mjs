@@ -126,7 +126,7 @@ test("cache dependency metadata and provenance are opt-in; CLI explains unavaila
   assert.equal(metadata.length, 1);
   for (const key of ["TABL ZORACLE_TAB", "DTEL ZORACLE_NUM", "DOMA ZORACLE_NUM"])
     assert.equal(metadata[0].dependencyDigests[key], artifactDigestsOf(on).get(key), key);
-  assert.equal(metadata[0].provenanceComplete, false, "unknown orchestration remains fail-closed");
+  assert.equal(metadata[0].provenanceComplete, true, "classified orchestration does not contaminate class dependencies");
   assert.deepEqual(artifactDigestsOf(on), artifactDigestsOf(off));
   const warm = build(dir, c, {cacheDir: onDir, provenance: true});
   assert.ok(warm.frontendCounts.reusedClasses.includes("ZCL_DDIC"));

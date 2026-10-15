@@ -6,6 +6,7 @@ import {join, resolve} from "node:path";
 import {deserialize} from "node:v8";
 import {inflateRawSync} from "node:zlib";
 import {pathToFileURL} from "node:url";
+import {expandDependencyMetadata} from "./frontend-provenance-metadata.mjs";
 import {artifactDigestsOf, artifactDigestStats} from "./frontend-artifact-digests.mjs";
 
 export function cacheDigestMetadata(root, name) {
@@ -16,6 +17,11 @@ export function cacheDigestMetadata(root, name) {
         const bytes = readFileSync(join(root, version, file)), payload = bytes.subarray(65);
         if (bytes.subarray(0, 64).toString() !== createHash("sha256").update(payload).digest("hex")) continue;
         const entry = deserialize(inflateRawSync(payload));
+        if (entry.metadata?.graph) {
+          const graphBytes = readFileSync(join(root, version, `${entry.metadata.graph}.provenance`));
+          if (createHash("sha256").update(graphBytes).digest("hex") !== entry.metadata.graph) continue;
+          entry.metadata = expandDependencyMetadata(entry.metadata, deserialize(inflateRawSync(graphBytes)));
+        }
         if (entry.value.name === name.toUpperCase() || entry.metadata?.owner === name.toUpperCase())
           found.push({version, file, ...(entry.metadata ?? {entry: entry.value.name, unavailable: "provenance recording was off or entry predates digest metadata"})});
       } catch { /* Same corruption/missing-entry fallback as compilation. */ }

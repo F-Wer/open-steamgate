@@ -1,3 +1,4 @@
+import {objectKey as cachedObjectKey} from "./frontend-inventory.mjs";
 import {relative, isAbsolute} from "node:path";
 import {fileURLToPath} from "node:url";
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
@@ -12,7 +13,7 @@ function portableSite(line) {
 }
 // Version-specific observation adapters for the pinned abaplint core. Unknown
 // registry iteration is always visible; adding a classification needs a test.
-const objectKey = (obj) => obj?.getType ? `${obj.getType()} ${obj.getName().toUpperCase()}` : undefined;
+const objectKey = (obj) => obj?.getType ? cachedObjectKey(obj) : undefined;
 const scalar = (v) => v === undefined ? null : typeof v === "string" ? v.toUpperCase() : v;
 
 export function installHooks(core, requireCore, r) {
@@ -41,7 +42,14 @@ export function installHooks(core, requireCore, r) {
   // Named queries include their actual ordered result, including absence.
   for (const method of ["getObject", "getFileByName", "findObjectForFile", "getFirstObject"]) {
     patch(regProto, method, (fn) => function(...args) {
+      if (r.auditDepth) return fn.apply(this, args);
       const state = r.state(this);
+      if (method === "getObject") {
+        const found = fn.apply(this, args), key = objectKey(found);
+        if (found) { owners.set(found, this); r.entry(state, key); }
+        r.query(state, {kind: method, args: args.map(scalar), result: key ? [key] : []});
+        return found;
+      }
       return r.context(method, args, () => {
         r.suppressed++;
         let found;
@@ -59,6 +67,7 @@ export function installHooks(core, requireCore, r) {
   }
   for (const method of ["getObjects", "getObjectsByType"]) {
     patch(regProto, method, (fn) => function(...args) {
+      if (r.auditDepth || r.suppressed) return fn.apply(this, args);
       const reg = this, state = r.state(reg), context = r.contexts.at(-1);
       const owner = r.current(state)?.key, phase = r.current(state)?.phase ?? "registry";
       const site = String(new Error().stack ?? "").split("\n").slice(2, 5).map(portableSite);
@@ -66,13 +75,18 @@ export function installHooks(core, requireCore, r) {
       // an unexpected sweep nested inside a known pass must still fail closed.
       const direct = site[0] ?? "";
       let kind;
-      if (/\/registry\.js:/.test(direct)) kind = context?.kind ?? "registry-inventory";
-      else if (/\/find_global_definitions\.js:/.test(direct)) kind = "global-definitions";
-      else if (/\/(cross_include_macros|include_graph)\.js:/.test(direct)) kind = "include-macro-context";
+      if (/\/registry\.js:/.test(direct)) {
+        // Audit concrete core call sites, never an entire source filename.
+        const method = /at Registry\.(parse|isDirty|getObjectCount|getFiles|findIssues|setConfig) \(/.exec(direct)?.[1];
+        if (method) kind = `registry-${method}`;
+      }
+      else if (/FindGlobalDefinitions\.run .*\/find_global_definitions\.js:/.test(direct)) kind = "global-definitions";
+      else if (/CrossIncludeMacros\.findCandidates .*\/cross_include_macros\.js:|getABAPObjects .*\/include_graph\.js:/.test(direct)) kind = "include-macro-context";
       else if (/\/(_current_scope|_procedural|ddic)\.js:/.test(direct)) kind = context?.kind;
       else if (direct.includes("frontend-provenance.mjs:") && context?.kind === "function-module-index") kind = context.kind;
       const query = {kind: kind ?? "unknown-scan", scan: method,
-        args: args.map(scalar), result: [], complete: false, phase};
+        args: args.map(scalar), result: [], complete: false, phase,
+        ...((kind === "include-macro-context" && !owner) || ["registry-inventory", "global-definitions", "registry-parse", "registry-findIssues", "registry-isDirty", "registry-getFiles", "registry-getObjectCount", "registry-setConfig"].includes(kind) ? {role: "scheduling"} : {})};
       if (kind && context?.kind === kind) query.queryArgs = context.args.map((a) => typeof a === "string" ? a : null);
       if (!kind) query.site = site;
       const suppressed = r.suppressed > 0;
@@ -102,6 +116,7 @@ export function installHooks(core, requireCore, r) {
   for (const cls of Object.values(core.Objects)) {
     for (let proto = cls?.prototype; proto && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
       for (const method of methods) patch(proto, method, (fn) => function(...args) {
+        if (r.auditDepth || (!["parse", "parseType", "getInclude", "getModule"].includes(method) && r.stack.at(-1)?.obj === this)) return fn.apply(this, args);
         const reg = owners.get(this) ?? (args.find((a) => a instanceof core.Registry));
         if (!reg) return fn.apply(this, args);
         owners.set(this, reg);
@@ -110,7 +125,7 @@ export function installHooks(core, requireCore, r) {
         const value = r.artifact(reg, this, phase, () => fn.apply(this, args));
         if (method === "getInclude" || method === "getModule") {
           r.query(state, {kind: method === "getInclude" ? "function-group-include" : "function-module-owner",
-            args: args.map(scalar), result: value ? [objectKey(this)] : []}, caller);
+            args: args.map(scalar), result: value ? [objectKey(this)] : [], policy: "group-member"}, caller);
         }
         return value;
       });
@@ -138,7 +153,7 @@ export function installHooks(core, requireCore, r) {
       if (value instanceof Set) result = [...value].map(objectKey).filter(Boolean);
       else if (value?.object) result = [objectKey(value.object)];
       else if (value) result = [typeof value === "boolean" ? true : value.getFilename?.() ?? value.getName?.() ?? "resolved"];
-      r.query(state, {kind, args: argsOf(args), result});
+      r.query(state, {kind, args: argsOf(args), result, ...(kind === "function-module-owner" ? {policy: "core-first-match"} : {})});
       return value;
     });
   });

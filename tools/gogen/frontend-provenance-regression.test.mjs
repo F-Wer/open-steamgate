@@ -9,7 +9,7 @@ import {mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync} from "nod
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
-import {recordProvenance, provenanceOf, artifactLowering, storedProvenance, inheritStoredProvenance, expandProgramSelection} from "./frontend-provenance.mjs";
+import {recordProvenance, provenanceOf, artifactLowering, withArtifact, storedProvenance, inheritStoredProvenance, expandProgramSelection} from "./frontend-provenance.mjs";
 import {classSource, syntheticCorpus} from "./cache-oracle-corpus.mjs";
 import {emitGo} from "./emit-go.mjs";
 const require = createRequire(import.meta.url), cr = createRequire(require.resolve("@abaplint/transpiler/package.json"));
@@ -25,7 +25,7 @@ function registry(files) {
 }
 const allRows = (m) => [...m.hits, ...m.misses, ...m.scans, ...m.unknownScans];
 const marker = (reg, owner, name) => provenanceOf(reg).get(owner).unknownScans.some((q) => q.args[0] === name);
-const scope = (reg, obj, run) => artifactLowering(run)({reg}, obj);
+const scope = (reg, obj, run) => withArtifact({reg}, obj, run, "test-artifact-build");
 const aFiles = () => ({"zcl_a.clas.abap": classSource("zcl_a", "DATA x TYPE zmiss. rv = 7.")});
 
 function diskFiles(dir) {
@@ -48,19 +48,22 @@ test("recording is opt-in with cacheDir, and explicit false overrides the enviro
   }
 });
 
-test("disk entries store only own rows and edges, not the DDIC closure", () => {
+test("disk entries reference the shared graph, which stores own rows and artifact edges", () => {
   const dir = mkdtempSync(join(tmpdir(), "prov-own-"));
   try {
     const c = syntheticCorpus({classes: 4});
     for (const [name, raw] of Object.entries(c.files)) writeFileSync(join(dir, name), raw);
     const options = {folders: [dir], objects: ["ZCL_DDIC"], cacheDir: join(dir, "cache"), provenance: true};
     compileProgram(options);
-    const entries = diskFiles(options.cacheDir).filter((f) => f.endsWith(".bin")).map((f) => deserialize(inflateRawSync(readFileSync(f).subarray(65))).value);
-    const entry = entries.find((e) => e.name === "ZCL_DDIC" || e.entry?.name === "ZCL_DDIC");
-    const stored = entry?.provenance ?? entry?.entry?.provenance;
-    assert.ok(stored && !Array.isArray(stored), "own-row envelope");
+    const files = diskFiles(options.cacheDir);
+    const entries = files.filter((f) => f.endsWith(".bin")).map((f) => deserialize(inflateRawSync(readFileSync(f).subarray(65))));
+    const entry = entries.find((e) => e.value.name === "ZCL_DDIC");
+    assert.ok(entry.valueBytes, "frozen lowering bytes");
+    assert.equal(entry.value.provenance, undefined, "no duplicate per-entry transcript");
+    const graph = deserialize(inflateRawSync(readFileSync(files.find((f) => f.endsWith(`${entry.metadata.graph}.provenance`)))));
+    const stored = graph.nodes[entry.metadata.root];
     assert.ok(stored.rows.every((q) => q.artifact === "CLAS ZCL_DDIC"));
-    assert.ok(stored.edges.includes("TABL ZORACLE_TAB"));
+    assert.ok(stored.dependencies.includes("TABL ZORACLE_TAB"));
     const warm = compileProgram(options), m = provenanceOf(warm).get("CLAS ZCL_DDIC");
     assert.ok(m.hits.some((q) => q.artifact === "DTEL ZORACLE_NUM" && q.result.includes("DOMA ZORACLE_NUM")));
   } finally { rmSync(dir, {recursive: true, force: true}); }
@@ -96,19 +99,19 @@ for (const edit of ["replace", "add", "remove"]) test(`retained registry ${edit}
   if (edit === "add") reg.addFile(new core.MemoryFile("zcl_a.clas.locals_imp.abap", ""));
   if (edit === "remove") reg.removeFile(reg.getFileByName("zcl_a.clas.locals_def.abap"));
   reg.removeFile(reg.getFileByName("zcl_old.clas.abap"));
-  compileProgram({registry: reg, folders: [], objects: [], provenance: true});
-  assert.ok(marker(reg, "CLAS ZCL_A", "retained-registry-edit"));
-  assert.ok(!allRows(provenanceOf(reg).get("CLAS ZCL_A")).some((q) => q.args.includes("ZSTALE")));
-  assert.ok(!provenanceOf(reg).has("CLAS ZCL_OLD"));
+  const p = compileProgram({registry: reg, folders: [], objects: [], provenance: true});
+  assert.notEqual(p.reg, reg, "edited registries are rebuilt");
+  assert.ok(!allRows(provenanceOf(p).get("CLAS ZCL_A")).some((q) => q.args.includes("ZSTALE")));
+  assert.ok(!provenanceOf(p).has("CLAS ZCL_OLD"));
 });
 
 test("retained config edits prune old rows and fail closed", () => {
   const reg = registry(aFiles());
   recordProvenance(() => { reg.parse(); scope(reg, reg.getObject("CLAS", "ZCL_A"), () => reg.getObject("CLAS", "ZSTALE")); });
   reg.setConfig(new core.Config(JSON.stringify(reg.getConfig().get())));
-  compileProgram({registry: reg, folders: [], objects: [], provenance: true});
-  assert.ok(marker(reg, "CLAS ZCL_A", "retained-registry-config-edit"));
-  assert.ok(!allRows(provenanceOf(reg).get("CLAS ZCL_A")).some((q) => q.args.includes("ZSTALE")));
+  const p = compileProgram({registry: reg, folders: [], objects: [], provenance: true});
+  assert.notEqual(p.reg, reg);
+  assert.ok(!allRows(provenanceOf(p).get("CLAS ZCL_A")).some((q) => q.args.includes("ZSTALE")));
 });
 
 test("no stack frames is an unknown scan, including without artifact context", () => {

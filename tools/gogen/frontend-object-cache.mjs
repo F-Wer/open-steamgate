@@ -1,4 +1,4 @@
-import {artifactLowering, storedProvenance, inheritStoredProvenance, provenanceOf, recordingProvenance} from "./frontend-provenance.mjs";
+import {artifactLowering, storedProvenance, inheritStoredProvenance, recordingProvenance} from "./frontend-provenance.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
@@ -8,7 +8,8 @@ import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, st
 import {join, resolve} from "node:path";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
-import {artifactDigestOf} from "./frontend-artifact-digests.mjs";
+import {dependencyGraph} from "./frontend-provenance-metadata.mjs";
+import {inputSnapshot} from "./frontend-inventory.mjs";
 import {sourceKeys} from "./frontend-source-key.mjs";
 
 const here = import.meta.dirname, home = resolve(here, "../..");
@@ -144,11 +145,11 @@ export function objectCache(registry, root) {
   if (fault && !["no-version", "sorted-files"].includes(fault) && !drop)
     throw new Error(`unknown GOGEN_CACHE_ORACLE_FAULT: ${fault}`);
   const objects = new Map(), byName = new Map();
-  for (const obj of registry.getObjects()) {
-    const key = `${obj.getType()} ${obj.getName().toUpperCase()}`;
+  // AUDITED cache inventory: source guards, never semantic dependencies.
+  for (const [key, {obj, sources: inputs}] of inputSnapshot(registry).objects) {
     // Macro collection keeps the first definition in registry input order.
     // Sorting these files would hide an order edit even from the global guard.
-    const sources = obj.getFiles().map((f) => [f.getFilename(), f.getRaw()]);
+    const sources = inputs.map((s) => [s.name, s.raw]);
     if (fault === "sorted-files") sources.sort(([a], [b]) => a.localeCompare(b));
     const words = new Set(sources.flatMap(([, raw]) => raw.toUpperCase().match(/(?:\/[A-Z0-9_]+\/)?[A-Z_][A-Z0-9_]*/g) ?? []));
     objects.set(key, {hash: digest(JSON.stringify(sources)), words});
@@ -176,7 +177,7 @@ export function objectCache(registry, root) {
   const selection = (program) => digest(JSON.stringify([...program.wanted]));
   const wholeSelection = (value) => value.replay?.ops.some((op) => op.key === "wanted"
     && (op.kind === "measure" || (op.kind === "read" && !op.method)));
-  const pending = [];
+  const pending = [], provenanceGraphs = new Map();
   const cache = {
     begin() { pending.length = 0; },
     read(owner, name, program) {
@@ -187,6 +188,20 @@ export function objectCache(registry, root) {
         const payload = bytes.subarray(65);
         if (bytes.subarray(0, 64).toString() !== digest(payload)) continue;
         const entry = deserialize(inflateRawSync(payload));
+        if (entry.valueBytes) entry.value = {...deserialize(entry.valueBytes), ...entry.value};
+        if (entry.metadata?.graph) {
+          const id = entry.metadata.graph;
+          if (!provenanceGraphs.has(id)) {
+            const graphBytes = readFileSync(join(root, version, `${id}.provenance`));
+            if (digest(graphBytes) !== id) continue;
+            provenanceGraphs.set(id, deserialize(inflateRawSync(graphBytes)));
+          }
+          const nodes = provenanceGraphs.get(id).nodes;
+          const own = nodes[owner], lowering = nodes[entry.metadata.root];
+          if (!own || !lowering) continue;
+          entry.value.provenance = {rows: [...own.rows, ...lowering.rows],
+            edges: [...new Set([...own.dependencies, ...lowering.dependencies].filter((k) => k !== owner))]};
+        }
         if (entry.key === sourceKey(owner, entry.reads) && portable(entry.value)) {
           if (Date.now() - touched > TOUCH_MS) { touched = Date.now(); touch(join(root, version)); }
           return entry.value;
@@ -210,45 +225,44 @@ export function objectCache(registry, root) {
     },
     write(owner, value, reads, program) {
       if (!recordingProvenance() || !program.reg) { cache.persist({owner, value, reads, program}); return; }
-      // Freeze the lowering now, as the old immediate writer did. Later owners
-      // may mutate shared IR/effect values before final provenance is available.
+      // Freeze the lowering graph once into immutable bytes. Finalized guards
+      // are appended to an envelope, without cloning/serializing that graph again.
       try {
         value = compactLowering(value);
         if (!portable(value)) return;
-        value = structuredClone(value);
-      } catch { return; }
-      pending.push({owner, value, reads: [...reads], program: {wanted: new Set(program.wanted)}});
+        const {provenance, ...payload} = value;
+        pending.push({owner, value: {name: value.name}, valueBytes: serialize(payload),
+          reads: [...reads], variant: wholeSelection(value) ? selection(program) : ""});
+      } catch { /* Non-portable lowerings compile normally. */ }
     },
     finish(program) {
       if (!pending.length) return;
-      const manifests = provenanceOf(program, {internal: true});
-      const fileOwners = new Map([...registry.getObjects()].flatMap((o) => o.getFiles().map((f) => [f.getFilename(), `${o.getType()} ${o.getName().toUpperCase()}`])));
-      const owners = new Set(fileOwners.values());
+      const graph = dependencyGraph(registry, pending.map((e) => e.owner));
+      const bytes = deflateRawSync(serialize(graph), {level: 1}), graphHash = digest(bytes);
+      const graphFile = join(root, version, `${graphHash}.provenance`);
+      try {
+        mkdirSync(join(root, version), {recursive: true});
+        const temp = `${graphFile}.${randomUUID()}.pending`;
+        try { writeFileSync(temp, bytes); renameSync(temp, graphFile); }
+        finally { rmSync(temp, {force: true}); }
+      } catch { pending.length = 0; return; }
       for (const entry of pending.splice(0)) {
-        const manifest = manifests.get(entry.owner), keys = new Set();
-        for (const hit of manifest?.hits ?? []) for (const result of hit.result) {
-          const key = owners.has(result) ? result : fileOwners.get(result);
-          if (key) keys.add(key);
-        }
-        const dependencies = [...keys].sort().map((key) => [key, artifactDigestOf(registry, key)]);
-        const ownerDigest = artifactDigestOf(registry, entry.owner);
-        entry.metadata = {format: "gogen-dependency-digests-1", owner: entry.owner, entry: entry.value.name,
-          artifactDigest: ownerDigest,
-          dependencyDigests: Object.fromEntries(dependencies),
-          provenanceComplete: !!manifest && manifest.unknownScans.length === 0
-            && !!ownerDigest && dependencies.every(([, digest]) => !!digest)};
+        entry.metadata = {format: "gogen-dependency-digests-2", owner: entry.owner, entry: entry.value.name,
+          artifactDigest: graph.nodes[entry.owner]?.digest ?? null, graph: graphHash, root: `lowering:${entry.owner}`};
         cache.persist(entry);
       }
     },
-    persist({owner, value, reads, program, metadata}) {
+    persist({owner, value, valueBytes, reads, program, metadata, variant}) {
       // Repeated reads can exceed the budget before compaction. A transcript
       // with unserializable arguments must still fall back to ordinary lowering.
-      try { value = compactLowering(value); } catch { return; }
-      if (!portable(value)) return;
-      const file = location(owner, value.name, wholeSelection(value) ? selection(program) : ""), temp = `${file}.${randomUUID()}.pending`;
+      if (!valueBytes) {
+        try { value = compactLowering(value); } catch { return; }
+        if (!portable(value)) return;
+      }
+      const file = location(owner, value.name, variant ?? (wholeSelection(value) ? selection(program) : "")), temp = `${file}.${randomUUID()}.pending`;
       try {
         mkdirSync(join(root, version), {recursive: true});
-        const payload = deflateRawSync(serialize({key: sourceKey(owner, reads), reads, ...(metadata ? {metadata} : {}), value}), {level: 1});
+        const payload = deflateRawSync(serialize({key: sourceKey(owner, reads), reads, ...(metadata ? {metadata} : {}), ...(valueBytes ? {valueBytes} : {}), value}), {level: 1});
         writeFileSync(temp, Buffer.concat([Buffer.from(digest(payload) + "\n"), payload]));
         renameSync(temp, file);
       } catch { /* Cache availability must not change compilation. */ }

@@ -5,7 +5,7 @@ import {mkdtempSync, writeFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
-import {artifactLowering, provenanceOf, recordProvenance} from "./frontend-provenance.mjs";
+import {artifactLowering, compilationProvenanceOf, provenanceOf, recordProvenance} from "./frontend-provenance.mjs";
 import {syntheticCorpus, classSource} from "./cache-oracle-corpus.mjs";
 import {captureArtifacts, compareArtifacts} from "./cache-oracle-capture.mjs";
 const require = createRequire(import.meta.url);
@@ -41,7 +41,8 @@ test("pre-parse manifests cover implicit pools, include macros, FM ownership and
   const macro = manifests.get("CLAS ZCL_INCLUDE_MACRO");
   assert.ok(macro.hits.some((q) => q.kind === "getObject" && q.result.includes("PROG ZORACLE_MACROS") && q.phase === "parse"));
   const fm = manifests.get("CLAS ZCL_FUNCTION");
-  assert.ok(fm.scans.some((q) => q.kind === "function-module-index" && q.result.includes("FUGR ZORACLE_GROUP")));
+  assert.ok(compilationProvenanceOf(p).scheduling.some((q) => q.kind === "function-module-index" && q.result.includes("FUGR ZORACLE_GROUP")));
+  assert.ok(!fm.scans.some((q) => q.kind === "function-module-index"));
   assert.ok(fm.hits.some((q) => q.kind === "function-module-owner" && q.args[0] === "ZORACLE_FUNCTION" && q.result.includes("FUGR ZORACLE_GROUP")));
   assert.ok(rows(manifests.get("FUGR ZORACLE_GROUP")).some((q) => q.kind === "function-group-include"));
   const ddic = manifests.get("CLAS ZCL_DDIC");
@@ -193,7 +194,7 @@ test("temporary preprocessing registries cannot overwrite the program object's m
     const p = compileProgram({folders: [dir], objects: ["ZCL_BOOL"], provenance: true});
     const m = provenanceOf(p).get("CLAS ZCL_BOOL");
     assert.ok(m.hits.some((q) => q.phase === "lowering" && q.artifact === "CLAS ZCL_BOOL"));
-    assert.ok(m.unknownScans.some((q) => q.site?.[0].includes("suppliedParams")));
+    assert.equal(m.unknownScans.length, 0);
     assert.deepEqual(provenanceOf(p), provenanceOf(p.reg));
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
