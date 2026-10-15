@@ -43,17 +43,41 @@ function pcreHex(p, x) {
 }
 
 // Unmeasured: ABAP PCRE extended mode by documentation; measure on A4H before changing
+// Called only at syntax positions in the existing walker.
+function pcreQuantifierAt(p, i) {
+  if ("*+?".includes(p[i])) return true;
+  if (p[i] !== "{") return false;
+  let j = i + 1;
+  const digit = c => c >= "0" && c <= "9";
+  while (j < p.length && digit(p[j])) j++;
+  if (j === i + 1) return false;
+  if (p[j] === ",") {
+    j++;
+    while (j < p.length && digit(p[j])) j++;
+  }
+  return p[j] === "}";
+}
+
 export function extendedPCRE(p, anchors) {
   const extended = !p.startsWith("(?-x)");
   if (!extended) p = p.slice(5);
-  let out = "";
+  let out = "", writtenAnchor = "";
   for (let i = 0; i < p.length; i++) {
+    const c = p[i];
+    if (extended) {
+      if (/[ \t\n\r\f\v]/.test(c)) continue;
+      if (c === "#") {
+        while (i + 1 < p.length && !/[\r\n]/.test(p[i + 1])) i++;
+        continue;
+      }
+    }
+    if (writtenAnchor && pcreQuantifierAt(p, i)) notCompiled("FIND PCRE: quantifier does not follow a repeatable item: " + writtenAnchor);
+    writtenAnchor = "";
     const name = pcreName(p,i);
     if (name) {
       out += name.startsWith("(?P<") ? "(?<" + name.slice(4) : name.startsWith("(?'") ? "(?<" + name.slice(3,-1) + ">" : name;
       i += name.length-1; continue;
     }
-    const c = p[i];
     if (c === "[") {
       const parsed = pcreClassItems(p,i,notCompiled);
       out += "[" + (parsed.neg ? "^" : "") + parsed.items.map(t => t.kind === "g" ? "\\"+t.text : t.raw ?? t.text).join("") + "]";
@@ -69,17 +93,11 @@ export function extendedPCRE(p, anchors) {
         continue;
       }
       if (next === "A" || next === "z") {
+        writtenAnchor = c + next;
         anchors.push([out.length, next]);
       }
       out += /[ \t\n\r\f\v#]/.test(next) ? next : c + next;
       continue;
-    }
-    if (extended) {
-      if (/[ \t\n\r\f\v]/.test(c)) continue;
-      if (c === "#") {
-        while (i + 1 < p.length && !/[\r\n]/.test(p[i + 1])) i++;
-        continue;
-      }
     }
     // At a syntax position: names, classes, escapes and x comments were skipped.
     let absolute;
@@ -95,6 +113,7 @@ export function extendedPCRE(p, anchors) {
       i += absolute[1] - 1;
       continue;
     }
+    if (c === "^" || c === "$") writtenAnchor = c;
     out += c;
   }
   return out;

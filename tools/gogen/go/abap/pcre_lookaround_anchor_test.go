@@ -168,3 +168,32 @@ func TestPCREQuantifiedLookaroundAnchors(t *testing.T) {
 		}
 	}
 }
+
+// PCRE2 10.42 error 109: written anchors are not repeatable items.
+func TestPCREWrittenAnchorQuantifiers(t *testing.T) {
+	for _, anchor := range []string{`\A`, `\z`, `^`, `$`} {
+		for _, q := range []string{"*", "+", "?", "{0}", "{1}", "{1,}", "{1,2}"} {
+			for _, gap := range []string{"", " \t", " # ignored\n"} {
+				p := anchor + gap + q
+				for _, replace := range []bool{false, true} {
+					func() {
+						defer func() {
+							want := "NOT_COMPILED in FIND PCRE: quantifier does not follow a repeatable item: " + anchor
+							if got := fmt.Sprint(recover()); got != want {
+								t.Errorf("%q replace=%v: %s want %s", p, replace, got, want)
+							}
+						}()
+						if replace {
+							ReplaceStmt("a", p, "X", true, true, false, 0, NoLength, -1, true)
+						} else {
+							FindResults("a", p, 'P', false, true)
+						}
+					}()
+				}
+			}
+		}
+	}
+	for _, p := range []string{`\\A*`, `\\z+`, `[\^$]*`, `\A.*`, `\z\x2a`, `(?-x)\A *`, "\\A # ignored *\n", `\A{,2}`, `\z{x}`} {
+		extendedPCRE(p)
+	}
+}

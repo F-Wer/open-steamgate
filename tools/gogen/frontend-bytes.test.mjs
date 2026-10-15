@@ -520,3 +520,22 @@ test("PCRE lookaround anchors remain quantifiable", async () => {
     }
   }
 });
+
+test("PCRE written anchors reject quantifiers before translation", async () => {
+  const a = await import("./js/abap.mjs");
+  const {extendedPCRE} = await import("./js/pcre.mjs");
+  // PCRE2 10.42 error 109, also confirmed for ^ and $.
+  for (const anchor of [String.raw`\A`, String.raw`\z`, "^", "$"]) {
+    for (const q of ["*", "+", "?", "{0}", "{1}", "{1,}", "{1,2}"]) {
+      for (const gap of ["", " \t", " # ignored\n"]) {
+        const p = anchor + gap + q;
+        const check = e => e.message === "NOT_COMPILED in FIND PCRE: quantifier does not follow a repeatable item: " + anchor;
+        assert.throws(() => a.FindResults("a", p, "P", false, true), check, p);
+        assert.throws(() => a.ReplaceStmt("a", p, "X", true, true, false, 0, a.NoLength, -1, true), check, p);
+      }
+    }
+  }
+  for (const p of [String.raw`\\A*`, String.raw`\\z+`, String.raw`[\^$]*`, String.raw`\A.*`, String.raw`\z\x2a`, String.raw`(?-x)\A *`, "\\A # ignored *\n", String.raw`\A{,2}`, String.raw`\z{x}`]) {
+    assert.doesNotThrow(() => extendedPCRE(p, []), p);
+  }
+});

@@ -3,6 +3,7 @@ package abap
 import (
 	"osg/gogen/byteops"
 	"osg/gogen/bytesection"
+	"osg/gogen/pcreanchor"
 	"osg/gogen/pcregeneric"
 	"regexp"
 	"strconv"
@@ -431,13 +432,29 @@ func extendedPCRE(p string) string {
 		p = p[5:]
 	}
 	var out strings.Builder
+	writtenAnchor := ""
 	for i := 0; i < len(p); i++ {
+		c := p[i]
+		if extended {
+			if strings.ContainsRune(" \t\n\r\f\v", rune(c)) {
+				continue
+			}
+			if c == '#' {
+				for i+1 < len(p) && p[i+1] != '\r' && p[i+1] != '\n' {
+					i++
+				}
+				continue
+			}
+		}
+		if writtenAnchor != "" && pcreanchor.QuantifierAt(p, i) {
+			panic(NotCompiled("FIND PCRE", "quantifier does not follow a repeatable item: "+writtenAnchor))
+		}
+		writtenAnchor = ""
 		if name := pcregeneric.Name(p, i); name != "" {
 			out.WriteString(pcregeneric.Capture(name))
 			i += len(name) - 1
 			continue
 		}
-		c := p[i]
 		if c == '[' {
 			class, end := pcregeneric.Class(p, i, func(reason string) { panic(NotCompiled("FIND PCRE", reason)) })
 			out.WriteString(class)
@@ -446,6 +463,9 @@ func extendedPCRE(p string) string {
 		}
 		if c == '\\' && i+1 < len(p) {
 			i++
+			if p[i] == 'A' || p[i] == 'z' {
+				writtenAnchor = p[i-1 : i+1]
+			}
 			if p[i] == 'Q' || p[i] == 'E' {
 				panic(NotCompiled("FIND PCRE", "unsupported quoting escape \\"+string(p[i])))
 			}
@@ -461,21 +481,13 @@ func extendedPCRE(p string) string {
 			out.WriteByte(p[i])
 			continue
 		}
-		if extended {
-			if strings.ContainsRune(" \t\n\r\f\v", rune(c)) {
-				continue
-			}
-			if c == '#' {
-				for i+1 < len(p) && p[i+1] != '\r' && p[i+1] != '\n' {
-					i++
-				}
-				continue
-			}
-		}
-		if anchor, size := pcregeneric.AbsoluteAnchor(p, i); size > 0 {
+		if anchor, size := pcreanchor.AbsoluteAnchor(p, i); size > 0 {
 			out.WriteString("(?:" + anchor + ")")
 			i += size - 1
 			continue
+		}
+		if c == '^' || c == '$' {
+			writtenAnchor = string(c)
 		}
 		out.WriteByte(c)
 	}
