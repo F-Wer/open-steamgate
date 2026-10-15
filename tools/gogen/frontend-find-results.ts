@@ -7,11 +7,12 @@ export function inlineFindResultTypes(body: abaplint.Nodes.StructureNode | undef
   const types = new Map<string, Type>();
   for (const st of body?.findAllStatementNodes() ?? []) {
     if (!(st.get() instanceof Statements.Find)) continue;
-    const target = st.findDirectExpression(Expressions.Target);
+    const children = st.getChildren();
+    const target = st.findDirectExpressions(Expressions.Target).find(t => children[children.indexOf(t) - 1]?.getFirstToken() === st.findDirectTokenByText("RESULTS"));
     const inline = target?.findFirstExpression(Expressions.InlineData);
-    if (!inline || !/\bRESULTS\s+DATA\s*\(/i.test(st.concatTokens())) continue;
+    if (!inline) continue;
     const name = inline.findFirstExpression(Expressions.TargetField)!.concatTokens().toUpperCase();
-    const ddicName = /^FIND ALL\b/i.test(st.concatTokens()) ? "MATCH_RESULT_TAB" : "MATCH_RESULT";
+    const ddicName = st.findDirectTokenByText("ALL") !== undefined ? "MATCH_RESULT_TAB" : "MATCH_RESULT";
     const obj = ctx.reg.getObject(ddicName.endsWith("_TAB") ? "TTYP" : "TABL", ddicName);
     if (!obj) throw new Unsupported(`FIND inline RESULTS: missing DDIC type ${ddicName}`);
     types.set(name, typeOf((obj as abaplint.Objects.Table | abaplint.Objects.TableType).parseType(ctx.reg), name, ctx.program));
@@ -65,9 +66,8 @@ export function lowerFindResults(node: abaplint.Nodes.StatementNode, ctx: FindCo
   const nFields = (t: Extract<Type, {k: "struct"}>): number => ctx.program.structs.get(t.go)?.fields?.length ?? 0;
   if (nFields(row) !== 4 || nFields(sub) !== 2) throw new Unsupported(`${where}: a result structure with more components than match_result`);
   return {s: "find_results", all, bytes, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, bytes ? XS : S), subject: convert(subjX, bytes ? XS : S),
-    icase: /\bIGNORING\s+CASE\b/i.test(text), target, table, row, sub, f};
+    icase: node.findDirectTokenByText("IGNORING") !== undefined, target, table, row, sub, f};
 }
-
 interface FindContext { readonly reg: abaplint.IRegistry; readonly program: Program }
 interface InlineHelpers { readonly Statements: typeof abaplint.Statements; readonly Expressions: typeof abaplint.Expressions; readonly typeOf: (type: abaplint.AbstractType, where: string, program: Program) => Type; readonly Unsupported: new (message: string) => Error }
 interface LowerHelpers {

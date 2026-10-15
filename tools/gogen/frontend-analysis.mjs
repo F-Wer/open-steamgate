@@ -2,6 +2,13 @@
 import {readText, listEntries, join} from "./host-io.ts";
 import {parseSamc} from "../osd-samc.ts";
 
+// Match frontend.mjs: AST instanceof checks must use the transpiler's core.
+import {createRequire} from "node:module";
+const require = createRequire(import.meta.url);
+const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
+const abaplint = transpilerRequire("@abaplint/core");
+const {Expressions, ExpressionsCDS, Nodes} = abaplint;
+
 const trees = new WeakMap();
 const inlineTables = new WeakMap();
 export function rearrangedClass(node, Rearranger) {
@@ -12,10 +19,16 @@ export function rearrangedClass(node, Rearranger) {
 export function inlineTableLocals(body) {
   if (!body) return new Set();
   if (!inlineTables.has(body)) {
-    // Keep the old token-text recognition (including refused statements),
-    // but join and search once per method instead of once per local.
-    const names = [...body.concatTokens().matchAll(/\bINTO\s+TABLE\s+@DATA\s*\(\s*(\w+)\s*\)/gi)].map((m) => m[1].toUpperCase());
-    inlineTables.set(body, new Set(names));
+    const names = new Set();
+    for (const st of body.findAllStatementNodes()) {
+      for (const into of st.findAllExpressions(Expressions.SQLIntoTable)) {
+        for (const inline of into.findAllExpressions(Expressions.InlineData)) {
+          const name = inline.findFirstExpression(Expressions.TargetField);
+          if (name) names.add(name.concatTokens().toUpperCase());
+        }
+      }
+    }
+    inlineTables.set(body, names);
   }
   return inlineTables.get(body);
 }
@@ -36,13 +49,51 @@ export function samcOf(folders) {
   return [...new Map(rows.map((r) => [`${r.applicationId}|${r.path}`, r])).values()];
 }
 
+// Keep failures out of the serializable map and defer them until SQL uses a
+// view. The map belongs to the registry, including reused registry compiles.
+const cdsFailures = new WeakMap();
+export const cdsMappingError = (views, name) => cdsFailures.get(views)?.get(name);
+function sqlViewName(annotations) {
+  for (const annotation of annotations) {
+    const key = annotation.getChildren().filter(c => c instanceof Nodes.TokenNode)
+      .map(c => c.getFirstToken().getStr()).join("").toUpperCase();
+    if (key !== "@ABAPCATALOG.SQLVIEWNAME:") continue;
+    const value = annotation.findFirstExpression(ExpressionsCDS.CDSString)?.getFirstToken().getStr();
+    if (value) return value.slice(1, -1).toUpperCase();
+  }
+}
+
 // A CDS view entity has no SQL view name and is left out.
 export function cdsSqlViews(sources) {
   const out = {};
-  for (const src of sources) {
-    const sql = /@AbapCatalog\.sqlViewName\s*:\s*'([^']+)'/i.exec(src)?.[1];
-    const cds = /\bdefine\s+(?:root\s+)?view\s+(?!entity\b)([\w\/]+)/i.exec(src)?.[1];
-    if (sql && cds) out[cds.toUpperCase()] = sql.toUpperCase();
+  const failures = new Map();
+  cdsFailures.set(out, failures);
+  for (const [index, input] of sources.entries()) {
+    const {filename, source} = typeof input === "string"
+      ? {filename: `gogen_${index}.ddls.asddls`, source: input} : input;
+    const src = source.startsWith("\uFEFF") ? source.slice(1) : source;
+    // Core recognizes only lowercase extensions. Keep the original for messages.
+    // Do not add CDS sources to the ABAP registry used for type checking.
+    const reg = new abaplint.Registry();
+    const file = new abaplint.MemoryFile(filename.toLowerCase(), src);
+    reg.addFile(file);
+    reg.parse();
+    const obj = reg.getFirstObject();
+    // Pinned core's getSQLViewName() searches raw text and includes comments.
+    // Its parsed CDS annotations exclude comments and expose the string token.
+    const tree = obj?.getTree();
+    if (!tree) {
+      const message = `${filename}: DDLS view mapping could not be read`;
+      // Without a tree there is no definition or SQL view name to read; the
+      // abapGit object name (the file name) is what a failure can be found by.
+      if (obj) failures.set(obj.getName().toUpperCase(), message);
+      continue;
+    }
+    if (!(tree.get() instanceof ExpressionsCDS.CDSDefineView)) continue;
+    const cds = obj.getDefinitionName();
+    if (tree.getChildren().some((c) => c instanceof Nodes.TokenNode && c.getFirstToken().getStr().toUpperCase() === "ENTITY")) continue;
+    const sql = sqlViewName(tree.findDirectExpressions(ExpressionsCDS.CDSAnnotation));
+    if (sql && cds) out[cds.toUpperCase()] = sql;
   }
   return out;
 }
