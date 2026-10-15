@@ -42,10 +42,8 @@ import {TMP_FOLDER, tmpDisabled} from "./osd-tmp.mjs";
 export const MANIFEST = "osd-pack.json";
 export const PACKS_DIR = "packs";
 
-export const SOURCE = ".osd-source.json";
-
-/** Fetch identity belongs to the folder, never to its compiler inputs. */
-export const isSourceIdentity = (file) => basename(file) === SOURCE;
+import {SOURCE, isSourceIdentity} from "./osd-source-identity.mjs";
+export {SOURCE, isSourceIdentity} from "./osd-source-identity.mjs";
 
 export function sourceOf(folder) {
   try { return JSON.parse(readFileSync(join(folder, SOURCE), "utf8")); }

@@ -1,7 +1,7 @@
 // Source-only analyses, keyed by the immutable parsed/rearranged node.
 import {readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
-import {parseSamc} from "../osd-amc.mjs";
+import {parseSamc} from "../osd-samc.ts";
 
 const trees = new WeakMap();
 const inlineTables = new WeakMap();

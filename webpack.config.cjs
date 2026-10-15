@@ -1,6 +1,7 @@
 const path = require("node:path");
 const webpack = require("webpack");
 const TerserPlugin = require("terser-webpack-plugin");
+const {includes, PreviewTypeScriptBoundaryPlugin} = require("./scripts/preview-typescript.cjs");
 
 // Bundles the transpiled ABAP gateway into the service worker that serves the
 // preview deployment (scripts/build-preview.mjs runs it). After
@@ -74,9 +75,13 @@ module.exports = {
     },
   },
   module: {
-    rules: [{test: /\.m?js$/, resolve: {fullySpecified: false}}],
+    rules: [
+      {test: /\.m?js$/, resolve: {fullySpecified: false}},
+      {test: /\.ts$/, include: includes, use: path.resolve(__dirname, "scripts/strip-types-loader.cjs")},
+    ],
   },
   plugins: [
+    new PreviewTypeScriptBoundaryPlugin(),
     // The published browser blocking bundle references __filename while
     // initialising its Emscripten module. In a service worker there is no
     // Node wrapper; give it the script URL, from which it can resolve assets.
