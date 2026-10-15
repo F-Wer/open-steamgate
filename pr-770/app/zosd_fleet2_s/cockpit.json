@@ -1,0 +1,19 @@
+{
+  "app": "zosd_fleet2_s",
+  "title": "Set fleet2",
+  "service": "ZL3C_FLEET2_SRV",
+  "files": [
+    "index.html",
+    "Component.js",
+    "manifest.json",
+    "Set.view.xml",
+    "Set.controller.js",
+    "i18n/i18n.properties",
+    "Live.js",
+    "Words.js"
+  ],
+  "tile": {
+    "subtitle": "Settings, schedule, kill switch, doctor",
+    "icon": "sap-icon://action-settings"
+  }
+}
