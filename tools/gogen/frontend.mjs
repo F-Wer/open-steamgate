@@ -25,7 +25,7 @@ import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
 import {prepareSession, finishSession, compileClass} from "./frontend-session.mjs";
 import {syntaxDiagnostics} from "./frontend-diagnostics.ts";
-import {sourceOwnershipSafety} from "./frontend-owned.mjs";
+import {sourceOwnershipSafety} from "./frontend-owned.ts";
 import {builtin} from "./frontend-builtins.mjs";
 import {literalText, textLiteral} from "./frontend-literals.ts";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
