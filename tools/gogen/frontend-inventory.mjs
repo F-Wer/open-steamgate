@@ -5,6 +5,8 @@ const require = createRequire(import.meta.url);
 export const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 const enumerate = core.Registry.prototype.getObjects;
 const snapshots = new WeakMap(), parsed = new WeakMap(), replacements = new WeakMap(), origins = new WeakMap(), keys = new WeakMap();
+const hasBuiltArtifacts = (inputs) => [...inputs.objects.values()].some(({obj}) =>
+  obj.syntaxResult || obj.def || obj.definition || obj.parsedType || obj.isDirty?.() === false);
 const hash = (s) => createHash("sha256").update(s).digest("hex");
 export function objectKey(obj) {
   if (!keys.has(obj)) keys.set(obj, `${obj.getType()} ${obj.getName().toUpperCase()}`);
@@ -43,8 +45,10 @@ for (const method of ["parse", "parseAsync"]) {
   const original = core.Registry.prototype[method];
   core.Registry.prototype[method] = function(...args) {
     const before = inputSnapshot(this, true), previous = parsed.get(this);
+    // The first observed parse cannot vouch for artifacts built before observation.
+    const untrusted = !previous && hasBuiltArtifacts(before);
     const finish = () => {
-      if (!previous || previous.signature === before.signature && previous.configObject === before.configObject) parsed.set(this, inputSnapshot(this, true));
+      if (!untrusted && (!previous || previous.signature === before.signature && previous.configObject === before.configObject)) parsed.set(this, inputSnapshot(this, true));
     };
     const result = original.apply(this, args);
     if (result?.then) return result.then((value) => { finish(); return value; });
@@ -60,7 +64,7 @@ export function freshRegistry(reg, session) {
   if (previous?.signature === inputs.signature && previous.configObject === inputs.configObject) return reg;
   // A never-parsed registry can be parsed in place. A prebuilt registry without
   // an observed boundary must be rebuilt, as must every edited retained one.
-  const built = [...inputs.objects.values()].some(({obj}) => obj.syntaxResult || obj.def || obj.definition || obj.parsedType || obj.isDirty?.() === false);
+  const built = hasBuiltArtifacts(inputs);
   if (!previous && !built) { reg.parse(); return reg; }
   const fresh = new core.Registry(new core.Config(inputs.config));
   for (const {dependency, sources} of inputs.objects.values()) for (const source of sources) {

@@ -299,3 +299,40 @@ test("unobserved prebuilt procedural registries are rebuilt after an INCLUDE edi
     if (!p.reg.getObject('PROG','ZPROVIDER').getMainABAPFile().getRaw().includes("'new'")) throw new Error('provider source was lost');`;
   execFileSync(process.execPath, ["--input-type=module", "-e", code], {stdio: "pipe"});
 });
+
+
+test("first observed reparse cannot certify artifacts built before the frontend import", () => {
+  const code = `import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    const require = createRequire(import.meta.url);
+    const core = createRequire(require.resolve('@abaplint/transpiler/package.json'))('@abaplint/core');
+    const config = core.Config.getDefault().get();
+    config.syntax = {...config.syntax, version:'v758', errorNamespace:'.'};
+    config.rules = {check_syntax:true, parser_error:true};
+    const files = {
+      'zif_provider.intf.abap': 'INTERFACE zif_provider PUBLIC. TYPES value TYPE i. ENDINTERFACE.',
+      'zif_consumer.intf.abap': 'INTERFACE zif_consumer PUBLIC. TYPES value TYPE zif_provider=>value. ENDINTERFACE.',
+      'zreader.clas.abap': 'CLASS zreader DEFINITION PUBLIC. PUBLIC SECTION. CLASS-METHODS run RETURNING VALUE(rv) TYPE zif_consumer=>value. ENDCLASS. CLASS zreader IMPLEMENTATION. METHOD run. rv = 7. ENDMETHOD. ENDCLASS.',
+    };
+    const registry = () => {
+      const reg = new core.Registry(new core.Config(JSON.stringify(config)));
+      for (const [name, raw] of Object.entries(files)) reg.addFile(new core.MemoryFile(name, raw));
+      return reg;
+    };
+    const reg = registry();
+    reg.parse();
+    assert.equal(reg.findIssues().length, 0);
+    const {compileProgram} = await import('./tools/gogen/frontend.mjs');
+    files['zif_provider.intf.abap'] = files['zif_provider.intf.abap'].replace('TYPE i.', 'TYPE int8.');
+    reg.updateFile(new core.MemoryFile('zif_provider.intf.abap', files['zif_provider.intf.abap']));
+    reg.parse();
+    const options = {folders:[], objects:['ZREADER'], tolerant:true};
+    const p = compileProgram({...options, registry:reg});
+    const cold = compileProgram({...options, registry:registry()});
+    const run = p => p.classes.find(c => c.name === 'ZREADER').methods.find(m => m.name === 'RUN');
+    assert.equal(run(cold).returning.type.k, 'int8');
+    assert.deepEqual(run(p), run(cold));
+    assert.notEqual(p.reg, reg);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", code], {stdio: "pipe"});
+});

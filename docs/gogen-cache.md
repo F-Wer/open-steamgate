@@ -71,6 +71,28 @@ recorded graph instead of querying registry inventories. There is no filename
 whitelist exempting frontend modules. A later unclassified iteration from the
 same module still records an unknown scan.
 
+### Requirements for Step 4 selective validation
+
+Dependency digests alone cannot invalidate every named query. Step 4 must save
+query specifications and re-evaluate them against the new registry, including
+negative and empty answers. In particular:
+
+- `supplied(ZBASE, WORK)` can answer `[]` with providers `[ZBASE, ZCHILD]`;
+  adding a redefinition that tests `IS SUPPLIED` changes that answer.
+- A new interface implementor changes the implementor query's candidate set.
+- Adding an ENQU changes `lock(EZLOCK)` from `MISSING` to a descriptor.
+- Adding a second FUGR with the same FM changes `function-module-owner` under
+  its last-wins enumeration rule.
+
+The newly added provider has no prior dependency digest to compare. Re-running
+the saved named query is required to discover the changed answer.
+
+Selection-dependent IR also requires replay validation for **complete** entries.
+The replay transcript's `wanted` reads guard not-compiled stubs; the supplied
+answer guards contributions from selected classes. Step 4 must evaluate
+`supplied` against the current selection and retain those replay checks even
+when all recorded dependency digests match.
+
 ### Fresh-registry contract
 
 A lightweight parse-boundary observer remembers ordered effective inputs and
@@ -80,7 +102,9 @@ boundary. A source/config/inventory/order edit rebuilds a new registry from the
 ordered effective inputs, with the same dependency roles and effective config,
 and clears retained session analyses before syntax/lowering. Re-parsing an
 edited old registry does not certify its cached consumers as fresh. A prebuilt
-registry without an observed boundary is rebuilt conservatively. Folder mode
+registry without an observed boundary is rebuilt conservatively. The first
+observed parse also remains untrusted if artifacts already existed at entry;
+it cannot certify caches built before the frontend was imported. Folder mode
 already constructs a new registry.
 
 Unchanged supplied-registry/Unit/lexer closure rounds keep the same registry and
@@ -109,6 +133,52 @@ expands dictionaries and recomputes completeness only for inspection. The graph
 reference is observational metadata, never a lookup key. Missing/corrupt graphs
 fall back to lowering. Recording-off entries retain the old data shape and no
 provenance metadata.
+
+### First-observed-parse fix round
+
+The dynamic-import regression builds and syntax-checks `ZIF_PROVIDER`,
+`ZIF_CONSUMER` and `ZREADER` before importing the frontend, then changes only
+provider `TYPE i` to `int8`, reparses and compiles the supplied registry. It
+fails without the fix: `RUN` retains `i` while fresh cold produces `int8` and a
+numeric conversion. With the fix the registry is rebuilt and the complete
+method IR equals fresh cold. The entry artifact check uses the existing input
+snapshot; it adds no snapshot work.
+
+Validation: all **240 frontend tests** pass in an isolated serial run (213 s),
+including all **20 query/freshness tests**. Both default and
+`GOGEN_PROVENANCE=1` CI-sized oracle runs pass **seven tests**, each with
+**62 observations / 60 validated mutations and zero mismatches**. Typing-proof
+against a new record from **`06bda3ab`** passes **239 byte-identical artifacts in
+each of six modes**; warm runs reuse 336 classes and lower 25. The initial
+parallel frontend run had one cache-control failure while other tests generated
+tool files; that control passes in isolation and in the full serial run.
+Changed-path size budget, explicit changed-file leak scan, suite registration
+and whitespace checks pass. The recording-time acceptance budget above remains
+**unmet**; this fix does not change that result.
+
+Recording-off recheck: five fresh-process samples per scenario/version, pinned
+CPUs 2–3, alternating version order, complete pinned open-abap-core + ajson.
+Frontend timing includes input loading through cache finalization; emission and
+digest inspection follow the timer. Medians in milliseconds:
+
+| Scenario | `06bda3ab` | Pre-fix `8c5707ec` | Fixed | Fix vs pre-fix |
+| --- | --- | --- | --- | --- |
+| No cache | 1,697.4 | 1,758.5 | 1,735.1 | −1.3% |
+| cacheDir cold | 2,293.3 | 2,207.3 | 2,267.0 | +2.7% |
+| cacheDir warm | 1,891.2 | 1,941.7 | 1,994.4 | +2.7% |
+
+The fix stays within ±3% of pre-fix HEAD in all three scenarios. Relative to
+Step 3 this batch is +2.2% / −1.1% / +5.5%; timings have large outliers (including
+a 3,806.9 ms fixed warm sample), so it does not establish a ±3% warm-path bound
+against Step 3. All **45 captures** have identical emitted-artifact/class-IR and
+resolved-digest hashes. Reports remain local in `.local/s4a1-fix-perf.json`.
+
+A focused follow-up uses seven fresh warm samples per version, each after a
+fresh cold prime, alternating Step 3/fixed order on pinned CPU 14. Warm medians
+are **2,532.0 / 2,557.4 ms (+1.0%)** against `06bda3ab`, within ±3%. All 28
+cold/warm captures have identical artifact/class-IR and resolved-digest hashes.
+This separate batch addresses the noisy warm-path comparison without discarding
+the first batch; `.local/s4a1-fix-warm.json` retains its measurements.
 
 ### Step 4a.1 validation and acceptance result
 
