@@ -1,8 +1,9 @@
 // Open SQL value and type lowering.
 import * as RIR from "../sqlscript-ir.mjs";
 import {Unsupported, Expressions, charlike, isExpr, isTok, upper} from "./frontend-base.mjs";
-import {convert, fieldChain, isVariableName, source, sourceOperand} from "./frontend.mjs";
+import {convert, fieldChain, isVariableName} from "./frontend.mjs";
 import {fieldOf} from "./frontend-types-signatures.mjs";
+import {source, sourceOperand} from "./frontend-expressions-calls.mjs";
 
 /** the IR type of a column in a predicate or a projection */
 // a DEC column: its digits (2n-1 for p LENGTH n) and decimals, as the IR
