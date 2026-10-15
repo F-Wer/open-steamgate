@@ -369,8 +369,10 @@ export function whereColumns(t) {
     structs.set(name, t.getComponents().map((c) => ({name: upper(c.name), kind: typeKindOf(c.type)})));
   };
   /** @type {Set<string>} */ const known = new Set();
+  /** @type {Map<string, string | null>} */ const classSupers = new Map();
   for (const obj of enumerateObjects(reg, "rtti-inventory", [], "final-output")) {
     const n = upper(obj.getName());
+    if (obj instanceof abaplint.Objects.Class) classSupers.set(n, obj.getDefinition()?.getSuperClass()?.toUpperCase() ?? null);
     if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
     try {
       if (obj instanceof abaplint.Objects.Table) add(n, obj.parseType(reg));
@@ -386,7 +388,9 @@ export function whereColumns(t) {
     } catch { /* a type abaplint cannot resolve is simply not described */ }
     rttiProjection(reg, obj, () => [[...known].filter((k) => k === n || k.startsWith(`${n}=>`)), [...structs].filter(([k]) => k === n || k.startsWith(`${n}=>`))]);
   }
-  return {structs, known};
+  // Compiled local classes use the same POOL:LOCAL internal name as object RTTI.
+  for (const cls of program.classes) if (cls.name.includes(":")) classSupers.set(cls.name, cls.super);
+  return {structs, known, classSupers};
 }
 
 
@@ -1091,6 +1095,11 @@ function compiledFunctionCall(node, ctx, text, name) {
     }
     // a kernel service the host implements: the ABAP body (the transpiler's
     // @KERNEL code) is replaced by a call into the host
+    if (className === "CL_ABAP_CLASSDESCR" && name === "GET_SUPER_CLASS_TYPE") {
+      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: "Native_GET_SUPER_CLASS_TYPE", me: true}],
+        pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
+      continue;
+    }
     if (NATIVE_ME.has(`${className}=>${name}`)) {
       cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: NATIVE_ME.get(`${className}=>${name}`).fn, me: true}],
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
@@ -5177,7 +5186,7 @@ const FUNCTIONS = {
     throw new Unsupported(`call chain ${chain.concatTokens()}`);
   }
   const name = upper(mc.findDirectExpression(Expressions.MethodName).concatTokens());
-  if (receiver && isSubclass(ctx.reg, receiver.type.name, "CL_ABAP_OBJECTDESCR") && ["GET_ATTRIBUTE_TYPE", "GET_METHOD_PARAMETER_TYPE", "GET_INTERFACE_TYPE", "GET_SUPER_CLASS_TYPE"].includes(name)) throw new Unsupported(`object RTTI method ${name}: member descriptions are not implemented`);
+  if (receiver && isSubclass(ctx.reg, receiver.type.name, "CL_ABAP_OBJECTDESCR") && ["GET_ATTRIBUTE_TYPE", "GET_METHOD_PARAMETER_TYPE", "GET_INTERFACE_TYPE"].includes(name)) throw new Unsupported(`object RTTI method ${name}: member descriptions are not implemented`);
   const param = mc.findDirectExpression(Expressions.MethodCallParam);
   const direct = param?.findDirectExpression(Expressions.Source);
   const named = param?.findDirectExpression(Expressions.ParameterListS);

@@ -1,5 +1,5 @@
 import {append} from "./append.ts";
-import {objectRttiJs, exceptionClass} from "./emit-exception.ts";
+import {superClassJs, objectRttiJs, exceptionClass} from "./emit-exception.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
 import {constructorFactories} from "./emit-constructors.ts";
 import {emitCondition} from "./emit-js-condition.mjs";
@@ -225,7 +225,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`  static $new(${["s", ...cp.map((p) => ident(p.name))].join(", ")}) {`, ...(chainCctor(cls) ? [`    ${typeName(cls.name)}.$ensure(s);`] : []), `    const o = new ${typeName(cls.name)}();`,
       ...(ctorAt?.constructor ? [`    o.CONSTRUCTOR(${["s", ...cp.map((p) => ident(p.name))].join(", ")});`] : []), "    return o;", "  }");
     const all = [...cls.methods, ...(cls.constructor ? [{...cls.constructor, name: "CONSTRUCTOR", static: false}] : [])];
-    for (const m of all) append(out, method(cls, m));
+    for (const m of all) append(out, method(cls, m, program.rtti));
     for (const m of cls.stubs ?? []) {
       if (m.name === "CONSTRUCTOR") continue;
       out.push(`  ${m.static ? "static " : ""}${typeName(m.name)}() { throw new abap.AbapError("NOT_COMPILED", ${JSON.stringify(`${cls.name}=>${m.name}: ${m.reason}`)}); }`);
@@ -300,7 +300,7 @@ function chainCctor(cls) {
   for (let c = cls; c; c = c.super ? BYNAME.get(c.super) : null) if (ownCctor(c)) return true;
   return false;
 }
-function method(cls, m) {
+function method(cls, m, rtti) {
   const params = ["s", ...m.params.map((p) => ident(p.name))];
   const head = `  ${m.static ? "static " : ""}${typeName(m.name)}(${params.join(", ")}) {`;
   const lines = [head];
@@ -312,7 +312,7 @@ function method(cls, m) {
   if (m.returning) lines.push(`    let ${ret} = ${zero(m.returning.type)};`);
   for (const l of m.locals) lines.push(`    let ${ident(l.name)} = ${zero(l.type)};`);
   for (const f of m.fieldSymbols ?? []) lines.push(`    let ${ident(f.name)} = null;`);
-  const ctx = {cls, method: m, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
+  const ctx = {cls, rtti, method: m, loop: 0, ret, inCtor: m.name === "CONSTRUCTOR"};
   // ultra/events: a field symbol of anything but a structure row or generic
   // data would need a box for the place it points at; refused here honestly
   const odd = (m.fieldSymbols ?? []).find((f) => f.type.k !== "struct" && f.type.k !== "data" && !["i", "int8", "string", "c", "n", "p", "d", "t", "x", "xstring", "f"].includes(f.type.k));
@@ -620,7 +620,7 @@ function stmtLines(st, ctx, d) {
           `${t}  ${place(st.args[2].value, ctx)} = hx; ${place(st.args[3].value, ctx)} = hx;`,
           `${t}  ${place(st.args[4].value, ctx)} = Buffer.from(hx, "hex").toString("base64"); }`];
       }
-      // see nativeMessageText in emit-go.mjs
+      if (st.fn === "Native_GET_SUPER_CLASS_TYPE") return superClassJs(ctx, t, ident);
       if (st.fn === "Native_DESCRIBE_BY_OBJECT_REF") return objectRttiJs(t, ident(ctx.method.params[0].name), ident);
       if (st.fn === "classname.Internal") {
         const [x, out] = st.args.map(a => a.value);

@@ -1,0 +1,5 @@
+CLASS zcl_gogen_t_superb DEFINITION PUBLIC INHERITING FROM zcl_gogen_t_supera.
+  PUBLIC SECTION.
+ENDCLASS.
+CLASS zcl_gogen_t_superb IMPLEMENTATION.
+ENDCLASS.

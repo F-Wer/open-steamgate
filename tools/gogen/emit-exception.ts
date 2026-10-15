@@ -1,4 +1,4 @@
-import type {Program, ProgramInput, Class, RenderName, RttiHelpers, MessageHelpers} from "./emit-go-types.ts";
+import type {Program, ProgramInput, Class, RenderName, Rtti, RttiHelpers, MessageHelpers} from "./emit-go-types.ts";
 
 // Object RTTI for the exception/reference seam. Descriptor member enumeration
 // reads on kernel descriptors are guarded at runtime.
@@ -11,8 +11,11 @@ export function objectRttiGo(program: Pick<Program, "classes">, {goType, ident}:
     '\tif abap.RefEq(p_object_ref, nil) { panic(abap.ClassicException{Name: "REFERENCE_IS_INITIAL", Method: "DESCRIBE_BY_OBJECT_REF"}) }',
     '\tname := abap.ClassOf(p_object_ref)',
     '\tif name == "" { panic(abap.NotCompiled("DESCRIBE_BY_OBJECT_REF", "the class of the object is not registered")) }',
-    '\to := Alloc_CL_ABAP_CLASSDESCR()',
+    '\to := objectRttiClass(name)',
     '\tif k, ok := p_object_ref.(interface{ GetKernelException() *abap.Exception }); ok { o.KernelRtti = k.GetKernelException() != nil }',
+    '\treturn o', '}', '',
+    `func objectRttiClass(name string) ${goType({k: "ref", name: "CL_ABAP_CLASSDESCR"})} {`,
+    '\to := Alloc_CL_ABAP_CLASSDESCR()',
     ...[["TYPE_KIND", "*"], ["KIND", "C"]].map(([n, v]): string => `\to.${ident(n)} = ${JSON.stringify(v)}`),
     `\to.${ident("RELATIVE_NAME")} = name[strings.LastIndex(name, ":")+1:]`,
     '\tabsolute := "\\\\CLASS=" + name',
@@ -27,8 +30,12 @@ export function objectRttiJs(t: string, x: string, ident: RenderName): string[] 
     `${t}if (${x} == null) throw new abap.ClassicException("REFERENCE_IS_INITIAL", "DESCRIBE_BY_OBJECT_REF");`,
     `${t}const name = ${x}.constructor.$abap;`,
     `${t}if (!name) throw new abap.AbapError("NOT_COMPILED", "DESCRIBE_BY_OBJECT_REF: the class of the object is not registered");`,
+    ...classDescrJs(t, ident, `!!${x}.$kernelException`)];
+}
+function classDescrJs(t: string, ident: RenderName, kernel = "false"): string[] {
+  return [
     `${t}const o = new CL_ABAP_CLASSDESCR();`,
-    `${t}o.$kernelRtti = !!${x}.$kernelException;`,
+    `${t}o.$kernelRtti = ${kernel};`,
     ...[["TYPE_KIND", '"*"'], ["KIND", '"C"'], ["RELATIVE_NAME", 'name.slice(name.lastIndexOf(":") + 1)'], ["ABSOLUTE_NAME", 'name.includes(":") ? "\\\\CLASS-POOL=" + name.replace(":", "\\\\CLASS=") : "\\\\CLASS=" + name'], ["MV_OBJECT_NAME", 'name'], ["MV_OBJECT_TYPE", '"CLAS"']]
       .map(([n, v]): string => `${t}o.${ident(n)} = ${v};`),
     `${t}return o;`];
@@ -59,4 +66,30 @@ export function nativeMessageText(program: ProgramInput, {goType, ident, classes
       ? [`\tif x, ok := any(text).(I_CX_ROOT); !ok || abap.ExceptionRead(x.As_CX_ROOT(), "TEXTID").${ident("TEXTID")} != "" {`, `\t\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "OTR texts are not read in the Go host"))`, "\t}"]
       : [`\tpanic(abap.NotCompiled("CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "CX_ROOT is not compiled"))`]),
     `\treturn "An exception was raised."`, "}", ""];
+}
+
+// SAP's answer without an explicit superclass is unmeasured (measure on A4H).
+// Follow Node/open-abap-core: raise SUPER_CLASS_NOT_FOUND, never invent OBJECT.
+export function superClassGo(program: {readonly rtti: Rtti}, {goType, ident}: RttiHelpers): string[] {
+  const ref = goType({k: "ref", name: "CL_ABAP_CLASSDESCR"});
+  return [`var rttiClassSupers = map[string]string{`,
+    ...[...program.rtti.classSupers].sort().map(([n, sup]): string => `\t${JSON.stringify(n)}: ${JSON.stringify(sup ?? "")},`),
+    "}", `func Native_GET_SUPER_CLASS_TYPE(s *abap.Session, me ${ref}) ${ref} {`,
+    `\tname := strings.ToUpper(strings.TrimRight(me.${ident("MV_OBJECT_NAME")}, " "))`,
+    `\tif name == "" { name = strings.ToUpper(strings.TrimRight(me.${ident("RELATIVE_NAME")}, " ")) }`,
+    '\tsup, ok := rttiClassSupers[name]',
+    '\tif !ok { panic(abap.NotCompiled("GET_SUPER_CLASS_TYPE", "class RTTI is unavailable: "+name)) }',
+    '\tif sup == "" { panic(abap.ClassicException{Name: "SUPER_CLASS_NOT_FOUND", Method: "GET_SUPER_CLASS_TYPE"}) }',
+    '\tif _, ok := rttiClassSupers[sup]; !ok { panic(abap.NotCompiled("GET_SUPER_CLASS_TYPE", "superclass RTTI is unavailable: "+sup)) }',
+    '\treturn objectRttiClass(sup)', "}", ""];
+}
+export function superClassJs(program: {readonly rtti: Rtti}, t: string, ident: RenderName): string[] {
+  const pairs = [...program.rtti.classSupers];
+  return [`${t}const supers = new Map(${JSON.stringify(pairs)});`,
+    `${t}const currentName = (me.${ident("MV_OBJECT_NAME")} || me.${ident("RELATIVE_NAME")}).trimEnd().toUpperCase();`,
+    `${t}if (!supers.has(currentName)) throw new abap.AbapError("NOT_COMPILED", "GET_SUPER_CLASS_TYPE: class RTTI is unavailable: " + currentName);`,
+    `${t}const sup = supers.get(currentName);`,
+    `${t}if (!sup) throw new abap.ClassicException("SUPER_CLASS_NOT_FOUND", "GET_SUPER_CLASS_TYPE");`,
+    `${t}if (!supers.has(sup)) throw new abap.AbapError("NOT_COMPILED", "GET_SUPER_CLASS_TYPE: superclass RTTI is unavailable: " + sup);`,
+    `${t}const name = sup;`, ...classDescrJs(t, ident)];
 }

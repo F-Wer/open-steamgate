@@ -103,6 +103,19 @@ test("locks have named misses and ENQU to TABL to DDIC edges; final inventories 
   assert.ok(rows(unreadable, "CLAS ZLOCKER").some((q) => q.kind === "getObject" && q.args.join() === "TABL,ZABSENT_TABLE" && q.result.length === 0));
 });
 
+test("RTTI preserves explicit superclass names and rebuilds them independently of compiled classes", () => {
+  const files = {
+    "zparent.clas.abap": classSource("zparent", "rv = 1."),
+    "zchild.clas.abap": classSource("zchild", "rv = 2.").replace("DEFINITION PUBLIC", "DEFINITION PUBLIC INHERITING FROM zparent"),
+  };
+  const first = build(files, ["ZPARENT"]);
+  assert.equal(first.rtti.classSupers.get("ZCHILD"), "ZPARENT");
+  assert.equal(first.rtti.classSupers.get("ZPARENT"), null);
+  assert.ok(!first.rtti.classSupers.has("OBJECT"));
+  files["zchild.clas.abap"] = files["zchild.clas.abap"].replace(" INHERITING FROM zparent", "");
+  assert.equal(build(files, ["ZPARENT"]).rtti.classSupers.get("ZCHILD"), null);
+});
+
 test("RTTI and table projections are final-output and rebuild when inventories change", () => {
   const c = syntheticCorpus({classes: 4});
   const first = build(c.files, ["ZCL_CONTROL_0001"]);

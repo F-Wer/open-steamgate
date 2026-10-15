@@ -123,6 +123,7 @@ export interface DatabaseTable extends IR.DatabaseTable {
   readonly hidesClient?: string;
 }
 export interface Rtti {
+  readonly classSupers: ReadonlyMap<string, string | null>;
   readonly structs: ReadonlyMap<string, readonly {readonly name: string; readonly kind: string}[]>;
   readonly known: ReadonlySet<string>;
 }

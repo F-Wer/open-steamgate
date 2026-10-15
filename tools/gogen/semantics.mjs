@@ -1,9 +1,7 @@
 import {copyJsRuntime} from "./copy-js-runtime.mjs";
 import {writeGo} from "./symbols.ts";
-// ABAP semantics pinned against A4H: each class in testdata/ has a static
-// RUN returning a string, and EXPECT below is what A4H returned for the same
-// code (ABAP Unit probe, 2026-09-23), except entries marked unmeasured.
-// Both emitters must give it.
+// Each testdata class's static RUN returns a string, checked on both emitters.
+// EXPECT records A4H/Node measurements or marks cases as unmeasured.
 //
 //   node tools/gogen/semantics.mjs
 import {execFileSync} from "node:child_process";
@@ -16,6 +14,8 @@ import {emitJs} from "./emit-js.mjs";
 import {home} from "./home.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const EXPECT = {
+  // Node/open-abap-core measured 2026-10-15; SAP root superclass is unmeasured (measure on A4H).
+  ZCL_GOGEN_T_SUPERC: "\\CLASS=ZCL_GOGEN_T_SUPERB/\\CLASS=ZCL_GOGEN_T_SUPERC/0/\\CLASS=ZCL_GOGEN_T_SUPERB/0/\\CLASS=ZCL_GOGEN_T_SUPERA/1/",
   // unmeasured; measure on A4H: exception widening, identity and mixed PREVIOUS chains.
   ZCL_GOGEN_T_EXCPREV: 'bound/instance/text/identity/end/rtti/CX_SY_CONVERSION_NO_NUMBER <- CX_SY_ZERODIVIDE/prev/same/ZCX_GOGEN_T_PREVIOUS <- CX_SY_CONVERSION_NO_NUMBER <- CX_SY_ZERODIVIDE/class text/return/class/classprev/classcast/empty',
   // Unmeasured: inline DDIC RESULTS, FIRST into a table, copied submatches LOOP; A4H not run.
