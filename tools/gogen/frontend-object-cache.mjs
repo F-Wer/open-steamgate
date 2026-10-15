@@ -238,7 +238,9 @@ export function objectCache(registry, root) {
     finish(program) {
       if (!pending.length) return;
       const graph = dependencyGraph(registry, pending.map((e) => e.owner));
-      const bytes = deflateRawSync(serialize(graph), {level: 1}), graphHash = digest(bytes);
+      // Shared rows compress better with a modest extra pass (a few ms per
+      // compile); entry payloads and the recording-off path keep level 1.
+      const bytes = deflateRawSync(serialize(graph), {level: 4}), graphHash = digest(bytes);
       const graphFile = join(root, version, `${graphHash}.provenance`);
       try {
         mkdirSync(join(root, version), {recursive: true});

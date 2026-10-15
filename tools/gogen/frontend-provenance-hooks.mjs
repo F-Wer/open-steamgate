@@ -47,7 +47,7 @@ export function installHooks(core, requireCore, r) {
       if (method === "getObject") {
         const found = fn.apply(this, args), key = objectKey(found);
         if (found) { owners.set(found, this); r.entry(state, key); }
-        r.query(state, {kind: method, args: args.map(scalar), result: key ? [key] : []});
+        r.namedQuery(state, method, args, key);
         return found;
       }
       return r.context(method, args, () => {
@@ -111,23 +111,34 @@ export function installHooks(core, requireCore, r) {
 
   // Wrap each implementation once, including inherited methods. Reads of a
   // cached object artifact create an edge even when its body makes no lookup.
+  // These implementations just return a field. Keep their provider edge and
+  // gap checks, without opening a context which cannot contain resolution.
+  const pureReads = new Set([coreClass("objects/_abap_object", "ABAPObject").prototype.getABAPFiles,
+    core.Objects.Class.prototype.getDefinition, core.Objects.Interface.prototype.getDefinition]);
   const methods = ["parse", "parseType", "getDefinition", "getClassDefinition", "getABAPFiles", "getMainABAPFile",
     "getInclude", "getIncludeFiles", "getIncludes", "getModule", "getModules", "getSequencedFiles", "getSQLViewName", "getDefinitionName", "listBadiDefinitions"];
   for (const cls of Object.values(core.Objects)) {
     for (let proto = cls?.prototype; proto && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
-      for (const method of methods) patch(proto, method, (fn) => function(...args) {
-        if (r.auditDepth || (!["parse", "parseType", "getInclude", "getModule"].includes(method) && r.stack.at(-1)?.obj === this)) return fn.apply(this, args);
-        const reg = owners.get(this) ?? (args.find((a) => a instanceof core.Registry));
-        if (!reg) return fn.apply(this, args);
-        owners.set(this, reg);
+      for (const method of methods) patch(proto, method, (fn) => {
+        const recursive = ["parse", "parseType", "getInclude", "getModule"].includes(method);
         const phase = method === "parse" ? "parse" : method === "parseType" ? "ddic-type" : "artifact-read";
-        const state = r.state(reg), caller = r.current(state)?.key;
-        const value = r.artifact(reg, this, phase, () => fn.apply(this, args));
-        if (method === "getInclude" || method === "getModule") {
-          r.query(state, {kind: method === "getInclude" ? "function-group-include" : "function-module-owner",
-            args: args.map(scalar), result: value ? [objectKey(this)] : [], policy: "group-member"}, caller);
-        }
-        return value;
+        const pure = pureReads.has(fn);
+        return function(...args) {
+          if (r.auditDepth || (!recursive && r.stack[r.stack.length - 1]?.obj === this)) return fn.apply(this, args);
+          const reg = owners.get(this) ?? (args.find((a) => a instanceof core.Registry));
+          if (!reg) return fn.apply(this, args);
+          owners.set(this, reg);
+          if (pure) { r.readArtifact(reg, this); return fn.apply(this, args); }
+          const state = r.state(reg), caller = r.current(state)?.key;
+          const entered = r.enterArtifact(reg, this, phase);
+          let value;
+          try { value = fn.apply(this, args); } finally { if (entered) r.stack.pop(); }
+          if (method === "getInclude" || method === "getModule") {
+            r.query(state, {kind: method === "getInclude" ? "function-group-include" : "function-module-owner",
+              args: args.map(scalar), result: value ? [objectKey(this)] : [], policy: "group-member"}, caller);
+          }
+          return value;
+        };
       });
     }
   }

@@ -14,6 +14,12 @@ const empty = () => ({queries: new Map(), edges: new Set()});
 // Identity snapshots of core's cached artifacts: no getter calls or graph walks.
 const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "parsed", "modules", "includes"];
 const artifacts = (obj) => artifactFields.map((name) => obj[name]);
+const scalar = (a) => typeof a === "string" ? a.toUpperCase() : a === undefined ? null : a;
+function branch(node, key) {
+  let child = node.get(key);
+  if (!child) node.set(key, child = new Map());
+  return child;
+}
 
 class Recorder {
   constructor(expose) {
@@ -24,6 +30,8 @@ class Recorder {
     this.suppressed = 0;
     this.auditDepth = 0;
     this.roles = [];
+    this.named = new WeakMap();
+    this.inventories = new WeakMap();
   }
   state(reg) {
     let state = registries.get(reg);
@@ -48,14 +56,35 @@ class Recorder {
   entry(state, key, lowering = false) {
     if (!key) return state.global;
     const entries = lowering ? state.lowerings : state.entries;
-    if (!entries.has(key)) entries.set(key, empty());
-    return entries.get(key);
+    let entry = entries.get(key);
+    if (!entry) entries.set(key, entry = empty());
+    return entry;
   }
   own(state, key) { return this.entry(state, key, this.current(state)?.lowering); }
   role(state) { return this.current(state) ? "artifact" : this.roles.at(-1) ?? "artifact"; }
   current(state) {
-    const top = this.stack.at(-1);
+    const top = this.stack[this.stack.length - 1];
     return top?.state === state ? top : this.stack.findLast((f) => f.state === state);
+  }
+
+  // Repeated core lookups usually observe the same answer. Intern the scalar
+  // tuple before allocating argument/result arrays, a row or its public key.
+  namedQuery(state, kind, args, result) {
+    const frame = this.current(state), owner = frame?.key;
+    let node = frame?.named;
+    if (!node) {
+      const role = this.role(state), phase = frame?.phase ?? "registry";
+      const entry = role === "scheduling" ? state.scheduling : role === "final-output" ? state.finalOutput : this.own(state, owner);
+      node = this.named.get(entry);
+      if (!node) this.named.set(entry, node = new Map());
+      node = branch(branch(branch(node, role), phase), owner);
+      if (frame) frame.named = node;
+    }
+    node = branch(branch(node, kind), args.length);
+    for (let i = 0; i < args.length; i++) node = branch(node, scalar(args[i]));
+    if (node.has(result)) return;
+    node.set(result, true);
+    this.query(state, {kind, args: args.map(scalar), result: result ? [result] : []});
   }
   query(state, query, owner = this.current(state)?.key) {
     if (this.auditDepth) return;
@@ -81,6 +110,12 @@ class Recorder {
     }
     return key;
   }
+  // These hooks are only used for audited, pure getters in the pinned core.
+  // They cannot resolve anything inside their body, so need no artifact frame.
+  readArtifact(reg, obj) {
+    const state = this.state(reg), key = this.link(state, obj);
+    this.checkArtifact(state, obj, key);
+  }
   checkArtifact(state, obj, key) {
     if (this.checked?.has(obj)) return;
     this.checked ??= new WeakSet();
@@ -92,16 +127,20 @@ class Recorder {
       this.query(state, {kind: "unknown-scan", args: ["artifact-built-before-recording"], result: []}, key);
     }
   }
-  artifact(reg, obj, phase, run) {
-    const key = keyOf(obj), top = this.stack.at(-1);
-    if (!key) return run();
-    if (top?.state.reg === reg && top.key === key && phase === "artifact-read") return run();
+  enterArtifact(reg, obj, phase) {
+    const key = keyOf(obj), top = this.stack[this.stack.length - 1];
+    if (!key) return false;
+    if (top?.state.reg === reg && top.key === key && phase === "artifact-read") return false;
     const state = this.state(reg);
     this.link(state, obj);
     this.entry(state, key, phase === "lowering" || phase === "selection");
     this.checkArtifact(state, obj, key);
     this.stack.push({state, key, obj, phase, lowering: phase === "lowering" || phase === "selection"});
-    try { return run(); } finally { this.stack.pop(); }
+    return true;
+  }
+  artifact(reg, obj, phase, run) {
+    const entered = this.enterArtifact(reg, obj, phase);
+    try { return run(); } finally { if (entered) this.stack.pop(); }
   }
   context(kind, args, run) {
     const frame = {kind, args};
@@ -113,9 +152,13 @@ class Recorder {
   inventory(reg, objects) {
     const state = this.state(reg);
     const configEdited = state.config && state.config !== reg.getConfig();
-    const snapshots = new Map([...inputSnapshot(reg).objects].map(([key, {sources}]) => [key, sources.map((s) => [s.name, s.raw])]));
+    const snapshot = inputSnapshot(reg);
+    if (this.inventories.get(reg) === snapshot && !configEdited) return state;
+    const snapshots = new Map([...snapshot.objects].map(([key, {sources}]) => [key, sources.map((s) => [s.name, s.raw])]));
     const changed = [...snapshots].filter(([key, files]) => state.files.has(key)
-      && JSON.stringify(files) !== JSON.stringify(state.files.get(key))).map(([key]) => key);
+      && (files.length !== state.files.get(key).length || files.some(([name, raw], i) => {
+        const old = state.files.get(key)[i]; return name !== old[0] || raw !== old[1];
+      }))).map(([key]) => key);
     const removed = [...state.files.keys()].filter((key) => !snapshots.has(key));
     const added = [...snapshots.keys()].some((key) => !state.files.has(key));
     const edited = changed.length || removed.length || (state.files.size && added);
@@ -137,6 +180,7 @@ class Recorder {
       this.entry(state, key);
     }
     state.files = snapshots;
+    this.inventories.set(reg, snapshot);
     for (const obj of state.artifacts.keys()) if (!snapshots.has(keyOf(obj))) state.artifacts.delete(obj);
     return state;
   }
