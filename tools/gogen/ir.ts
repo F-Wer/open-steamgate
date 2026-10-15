@@ -118,6 +118,10 @@ export type Expr = ExprMetadata & (
   | { readonly e: 'static'; readonly owner: string; readonly name: string; readonly type: Type; readonly go: string }
   | { readonly e: 'fn'; readonly name: string; readonly args: readonly Expr[]; readonly type: Type });
 
+// Byte concatenation factories emit one of these two shapes (never a mix).
+export interface ConcatBytesParts { readonly s: 'concat_bytes'; readonly target: Expr; readonly table?: undefined; readonly parts: readonly Expr[]; readonly fixed?: number }
+export interface ConcatBytesTable { readonly s: 'concat_bytes'; readonly target: Expr; readonly table: TypedExpr; readonly row: Expr }
+
 export type Stmt =
   | { readonly s: 'note_update_task' }
   | { readonly s: 'raise'; readonly value: Expr; readonly cls: string | null }
@@ -149,7 +153,8 @@ export type Stmt =
   | { readonly s: 'shift_left_circ_bytes'; readonly target: Expr }
   | { readonly s: 'shift_left_leading'; readonly target: Expr; readonly mask: Expr; readonly maskLen: number }
   | { readonly s: 'shift_right_trailing'; readonly target: Expr; readonly mask: Expr; readonly maskLen: number }
-  | { readonly s: 'concat_bytes'; readonly target: Expr; readonly table?: Expr; readonly row?: Expr; readonly parts?: readonly Expr[]; readonly fixed?: number }
+  | ConcatBytesParts
+  | ConcatBytesTable
   | { readonly s: 'condense'; readonly target: Expr; readonly noGaps: boolean }
   | { readonly s: 'assert'; readonly cond: Condition; readonly text: string }
   | { readonly s: 'set_data'; readonly target: Expr; readonly value: Expr }
