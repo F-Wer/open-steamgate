@@ -41,7 +41,7 @@ import {samcOf, cdsSqlViews, cdsMappingError, rearrangedClass, inlineTableLocals
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
-
+import {copyValue, positionStmt} from "./tagged-copies.ts";
 import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
 import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sqlValue, SQL_OPS} from "./frontend-sql.mjs";
 
@@ -1310,7 +1310,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // a host loop (KERNEL): the statements up to its closing line are its body
     const k = kernelOf(child, ctx);
     if (k?.loop !== undefined) {
-      const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
+      const pos = {file: /** @type {string} */ (ctx.file.getFilename().split("/").pop()), row: child.getFirstToken().getStart().getRow()};
       const j = children.findIndex((c, x) => x > i && kernelOf(c, ctx)?.end === true);
       const inner = children.slice(i + 1, j);
       const where = `${ctx.className}=>${ctx.method} (${pos.file}:${pos.row})`;
@@ -1340,12 +1340,12 @@ function compiledFunctionCall(node, ctx, text, name) {
     // becomes a stub that raises NOT_COMPILED when it runs, as a system
     // dumps; the rest of the method compiles, and nothing is skipped
     // silently: execution never passes the stub
-    const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
+    const pos = {file: /** @type {string} */ (ctx.file.getFilename().split("/").pop()), row: child.getFirstToken().getStart().getRow()};
     try {
-      if (child instanceof Nodes.StructureNode) out.push({...structure(child, ctx), pos});
+      if (child instanceof Nodes.StructureNode) out.push(positionStmt(structure(child, ctx), pos));
       else if (child instanceof Nodes.StatementNode) {
         const s = statement(child, ctx);
-        if (s !== undefined) out.push({...s, pos});
+        if (s !== undefined) out.push(positionStmt(s, pos));
       }
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
@@ -1521,7 +1521,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (derefLoop) {
       const ref = variable(derefLoop[1], ctx);
       if (ref.type.k !== "dref") throw new Unsupported(`LOOP AT ->* of a ${ref.type.k}`);
-      table = {...ref, type: {k: "data", table: true}};
+      table = copyValue(ref, {type: {k: "data", table: true}});
     } else table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
     if (using !== null || dynamicUsing !== null) {
       if (table.type.k !== "table") throw new Unsupported(`LOOP ... USING KEY over a ${table.type.k}`);
@@ -1560,7 +1560,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       if (!nm || !["data", "struct"].includes(fsType?.k) || /\b(WHERE|FROM|TO|INTO|USING)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
       // a typed field symbol (ultra/json): each row must be a value of that
       // structure, checked at run time as ASSIGN ref->* TO <typed> is
-      /** @type {import("./frontend-types.ts").LoopState} */ const loop = {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), token: {}};
+      /** @type {Extract<import("./frontend-types.ts").LoopState, {s: "loop_data"}>} */ const loop = {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), token: {}};
       (ctx.loopStack ??= []).push(loop);
       try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); }
       return loop;
@@ -1602,12 +1602,12 @@ function compiledFunctionCall(node, ctx, text, name) {
     if ((using !== null || dynamicUsing !== null) && where?.some((w) => w.fx)) throw new Unsupported(`LOOP ... USING KEY with a WHERE on a component of another type or a nested one: ${text}`);
     const dynamicKeys = dynamicUsing === null ? null : {
       value: convert(variable(dynamicUsing[1], ctx), S),
-      options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => secondaryKey(table.type, x.name, ctx, text)),
+      options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => /** @type {import("./ir.ts").ResolvedKey} */ (secondaryKey(table.type, x.name, ctx, text))),
     };
     // ultra/itab: the loop is known to its body, for DELETE itab (the
     // current row) inside it
     // (a shared token object, not the loop itself, so the IR stays a tree)
-    /** @type {import("./frontend-types.ts").LoopState} */ const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), ...(dynamicKeys ? {dynamicKeys} : {}), token: {}};
+    /** @type {Extract<import("./frontend-types.ts").LoopState, {s: "loop"}>} */ const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), ...(dynamicKeys ? {dynamicKeys} : {}), token: {}};
     (ctx.loopStack ??= []).push(loop);
     // critic fix: inside the body the loop's field symbol is freshly
     // assigned on every pass until a DELETE of the current row makes it
@@ -1772,7 +1772,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const m = /^UNASSIGN\s+(<[\w\/]+>)\s*\.?$/i.exec(text);
     const name = m ? upper(m[1]) : undefined;
     if (!name || !ctx.fieldSymbols?.has(name)) throw new Unsupported(`statement Unassign: ${text}`);
-    return {s: "unassign", fs: {e: "fs", name, type: ctx.fieldSymbols.get(name)}};
+    return {s: "unassign", fs: {e: "fs", name, type: /** @type {import("./ir.ts").Type} */ (ctx.fieldSymbols.get(name))}};
   }
   if (isStmt(node, Statements.Select)) return selectStatement(node, ctx, text);
   if (isStmt(node, Statements.Commit) || isStmt(node, Statements.Rollback)) return luwStatement(node, text);
@@ -2000,12 +2000,12 @@ function compiledFunctionCall(node, ctx, text, name) {
     const lines = keywords[1] === "LINES" && keywords[2] === "OF";
     const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
     if (!["string", "c", "n", "d"].includes(target.type.k)) throw new Unsupported(`CONCATENATE into a ${target.type.k}`);
-    const piece = (x) => {
+    /** @param {import("./frontend-types.ts").ValueExpr} x @returns {import("./frontend-types.ts").ValueExpr} */ const piece = (x) => {
       if (x.type.k === "c") return respecting ? {e: "padc", x, n: x.type.len, type: S} : convert(x, S);
       if (["string", "n", "d", "t"].includes(x.type.k)) return convert(x, S);
       throw new Unsupported(`CONCATENATE of a ${x.type.k}`);
     };
-    let sep = null;
+    /** @type {import("./frontend-types.ts").ValueExpr | null} */ let sep = null;
     const parts = [];
     let table = null;
     for (let i = 0; i < kids.length; i += 1) {
@@ -2439,8 +2439,8 @@ function compiledFunctionCall(node, ctx, text, name) {
       const time = outputs.has("TIME") ? lvalue(outputs.get("TIME"), ctx) : null;
       if ((!date && !time) || (date && date.type.k !== "d") || (time && time.type.k !== "t")) throw new Unsupported(`CONVERT targets: ${text}`);
       return {s: "native", fn: "abap.ConvertTimestampInto", stmt: true, args: [stamp, zone,
-        date ? convert(date, {k: "data"}) : {e: "zero", type: {k: "data"}},
-        time ? convert(time, {k: "data"}) : {e: "zero", type: {k: "data"}}].map((value) => ({value}))};
+        date ? convert(date, {k: "data"}) : /** @type {Extract<import("./ir.ts").Expr, {e: "zero"}>} */ ({e: "zero", type: {k: "data"}}),
+        time ? convert(time, {k: "data"}) : /** @type {Extract<import("./ir.ts").Expr, {e: "zero"}>} */ ({e: "zero", type: {k: "data"}})].map((value) => ({value}))};
     }
     if (!inputs.has("DATE") || !inputs.has("TIME") || !outputs.has("STAMP")) throw new Unsupported(`CONVERT form: ${text}`);
     const stamp = lvalue(outputs.get("STAMP"), ctx);
@@ -2565,7 +2565,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       const regex = kind !== "";
       const pcre = kind === "PCRE";
       let pattern = source(pat, ctx);
-      let icase = {e: "flag", value: hasKeywords("IGNORING", "CASE"), type: {k: "bool"}};
+      /** @type {import("./frontend-types.ts").ValueExpr} */ let icase = {e: "flag", value: hasKeywords("IGNORING", "CASE"), type: {k: "bool"}};
       if (!pcre && regex && pattern.type.k === "ref" && pattern.type.name === "CL_ABAP_REGEX" && ctx.program.wanted.has("CL_ABAP_REGEX") && !icase.value) {
         const base = pattern;
         pattern = {e: "refattr", base, name: "PATTERN", type: S};
@@ -2952,7 +2952,7 @@ const STRING_FNS = {
 /** a Target (or InlineData) as an assignable place */
 /** @param {import("./frontend-types.ts").SyntaxNode} target @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function lvalue(target, ctx) {
   const kids = target.getChildren();
-  let place;
+  /** @type {import("./frontend-types.ts").ValueExpr} */ let place;
   let i = 0;
   const first = kids[0];
   if (isExpr(first, Expressions.ClassName) && isTok(kids[1], "=>")) {
@@ -2997,7 +2997,7 @@ const STRING_FNS = {
       if (off !== null) i += 1;
       const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
       if (i < kids.length - 1 || !["x", "c"].includes(place.type.k) || (place.type.k === "x" && !len)) throw new Unsupported(`write target ${target.concatTokens()}`);
-      return {e: "substr_target", base: place, off, len, type: place.type.k === "x" ? X(len.e === "int" ? len.value : place.type.len) : S};
+      return {e: "substr_target", base: place, off, len, type: place.type.k === "x" ? X(len.e === "int" ? len.value : /** @type {Extract<import("./ir.ts").Type, {k: "x"}>} */ (place.type).len) : S};
     } else {
       throw new Unsupported(`target ${target.concatTokens()}`);
     }
@@ -3212,7 +3212,7 @@ const STRING_FNS = {
 /* --------------------------------------------------------------- expressions */
 
 const SY = {"SY-INDEX": "Index", "SY-TABIX": "Tabix", "SY-SUBRC": "Subrc", "SY-DBCNT": "Dbcnt", "SY-FDPOS": "Fdpos"};
-const SY_MESSAGES = {
+/** @type {Record<string, {field: string; type: import("./ir.ts").Type}>} */ const SY_MESSAGES = {
   "SY-MSGID": {field: "Msgid", type: C(20)}, "SY-MSGNO": {field: "Msgno", type: {k: "n", len: 3}},
   "SY-MSGTY": {field: "Msgty", type: C(1)},
   ...Object.fromEntries([1, 2, 3, 4].map((i) => [`SY-MSGV${i}`, {field: `Msgv${i}`, type: C(50)}])),
@@ -5222,7 +5222,7 @@ const FUNCTIONS = {
     if (tabNode === undefined || ps.some((x) => !["TABLE", "SEP"].includes(upper(x.findDirectExpression(Expressions.ParameterName).concatTokens())))) throw new Unsupported(`concat_lines_of( ) form: ${chain.concatTokens()}`);
     const tab = source(tabNode, ctx);
     if (tab.type.k !== "table" || tab.type.row.k !== "string") throw new Unsupported(`concat_lines_of( ) of a ${tab.type.k === "table" ? `table of ${tab.type.row.k}` : tab.type.k}: only a table of strings is in the subset`);
-    let sep = {e: "str", value: "", type: S};
+    /** @type {import("./frontend-types.ts").ValueExpr} */ let sep = {e: "str", value: "", type: S};
     if (arg("SEP") !== undefined) {
       const x = source(arg("SEP"), ctx);
       if (!charlike(x.type)) throw new Unsupported(`concat_lines_of( ) sep of a ${x.type.k}`);
@@ -5593,7 +5593,7 @@ const FUNCTIONS = {
   // d / t into characters: the eight / six digits as they are (both are
   // held as their digits already); into a c they are cut or padded as any
   // characters are
-  if (to.k === "string" && (from.k === "d" || from.k === "t")) return {...expr, type: to};
+  if (to.k === "string" && (from.k === "d" || from.k === "t")) return copyValue(expr, {type: to});
   if (to.k === "c" && (from.k === "d" || from.k === "t")) return ok("s2c");
   // c -> n for a literal of exactly the field's digits only: the characters
   // are the value (anything else, blanks, signs, other lengths, is a
@@ -5603,7 +5603,7 @@ const FUNCTIONS = {
   // $ZOSG_TMP_0462). An n holds its digits, zeros included:
   // n -> string keeps them (0000000042), n -> c is a c move of them (into a
   // c 8: 00000000), n -> i and f read them as a number
-  if (from.k === "n" && to.k === "string") return {...expr, type: to};
+  if (from.k === "n" && to.k === "string") return copyValue(expr, {type: to});
   if (from.k === "n" && to.k === "c") return ok("s2c");
   if (from.k === "n" && numeric(to)) return ok("c2n");
   // i -> n: the sign dropped, the last digits kept, zeros in front (42 into
@@ -5627,7 +5627,7 @@ const FUNCTIONS = {
   // packed numbers (go/abap packed.go, A4H 2026-09-24, ZCL_GOGEN_T_PD*).
   // Into calculation type p: exact, nothing rounded yet
   if (to.k === "p" && to.calc) {
-    if (from.k === "p") return {...expr, type: to, fromP: from.calc ? expr.fromP : from};
+    if (from.k === "p") return copyValue(expr, {type: to, fromP: from.calc ? expr.fromP : from});
     if (from.k === "i" || from.k === "int8") return ok("i2pc");
     if (charlike(from)) return ok("c2pc");
     throw new Unsupported(`conversion ${from.k} -> calculation type p`);
@@ -5689,7 +5689,7 @@ const FUNCTIONS = {
   if ((to.k === "x" || to.k === "xstring") && charlike(from)) return ok("c2x");
   // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
   if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");
-  if (to.k === "xstring" && from.k === "x") return {...expr, type: to};
+  if (to.k === "xstring" && from.k === "x") return copyValue(expr, {type: to});
   // x / xstring -> i/int8: last four/eight bytes, zero-extended, then signed.
   // (A4H: FF gives 255; ultra/bytecmp 2026-09-24, ZCL_GOGEN_T_XMOVI:
   // FFFFFFFF -1, 80000000 -2147483648, 0100000002 2 for an x and an

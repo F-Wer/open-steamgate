@@ -20,7 +20,8 @@ export type CallExpr = RuntimeFields<Omit<RawCall, 'owner' | 'static' | 'callee'
   readonly static?: boolean;
   readonly callee?: string;
 };
-export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int'}>> | CallExpr
+export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'struct' | 'upcast'}>> | CallExpr
+  | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'struct'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'struct'}>}) | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'upcast'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'ref'}>})
   | {readonly e: 'int' | 'float'; readonly value: number; readonly type?: IR.Type};
 type StatementFields<T> = T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
   : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}

@@ -20,7 +20,7 @@ import {emitByteStatement} from "./emit-bytes.ts";
 // spells it. A method takes the Session first -- the roll area -- so the
 // same generated code runs on any goroutine. An instance method has the
 // object as its receiver; a static one is a plain function.
-
+import {copyType} from "./tagged-copies.ts";
 // An absent or OTHERS-only clause carries no named exception codes.
 /** @param {import("./ir.ts").Exceptions | null | undefined} exceptions @returns {string} */ const exceptionCodes = (exceptions) => {
   const codes = Object.entries(exceptions?.map ?? {}).map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
@@ -177,7 +177,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 /** the descriptor of a type, for generic data: built-in for elementary types, generated for the rest */
 /** @param {import("./emit-go-types.ts").Type} t @returns {string} */ function desc(t) {
   if ((t.qname || t.ddic) && !["struct", "table", "dref", "ref", "exc", "data"].includes(t.k)) {
-    const base = desc({...t, qname: undefined, ddic: undefined});
+    const base = desc(copyType(t, {qname: undefined, ddic: undefined}));
     const key = `${base}|${t.qname ?? ""}|${t.ddic ?? ""}`;
     if (!NAMED.has(key)) NAMED.set(key, {name: `tn_${NAMED.size}`, text: `abap.Named(${base}, ${JSON.stringify(t.qname ?? "")}, ${JSON.stringify(t.ddic ?? "")})`});
     return NAMED.get(key).name;
@@ -1323,7 +1323,7 @@ const LINES = !env("GOGEN_NOLINE");
     if (movePair(st, next, ctx, body[i - 1])) {
       // BumpTable keys on the address of the slice HEADER, not its backing
       // array. Preserve both bumps; clearing the source cannot invalidate a.
-      append(lines, stmt({...st, moveTable: true}, ctx, d), stmt(next, ctx, d));
+      append(lines, stmt({.../** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign"}>} */ (st), moveTable: true}, ctx, d), stmt(next, ctx, d));
       i++;
     } else append(lines, stmt(st, ctx, d));
   }

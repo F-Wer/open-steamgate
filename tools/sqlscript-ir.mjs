@@ -29,9 +29,9 @@ export const T = {
   // bind and the output boundary (docs/sqlscript-hana-observed.md)
   int2: {abap: "I", bits: 16},
   int8: {abap: "INT8"},
-  dec: (len, dec) => ({abap: "P", len, dec}),
-  char: (len) => ({abap: "C", len}),
-  bytes: (len) => len === undefined ? ({abap: "XSTRING"}) : ({abap: "X", len}),
+  /** @param {number} len @param {number} dec @returns {{abap: "P", len: number, dec: number}} */ dec: (len, dec) => ({abap: "P", len, dec}),
+  /** @param {number} len @returns {{abap: "C", len: number}} */ char: (len) => ({abap: "C", len}),
+  /** @param {number} [len] @returns {{abap: "XSTRING"} | {abap: "X", len: number}} */ bytes: (len) => len === undefined ? ({abap: "XSTRING"}) : ({abap: "X", len}),
   str: {abap: "STRING"},
   date: {abap: "D"},
   bool: {abap: "BOOL"},

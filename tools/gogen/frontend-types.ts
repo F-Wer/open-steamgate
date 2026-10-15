@@ -17,7 +17,7 @@ type StatementShape<T> = T extends {readonly s: "concat"} ? Omit<T, "sep"> & {re
 type FrontendIR<T> = T extends SqlPredicate ? FrontendSqlPredicate
   : T extends readonly (infer Item)[] ? readonly FrontendIR<Item>[]
   : T extends object ? {readonly [K in keyof StatementShape<T>]: FrontendIR<StatementShape<T>[K]>} : T;
-export type FrontendStmt = FrontendIR<Stmt>;
+export type FrontendStmt = FrontendIR<Stmt> & {readonly pos?: import("./ir.ts").Position};
 export interface FrontendMethod extends Omit<Method, "body"> { readonly body?: readonly FrontendStmt[] }
 export interface FrontendConstant { go: string; type: Type; value?: string | Record<string, string | undefined>; init?: ConstantInitializer; fieldInits?: Record<string, ConstantInitializer | undefined> }
 export type FrontendAttribute = (Omit<Attribute, "value"> & {readonly value?: string; readonly unsupported?: undefined})
