@@ -1,7 +1,7 @@
 import {validatePack} from "./osd-layer-pack.mjs";
 // Reproducible abapGit layers and ordered OCI systems (docs/oci-layers.md).
 import {execFileSync, spawnSync} from "node:child_process";
-import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
+import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, resolve} from "node:path";
@@ -80,8 +80,11 @@ export function build(folder, {name, kind, source} = {}) {
  */
 export function readLeakAllow(file) {
   let raw;
-  try { if (statSync(file).size > 1024 * 1024) fail("BAD_ALLOW", `${file}: larger than 1 MiB`); } catch (error) { if (error.code === "BAD_ALLOW") throw error; }
-  try { raw = JSON.parse(readFileSync(file, "utf8")); } catch (error) { fail("BAD_ALLOW", `${file}: not readable JSON (${error.name})`); }
+  let bytes;
+  try { bytes = readFileSync(file); } catch (error) { fail("BAD_ALLOW", `${file}: not readable (${error.code ?? error.name})`); }
+  // measured on what was read, not on stat: a pipe stats as size 0
+  if (bytes.length > 1024 * 1024) fail("BAD_ALLOW", `${file}: larger than 1 MiB`);
+  try { raw = JSON.parse(bytes.toString("utf8")); } catch (error) { fail("BAD_ALLOW", `${file}: not readable JSON (${error.name})`); }
   const allow = raw?.allow;
   if (!Array.isArray(allow)) fail("BAD_ALLOW", `${file}: expected {"allow": [...]}`);
   for (const [i, entry] of allow.entries()) {
@@ -129,7 +132,11 @@ export function leakGate(trees, metadata, documents = [], allow = [], layerNames
     // a stale exception is how an allow list stops meaning anything.
     // Only archive files: the metadata documents are ours, not the layer's. An
     // entry with a `layer` applies to that layer of a system only.
+    // a layer name is what the layer's config says, so two layers of one
+    // system may carry the same one; a scope naming such a name is ambiguous
+    const repeated = new Set(layerNames.filter((name, i) => layerNames.indexOf(name) !== i));
     const translated = allow.flatMap((entry) => {
+      if (entry.layer !== undefined && repeated.has(entry.layer)) fail("BAD_ALLOW", `allow entry for ${entry.layer}:${entry.file}: more than one layer is called ${entry.layer}`);
       const hits = archive.filter(({path, layer}) => path === entry.file && (entry.layer === undefined || layer === entry.layer));
       if (!hits.length) fail("BAD_ALLOW", `allow entry for ${entry.layer ? `${entry.layer}:` : ""}${entry.file}: no such file in the layer`);
       return hits.map(({name}) => ({file: name, value: entry.value, reason: entry.reason}));

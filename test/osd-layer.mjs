@@ -301,6 +301,7 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "two"])).to.throw(/publish refused/);
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}, {...entry, layer: "two"}], ["one", "two"])).not.to.throw();
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "three"}], ["one", "two"])).to.throw(/BAD_ALLOW|no such file/);
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "one"])).to.throw(/more than one layer/);
   });
 
   it("reads an allow file only with a reason on every entry", () => {
@@ -315,6 +316,11 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => readLeakAllow(file)).to.throw(/layer/);
     writeFileSync(file, " ".repeat(1024 * 1024 + 1));
     expect(() => readLeakAllow(file)).to.throw(/1 MiB/);
+    // a pipe stats as size 0; the cap is measured on what was read (a shell
+    // pipe, since Node's own child stdin is a socket /dev/stdin cannot open)
+    const reader = `import {readLeakAllow} from ${JSON.stringify(new URL("../tools/osd-layer.mjs", import.meta.url).href)}; try { readLeakAllow("/dev/stdin"); } catch (e) { console.log(e.message); }`;
+    const piped = spawnSync("sh", ["-c", `"$0" -e 'process.stdout.write(" ".repeat(1024 * 1024 + 1))' | "$0" --input-type=module -e "$1"`, process.execPath, reader], {encoding: "utf8"});
+    expect(piped.stdout).to.match(/1 MiB/);
   });
 
   it("refuses oversized content instead of skipping it", () => {
