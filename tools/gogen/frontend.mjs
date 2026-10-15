@@ -3425,7 +3425,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
     place = variable(kids[0].concatTokens(), ctx);
     i = 1;
   } else if (isTok(kids[0], "ME") || (isExpr(kids[0], Expressions.SourceField) && upper(kids[0].concatTokens()) === "ME")) {
-    place = {e: "attr", name: upper(kids[2].concatTokens()), type: findAttribute(ctx, upper(kids[2].concatTokens())).type};
+    /** @type {import("./frontend-types.ts").ValueExpr} */ const attr = findAttribute(ctx, upper(kids[2].concatTokens())); place = {e: "attr", name: upper(kids[2].concatTokens()), type: attr.type};
     i = 3;
   } else {
     throw new Unsupported(`field chain ${n.concatTokens()}`);
@@ -3444,7 +3444,7 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
       place = dataRefField(place, kids[i + 1], ctx);
       i += 1;
     } else if (isTok(kids[i], "->") && upper(kids[i - 1].concatTokens()) === "ME") {
-      place = {e: "attr", name: upper(kids[i + 1].concatTokens()), type: findAttribute(ctx, upper(kids[i + 1].concatTokens())).type};
+      /** @type {import("./frontend-types.ts").ValueExpr} */ const attr = findAttribute(ctx, upper(kids[i + 1].concatTokens())); place = {e: "attr", name: upper(kids[i + 1].concatTokens()), type: attr.type};
       i += 1;
     } else if (isExpr(kids[i], Expressions.FieldOffset) || isExpr(kids[i], Expressions.FieldLength)) {
       const off = isExpr(kids[i], Expressions.FieldOffset) ? offsetValue(kids[i], ctx) : null;
