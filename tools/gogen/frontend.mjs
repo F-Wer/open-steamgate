@@ -1,3 +1,5 @@
+import {builtinTableFields} from "./frontend-ddic.mjs";
+import {dynamicStaticCall} from "./frontend-dynamic-call.mjs";
 import {inputOrigin} from "./frontend-inventory.mjs";
 import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
@@ -140,7 +142,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
         // Later rounds can select any loaded object. Normalize once before
         // parsing so newly selected app classes match a fresh final registry.
         reg.addFile(new abaplint.MemoryFile(e.name,
-          lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint)));
+          builtinTableFields(lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint), e.name)));
       }
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
@@ -3097,21 +3099,7 @@ function statement(node, ctx) {
   // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
   // through the program's registry of static methods
   if (isStmt(node, Statements.Call) && node.findDirectExpression(Expressions.MethodSource)?.findDirectExpression(Expressions.Dynamic)) {
-    const ms = node.findDirectExpression(Expressions.MethodSource);
-    const kids = ms.getChildren();
-    if (kids.length !== 3 || !isTok(kids[1], "=>") || !isExpr(kids[2], Expressions.AttributeName)) throw new Unsupported(`CALL METHOD form: ${text}`);
-    const inner = kids[0].getChildren().filter((c) => !isTok(c));
-    if (inner.length !== 1) throw new Unsupported(`CALL METHOD form: ${text}`);
-    const cls = convert(sourceOperand(inner[0], ctx), S);
-    const body = node.findDirectExpression(Expressions.MethodCallBody);
-    const mp = body?.findDirectExpression(Expressions.MethodParameters);
-    if (mp && /\b(IMPORTING|CHANGING|RECEIVING|EXCEPTIONS)\b/i.test(mp.concatTokens())) throw new Unsupported(`CALL METHOD by name with ${mp.concatTokens()}`);
-    if (body && !mp) throw new Unsupported(`CALL METHOD form: ${text}`);
-    const args = (mp?.findAllExpressions(Expressions.ParameterS) ?? []).map((p) => ({name: upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()),
-      value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})}));
-    const method = upper(kids[2].concatTokens());
-    ctx.program.dynStatics.add(method);
-    return {s: "call_dyn_static", cls, method, args};
+    return dynamicStaticCall(node, ctx, {Expressions, isTok, isExpr, sourceOperand, source, convert, S, Unsupported});
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
   if (isStmt(node, Statements.Call)) {

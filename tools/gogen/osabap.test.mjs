@@ -1,6 +1,7 @@
 // Focused end-to-end check for the native report host. It intentionally uses
 // the local open-abap-gui/core checkouts, just like osabap.mjs itself.
 import test from "node:test";
+import {builtinTableFields} from "./frontend-ddic.mjs";
 import assert from "node:assert/strict";
 import {execFileSync, spawn, spawnSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
@@ -731,4 +732,93 @@ START-OF-SELECTION.
   } finally {
     rmSync(dir, {recursive: true, force: true});
   }
+});
+
+
+test("built-in DDIC fields with elementary COMPTYPE need no data element", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-builtin-ddic-"));
+  try {
+    const fields = [["MANDT", "CLNT", 3], ["ID", "INT4", 10], ["TEXT", "CHAR", 12],
+      ["NUM", "NUMC", 4], ["DAY", "DATS", 8], ["TIME", "TIMS", 6], ["BYTES", "RAW", 2],
+      ["STR", "STRG", 0], ["XSTR", "RSTR", 0], ["AMOUNT", "DEC", 7],
+      ["SMALL", "INT1", 3], ["SHORT", "INT2", 5], ["BIG", "INT8", 19],
+      ["CURRENCY", "CURR", 9], ["QUANTITY", "QUAN", 9]];
+    writeFileSync(join(dir, "zprobe.tabl.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+<DD02V><TABNAME>ZPROBE</TABNAME><TABCLASS>TRANSP</TABCLASS><CLIDEP>X</CLIDEP></DD02V>
+<DD03P_TABLE>${fields.map(([name, datatype, length], i) => `<DD03P><FIELDNAME>${name}</FIELDNAME>${i < 2 ? "<KEYFLAG>X</KEYFLAG>" : ""}<COMPTYPE>E</COMPTYPE><DATATYPE>${datatype}</DATATYPE><LENG>${length}</LENG><DECIMALS>${["DEC", "CURR", "QUAN"].includes(datatype) ? 2 : 0}</DECIMALS></DD03P>`).join("")}</DD03P_TABLE>
+</asx:values></asx:abap></abapGit>`);
+    const report = join(dir, "zprobe.prog.abap");
+    writeFileSync(report, `REPORT zprobe.
+PARAMETERS p_id TYPE i DEFAULT 1.
+START-OF-SELECTION.
+  DATA row TYPE zprobe.
+  row-mandt = sy-mandt. row-id = p_id. row-text = 'hello'. row-num = '0012'.
+  row-day = '20261015'. row-time = '123456'. row-bytes = 'ABCD'.
+  row-str = 'long text'. row-xstr = '012345'. row-amount = '12.34'.
+  INSERT zprobe FROM @row.
+  ASSERT sy-subrc = 0.
+  CLEAR row.
+  SELECT SINGLE mandt, text, num, day, time, bytes, str, xstr, amount FROM zprobe INTO CORRESPONDING FIELDS OF @row WHERE id = 1.
+  ASSERT 0 = sy-subrc.
+  ASSERT row-num = '0012'. ASSERT row-bytes = 'ABCD'.
+  ASSERT row-str = 'long text'. ASSERT row-xstr = '012345'. ASSERT row-amount = '12.34'.
+  WRITE: / row-mandt, row-text, row-day, row-time.
+`);
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const result = run(["-db", join(dir, "probe.db"), "--p_id", "1"]);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.match(result.stdout, /123 hello.*20261015.*123456/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("an absent optional dynamic static method raises a catchable illegal class", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-optional-call-"));
+  try {
+    writeFileSync(join(dir, "zcl_optional_receiver.clas.abap"), `
+CLASS zcl_optional_receiver DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION. CLASS-DATA last TYPE string.
+    CLASS-METHODS event IMPORTING value TYPE string.
+ENDCLASS.
+CLASS zcl_optional_receiver IMPLEMENTATION.
+  METHOD event. last = value. ENDMETHOD.
+ENDCLASS.`);
+    const report = join(dir, "zoptional.prog.abap");
+    writeFileSync(report, `REPORT zoptional.
+START-OF-SELECTION.
+  DATA value TYPE string VALUE 'event'.
+  TRY.
+    CALL METHOD ('ZCL_LNT_TEST_LOG_BAL')=>('EVENT') EXPORTING value = value.
+    ASSERT 1 = 2.
+  CATCH cx_sy_dyn_call_illegal_class.
+    WRITE / 'illegal class'.
+  ENDTRY.
+  TRY.
+    CALL METHOD ('ZCL_LNT_TEST_LOG_BAL')=>('EVENT') EXPORTING value = value.
+  CATCH cx_sy_dyn_call_error.
+    WRITE / 'optional swallowed'.
+  ENDTRY.
+  CALL METHOD ('ZCL_OPTIONAL_RECEIVER')=>('EVENT') EXPORTING value = value.
+  ASSERT zcl_optional_receiver=>last = value.
+  WRITE / 'continued'.
+`);
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const result = run([]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /illegal class\noptional swallowed\ncontinued\n$/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+
+test("DDIC normalization preserves references and non-elementary components", () => {
+  const field = (body) => `<DD03P>${body}</DD03P>`;
+  for (const body of [
+    '<COMPTYPE>E</COMPTYPE><DATATYPE>CHAR</DATATYPE><ROLLNAME>ZTEXT</ROLLNAME>',
+    '<COMPTYPE>R</COMPTYPE><DATATYPE>CHAR</DATATYPE>',
+    '<COMPTYPE>E</COMPTYPE><ROLLNAME>ZTEXT</ROLLNAME>',
+    '<DATATYPE>CHAR</DATATYPE>',
+  ]) assert.equal(builtinTableFields(field(body), "zprobe.tabl.xml"), field(body));
+  const input = field('<COMPTYPE>E</COMPTYPE><ROLLNAME/><DATATYPE>CHAR</DATATYPE>');
+  assert.equal(builtinTableFields(input, "zprobe.tabl.xml"), input.replace('<COMPTYPE>E</COMPTYPE>', '<COMPTYPE></COMPTYPE>'));
+  assert.equal(builtinTableFields(input, "zprobe.dtel.xml"), input);
 });

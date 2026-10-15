@@ -30,6 +30,19 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
+### ANOMALY-2026-10-15-tabl-elementary-builtins -- Elementary TABL fields without ROLLNAME
+
+- Status: `workaround` in the native compiler input path.
+- Affected version: `@abaplint/core 2.120.73` (also consumed by the pinned transpiler's database setup).
+- Reproducer: `tools/gogen/osabap.test.mjs`, "built-in DDIC fields with elementary COMPTYPE need no data element".
+- Input: an abapGit TABL field with `COMPTYPE=E`, `DATATYPE=CLNT`, `LENG=3` and no `ROLLNAME`; the same shape occurs for CHAR, INT4 and other built-in DDIC types.
+- Expected: DATATYPE/LENG/DECIMALS define the elementary field when there is no data-element reference.
+- Actual: core's `objects/table.js` takes every `COMPTYPE=E` through `DDIC.lookupDataElement`, producing UnknownType for the absent ROLLNAME. The transpiler's `DatabaseSetup` subsequently refuses the column; changing SQL type generation alone would leave ABAP typing broken.
+- Workaround: `tools/gogen/frontend-ddic.mjs` clears COMPTYPE on built-in TABL fields lacking a nonempty ROLLNAME before registry parsing. Named data elements and non-elementary components retain their original definitions; source files are unchanged.
+- Validation: native report builds its schema and inserts/reads CLNT, CHAR, NUMC, DATS, TIMS, RAW, STRG, RSTR and DEC fields; INT1/INT2/INT4/INT8/CURR/QUAN schema generation is covered too.
+- Upstream: needs an issue in abaplint/abaplint; no upstream submission in this local-only task.
+- Upstream version containing a fix: unknown.
+
 ### ANOMALY-2026-10-10-get-run-time-wrap -- GET RUN TIME does not wrap at 2^31
 
 - Status: `open` (fix committed locally in the transpiler branch).
