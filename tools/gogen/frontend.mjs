@@ -2373,7 +2373,7 @@ function compiledFunctionCall(node, ctx, text, name) {
         /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
       if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
-      const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
+      /** @type {import("./ir.ts").SortKey[]} */ const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
       for (const k of sortKeys) if (!["c", "string", "n", "d", "t", "i", "int8"].includes(k.type.k)) throw new Unsupported(`SORTED table keyed on a ${k.type.k}`);
       return {s: "insert_sorted", table, value: convert(source(vNode, ctx, table.type.row), table.type.row), keys: sortKeys, refInto};
     }
@@ -3565,7 +3565,7 @@ function localInterfaceConstant(id, attr, local, reg) {
       return {e: "table_map", from, row, value: {e: "struct", fields, type: to.row}, type: to};
     }
     if (from.type.k !== "struct" || to.k !== "struct") throw new Unsupported(`CORRESPONDING from a ${from.type.k} to a ${to.k}`);
-    const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(x.base));
+    /** @param {import("./frontend-types.ts").ValueExpr} x @returns {boolean} */ const plain = (x) => ["var", "attr", "static", "fs"].includes(x.e) || (x.e === "field" && plain(x.base));
     if (!plain(from)) throw new Unsupported(`CORRESPONDING of something other than a variable or its component: ${c.text}`);
     const src = structOf(ctx, from.type);
     const dst = structOf(ctx, to);
@@ -4686,7 +4686,7 @@ function selectSingle(sel, ctx, text) {
   const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
   if (target.type.k !== "dref") throw new Unsupported(`CREATE DATA into a ${target.type.k}`);
   const name = upper(m[2]);
-  let t;
+  /** @type {import("./ir.ts").Type} */ let t;
   const ddic = ctx.reg.getObject("TABL", name) ?? ctx.reg.getObject("VIEW", name) ?? ctx.reg.getObject("TTYP", name) ?? ctx.reg.getObject("DTEL", name);
   if (!/=>/.test(name) && !(ctx.scope.findType?.(name)) && ddic) {
     let at;
@@ -5016,7 +5016,7 @@ function eventInfo(ctx, owner, evName) {
 
 /** @param {string} raw @returns {string} */ function templateText(raw) {
   const t = raw.replace(/^[|}]/, "").replace(/[{|]$/, "");
-  return t.replace(/\\([{}|\\nrt])/g, (m, c) => ({n: "\n", r: "\r", t: "\t"})[c] ?? c);
+  /** @type {Readonly<Record<string, string | undefined>>} */ const escapes = {n: "\n", r: "\r", t: "\t"}; return t.replace(/\\([{}|\\nrt])/g, (m, c) => escapes[c] ?? c);
 }
 
 /** the decimals a system prints for a p expression in a template, or null */

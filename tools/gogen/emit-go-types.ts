@@ -199,7 +199,7 @@ export interface SinkSite { locals: readonly Local[]; depth: number }
 export type SunkLocals<Body extends readonly object[] = readonly Stmt[]> = Map<Body, readonly Local[]>;
 export interface Context {
   readonly cls: Partial<Omit<Class, 'constructor'>>;
-  loop?: number;
+  loop: number;
   inCtor?: boolean;
   method?: Partial<Method>;
   staticStores?: Map<string, string>;

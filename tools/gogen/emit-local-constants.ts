@@ -13,7 +13,7 @@ interface JsDeclarations {
 
 // Emit hoisted VALUE expressions through each backend's normal converter.
 export function localConstant(c: Constant, {fields, expr, zero, ident, struct}: ConstantHelpers): string | undefined {
-  const ctx = {cls: {}, method: {}};
+  const ctx = {cls: {}, method: {}, loop: 0};
   if (c.init) return expr(c.init, ctx);
   if (!hasFieldInits(c)) return undefined;
   const values = (fields.get(c.type.go)?.fields ?? []).map((f): string => {
