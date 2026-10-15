@@ -1,7 +1,7 @@
 import {abaplint, BasicTypes, Unsupported, I, F, INT8, S, C, X, XS, upper, goName} from "./frontend-base.mjs";
 import {ddicOutputLength, REG, clasDef} from "./frontend.mjs";
 import {P_GENERIC} from "./frontend-classes-native.mjs";
-import {copyType} from "./tagged-copies.ts";
+
 /** the RTTI type kind (cl_abap_typedescr=>typekind_*) of an abaplint type */
 /** @param {import("@abaplint/core").AbstractType | undefined} t @returns {string} */ function typeKindOf(t) {
   if (t instanceof BasicTypes.CharacterType) return "C";
@@ -182,7 +182,7 @@ import {copyType} from "./tagged-copies.ts";
   const d = t.getDDICName?.() ?? (ir.k === "n" && q && !/[=>-]/.test(q) && REG?.getObject("DTEL", upper(q)) ? q : undefined);
   if (!q && !d) return ir;
   if (d) ddicOutputLength(upper(d));
-  return copyType(ir, {...(q ? {qname: upper(q)} : {}), ...(d ? {ddic: upper(d)} : {})});
+  return {...ir, ...(q ? {qname: upper(q)} : {}), ...(d ? {ddic: upper(d)} : {})};
 }
 
 /** @param {import("./frontend-types.ts").CompilationContext} ctx @param {Extract<import("./ir.ts").Type, {k: "struct"}>} t @returns {import("./frontend-types.ts").StructType | undefined} */ const structOf = (ctx, t) => ctx.program.structs.get(t.go);

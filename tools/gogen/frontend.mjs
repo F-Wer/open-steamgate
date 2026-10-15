@@ -41,7 +41,7 @@ import {samcOf, cdsSqlViews, cdsMappingError, rearrangedClass, inlineTableLocals
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
-import {copyValue, positionStmt} from "./tagged-copies.ts";
+
 import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
 import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sqlValue, SQL_OPS} from "./frontend-sql.mjs";
 
@@ -1310,7 +1310,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // a host loop (KERNEL): the statements up to its closing line are its body
     const k = kernelOf(child, ctx);
     if (k?.loop !== undefined) {
-      const pos = {file: /** @type {string} */ (ctx.file.getFilename().split("/").pop()), row: child.getFirstToken().getStart().getRow()};
+      /** @type {import("./ir.ts").Position} */ const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
       const j = children.findIndex((c, x) => x > i && kernelOf(c, ctx)?.end === true);
       const inner = children.slice(i + 1, j);
       const where = `${ctx.className}=>${ctx.method} (${pos.file}:${pos.row})`;
@@ -1340,12 +1340,12 @@ function compiledFunctionCall(node, ctx, text, name) {
     // becomes a stub that raises NOT_COMPILED when it runs, as a system
     // dumps; the rest of the method compiles, and nothing is skipped
     // silently: execution never passes the stub
-    const pos = {file: /** @type {string} */ (ctx.file.getFilename().split("/").pop()), row: child.getFirstToken().getStart().getRow()};
+    /** @type {import("./ir.ts").Position} */ const pos = {file: ctx.file.getFilename().split("/").pop(), row: child.getFirstToken().getStart().getRow()};
     try {
-      if (child instanceof Nodes.StructureNode) out.push(positionStmt(structure(child, ctx), pos));
+      if (child instanceof Nodes.StructureNode) out.push({...structure(child, ctx), pos});
       else if (child instanceof Nodes.StatementNode) {
         const s = statement(child, ctx);
-        if (s !== undefined) out.push(positionStmt(s, pos));
+        if (s !== undefined) out.push({...s, pos});
       }
     } catch (e) {
       if (!(e instanceof Unsupported)) throw e;
@@ -1521,7 +1521,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (derefLoop) {
       const ref = variable(derefLoop[1], ctx);
       if (ref.type.k !== "dref") throw new Unsupported(`LOOP AT ->* of a ${ref.type.k}`);
-      table = copyValue(ref, {type: {k: "data", table: true}});
+      table = {...ref, type: {k: "data", table: true}};
     } else table = sourceOperand(st.findFirstExpression(Expressions.LoopSource).getFirstChild().getFirstChild(), ctx);
     if (using !== null || dynamicUsing !== null) {
       if (table.type.k !== "table") throw new Unsupported(`LOOP ... USING KEY over a ${table.type.k}`);
@@ -1575,7 +1575,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       const nm = /<[\w]+>/.exec(lt.concatTokens())?.[0];
       if (nm === undefined || !ctx.fieldSymbols.has(upper(nm))) throw new Unsupported(`LOOP ASSIGNING ${lt.concatTokens()}`);
       fs = upper(nm);
-      if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
+      if (table.type.row.k === "struct") { /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
     } else {
       // (ultra/events) LOOP ... TRANSPORTING NO FIELDS and the like have no target
       if (!lt?.findFirstExpression(Expressions.Target)) throw new Unsupported(`LOOP form: ${text}`);
@@ -1602,7 +1602,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if ((using !== null || dynamicUsing !== null) && where?.some((w) => w.fx)) throw new Unsupported(`LOOP ... USING KEY with a WHERE on a component of another type or a nested one: ${text}`);
     const dynamicKeys = dynamicUsing === null ? null : {
       value: convert(variable(dynamicUsing[1], ctx), S),
-      options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => /** @type {import("./ir.ts").ResolvedKey} */ (secondaryKey(table.type, x.name, ctx, text))),
+      options: (table.type.secondary ?? []).filter((x) => x.sorted).map((x) => { /** @type {import("./ir.ts").ResolvedKey} */ const key = secondaryKey(table.type, x.name, ctx, text); return key; }),
     };
     // ultra/itab: the loop is known to its body, for DELETE itab (the
     // current row) inside it
@@ -1973,7 +1973,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const initial = /\bINITIAL\s+LINE\b/i.test(text);
     const valueNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     if (!initial && !valueNode) throw new Unsupported(`APPEND REFERENCE INTO form: ${text}`);
-    const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true;
+    /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true;
     return {s: "append", table, value: initial ? {e: "zero", type: table.type.row} : convert(source(valueNode, ctx, table.type.row), table.type.row), refInto};
   }
   // APPEND ASSIGNING gives the field symbol the new row's address.
@@ -1984,7 +1984,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (table.type.k !== "table") throw new Unsupported(`APPEND ... ASSIGNING to a ${table.type.k}`);
     refuseSorted(table, "APPEND to");
     if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && fsType.go !== table.type.row.go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
-    if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
+    if (table.type.row.k === "struct") { /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
     const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row), fs: fsName};
   }
@@ -2037,7 +2037,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (table.type.k === "data" && table.type.table && fsType?.k === "data") return {s: "append_initial_data", table, fs: fsName};
     if (table.type.k !== "table" || !fsType || fsType.k === "data" || !sameType(fsType, table.type.row)) throw new Unsupported(`APPEND form: ${text}`);
     refuseSorted(table, "APPEND to");
-    const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true;
+    /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true;
     return {s: "append", table, value: {e: "zero", type: table.type.row}, fs: fsName};
   }
   if (isStmt(node, Statements.Append)) {
@@ -2089,7 +2089,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (rt && /\bASSIGNING\b/i.test(rt.concatTokens())) {
       fs = upper(/<[\w]+>/.exec(rt.concatTokens())?.[0] ?? "");
       if (!ctx.fieldSymbols.has(fs)) throw new Unsupported(`READ TABLE ASSIGNING ${fs}`);
-      if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
+      if (table.type.row.k === "struct") { /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
     } else if (rt && /^TRANSPORTING\s+NO\s+FIELDS$/i.test(rt.concatTokens().trim())) {
       // only sy-subrc and sy-tabix
     } else if (rt) {
@@ -2099,7 +2099,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       refInto = /\bREFERENCE\s+INTO\b/i.test(rt.concatTokens());
       if (refInto) {
         if (into.type.k !== "dref") throw new Unsupported(`READ TABLE REFERENCE INTO a ${into.type.k}`);
-        const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true;
+        /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true;
       } else if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
     }
     // WITH [TABLE] KEY k COMPONENTS c = v ...: a secondary key's order (secondaryKey)
@@ -2162,7 +2162,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       const fsName = upper(/ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1] ?? "");
       if (!ctx.fieldSymbols.has(fsName)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}`);
       if (ctx.fieldSymbols.get(fsName).k !== "data" && !sameType(ctx.fieldSymbols.get(fsName), table.type.row)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}: typed unlike the rows`);
-      if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
+      if (table.type.row.k === "struct") { /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
       return {s: "read_index", table, index, fs: fsName};
     }
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
@@ -2370,7 +2370,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // NON-UNIQUE key goes is not measured): the row goes before the first
     // row with a greater key, not at all when one has the same key
     if (table.type.sorted) {
-      if (refInto) { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
+      if (refInto) { /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ const tableType = table.type; tableType.stable = true; }
       if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
       const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
@@ -2438,9 +2438,9 @@ function compiledFunctionCall(node, ctx, text, name) {
       const date = outputs.has("DATE") ? lvalue(outputs.get("DATE"), ctx) : null;
       const time = outputs.has("TIME") ? lvalue(outputs.get("TIME"), ctx) : null;
       if ((!date && !time) || (date && date.type.k !== "d") || (time && time.type.k !== "t")) throw new Unsupported(`CONVERT targets: ${text}`);
-      return {s: "native", fn: "abap.ConvertTimestampInto", stmt: true, args: [stamp, zone,
-        date ? convert(date, {k: "data"}) : /** @type {Extract<import("./ir.ts").Expr, {e: "zero"}>} */ ({e: "zero", type: {k: "data"}}),
-        time ? convert(time, {k: "data"}) : /** @type {Extract<import("./ir.ts").Expr, {e: "zero"}>} */ ({e: "zero", type: {k: "data"}})].map((value) => ({value}))};
+      /** @type {import("./frontend-types.ts").ValueExpr} */ const dateValue = date ? convert(date, {k: "data"}) : {e: "zero", type: {k: "data"}};
+      /** @type {import("./frontend-types.ts").ValueExpr} */ const timeValue = time ? convert(time, {k: "data"}) : {e: "zero", type: {k: "data"}};
+      return {s: "native", fn: "abap.ConvertTimestampInto", stmt: true, args: [stamp, zone, dateValue, timeValue].map((value) => ({value}))};
     }
     if (!inputs.has("DATE") || !inputs.has("TIME") || !outputs.has("STAMP")) throw new Unsupported(`CONVERT form: ${text}`);
     const stamp = lvalue(outputs.get("STAMP"), ctx);
@@ -2997,7 +2997,7 @@ const STRING_FNS = {
       if (off !== null) i += 1;
       const len = isExpr(kids[i], Expressions.FieldLength) ? offsetValue(kids[i], ctx) : null;
       if (i < kids.length - 1 || !["x", "c"].includes(place.type.k) || (place.type.k === "x" && !len)) throw new Unsupported(`write target ${target.concatTokens()}`);
-      return {e: "substr_target", base: place, off, len, type: place.type.k === "x" ? X(len.e === "int" ? len.value : /** @type {Extract<import("./ir.ts").Type, {k: "x"}>} */ (place.type).len) : S};
+      const placeType = place.type; return {e: "substr_target", base: place, off, len, type: placeType.k === "x" ? X(len.e === "int" ? len.value : placeType.len) : S};
     } else {
       throw new Unsupported(`target ${target.concatTokens()}`);
     }
@@ -3635,7 +3635,7 @@ function localInterfaceConstant(id, attr, local, reg) {
   }
   throw new Unsupported(`${c.kw} constructor expression`);
 }
-/** @param {import("@abaplint/core").IInterfaceDefinition | import("@abaplint/core").IClassDefinition} def @returns {readonly import("./frontend-types.ts").MethodDefinition[]} */ function methodDefinitions(def) { const all = def.getMethodDefinitions(); /** @type {Iterable<import("./frontend-types.ts").MethodDefinition>} */ const methods = Array.isArray(all) ? all : all.getAll(); return Array.from(methods); }
+/** @param {{getMethodDefinitions(): import("./frontend-types.ts").MethodDefinition[] | ReturnType<import("@abaplint/core").IInterfaceDefinition["getMethodDefinitions"]>}} def @returns {readonly import("./frontend-types.ts").MethodDefinition[]} */ function methodDefinitions(def) { const all = def.getMethodDefinitions(); /** @type {Iterable<import("./frontend-types.ts").MethodDefinition>} */ const methods = Array.isArray(all) ? all : all.getAll(); return Array.from(methods); }
 /**
  * The signature of a method of any class or interface of the registry, by
  * owner and name ("M", or "I~M" for an interface method). Cached; an
@@ -5593,7 +5593,7 @@ const FUNCTIONS = {
   // d / t into characters: the eight / six digits as they are (both are
   // held as their digits already); into a c they are cut or padded as any
   // characters are
-  if (to.k === "string" && (from.k === "d" || from.k === "t")) return copyValue(expr, {type: to});
+  if (to.k === "string" && (from.k === "d" || from.k === "t")) return {...expr, type: to};
   if (to.k === "c" && (from.k === "d" || from.k === "t")) return ok("s2c");
   // c -> n for a literal of exactly the field's digits only: the characters
   // are the value (anything else, blanks, signs, other lengths, is a
@@ -5603,7 +5603,7 @@ const FUNCTIONS = {
   // $ZOSG_TMP_0462). An n holds its digits, zeros included:
   // n -> string keeps them (0000000042), n -> c is a c move of them (into a
   // c 8: 00000000), n -> i and f read them as a number
-  if (from.k === "n" && to.k === "string") return copyValue(expr, {type: to});
+  if (from.k === "n" && to.k === "string") return {...expr, type: to};
   if (from.k === "n" && to.k === "c") return ok("s2c");
   if (from.k === "n" && numeric(to)) return ok("c2n");
   // i -> n: the sign dropped, the last digits kept, zeros in front (42 into
@@ -5627,7 +5627,7 @@ const FUNCTIONS = {
   // packed numbers (go/abap packed.go, A4H 2026-09-24, ZCL_GOGEN_T_PD*).
   // Into calculation type p: exact, nothing rounded yet
   if (to.k === "p" && to.calc) {
-    if (from.k === "p") return copyValue(expr, {type: to, fromP: from.calc ? expr.fromP : from});
+    if (from.k === "p") return {...expr, type: to, fromP: from.calc ? expr.fromP : from};
     if (from.k === "i" || from.k === "int8") return ok("i2pc");
     if (charlike(from)) return ok("c2pc");
     throw new Unsupported(`conversion ${from.k} -> calculation type p`);
@@ -5689,7 +5689,7 @@ const FUNCTIONS = {
   if ((to.k === "x" || to.k === "xstring") && charlike(from)) return ok("c2x");
   // x <-> xstring: the bytes; into x LENGTH n cut or padded right with 00
   if (to.k === "x" && (from.k === "xstring" || from.k === "x")) return ok("xs2x");
-  if (to.k === "xstring" && from.k === "x") return copyValue(expr, {type: to});
+  if (to.k === "xstring" && from.k === "x") return {...expr, type: to};
   // x / xstring -> i/int8: last four/eight bytes, zero-extended, then signed.
   // (A4H: FF gives 255; ultra/bytecmp 2026-09-24, ZCL_GOGEN_T_XMOVI:
   // FFFFFFFF -1, 80000000 -2147483648, 0100000002 2 for an x and an
