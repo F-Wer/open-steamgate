@@ -1,9 +1,11 @@
 import {children} from "./ir-children.ts";
+import {enumerateObjects, semanticQuery, withArtifact} from "./frontend-provenance.mjs";
 // Ownership is per declaration, never a change to an ABAP type or ABI.
 // Unknown/reference use positions conservatively retain string storage.
 export function sourceOwnershipSafety(reg) {
   const out = new Map();
-  for (const obj of reg.getObjects()) {
+  for (const obj of enumerateObjects(reg, "ownership-dispatch")) {
+    withArtifact({reg}, obj, () => {
     const names = new Set();
     let dynamic = false;
     for (const file of obj.getABAPFiles?.() ?? []) for (const st of file.getStatements()) {
@@ -16,6 +18,8 @@ export function sourceOwnershipSafety(reg) {
       }
     }
     out.set(obj.getName().toUpperCase(), {names, dynamic});
+    semanticQuery(reg, "ownershipSafety", [obj.getName().toUpperCase()], [obj.getName().toUpperCase()], {names: [...names], dynamic, providers: [`${obj.getType()} ${obj.getName().toUpperCase()}`], policy: "expanded-statements"});
+    }, "ownership-safety");
   }
   return out;
 }

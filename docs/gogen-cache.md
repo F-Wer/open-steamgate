@@ -2,7 +2,7 @@
 
 The disk object cache is opt-in through `compileProgram({cacheDir, ...})`.
 It persists portable class IR and an ordered transcript of program-state reads
-and effects. The registry still parses and checks normally. Step 1 retains the
+and effects. The registry still parses and checks normally. The cache retains the
 whole-registry version guard: an edit creates a new version and lowers every
 selected class. This is a correctness baseline, not selective reuse after edits.
 Reverting exactly to an earlier version can reuse that version's entries.
@@ -32,6 +32,227 @@ Nonportable graphs, nested mutations, corrupt entries and unavailable caches fal
 back to lowering. Final interfaces, RTTI, tables and other metadata are rebuilt.
 Neither source words nor lowering-time reads cover every semantic dependency.
 
+
+## Step 4a.1: scoped queries and registry freshness
+
+This branch implements query scoping and registry rebuilding. It **does not pass
+its recording-time acceptance budget**; recording remains opt-in. The global
+version guard, source-word/SCC keys and replay validation stay in force. No v3
+lookup, selective reuse, shadow key or cache-default change is implemented.
+
+`provenanceOf(program)` reports artifact dependencies. The separate
+`compilationProvenanceOf(program)` returns `{scheduling, finalOutput}` query
+arrays. Artifact-building rows/edges and entry-lowering rows/edges have separate
+roots. Reading a cached provider inherits its artifact-building provenance,
+including transitive DDIC reads, without inheriting whichever other class's
+lowering happened first. Public closure expansion remains an inspection operation.
+
+| Former scan site | Explicit contract and attribution |
+| --- | --- |
+| Supplied parameters | A fresh contribution index of selected implementations; consumers query `supplied(declaringOwner, method)`. Empty parameter answers remain queries with selected candidate providers. Redefinitions resolve to the original declaring class; interface implementations to the interface; expanded macro statements participate. The replayed `supplied` reads still guard the parameter set. |
+| Local definitions/interfaces | `locals(owner, includeTests)` belongs to the discovering owner. Results retain ordered qualified names and definition-owner identities; the shared graph stores their owner digests. The outer dispatch is scheduling. |
+| Group/class selection | Ordered `selected-groups` / `selected-classes` scheduling inventories. Class entries retain their actual replay-tracked `wanted` reads. Literal and expanded FM callers receive named ownership answers; gogen's index preserves last-wins enumeration, while core's semantic resolver retains first-match behavior. |
+| Locks before lowering | Descriptors build inside ENQU artifact contexts. Consumers query `lock(name)`, including `MISSING`, with ordered keys/fields and ENQU → TABL → DDIC edges. Discovery inventory is scheduling. |
+| Locks after lowering | Separate final-output inventory, rebuilt every compile, outside cached class dependencies. |
+| RTTI | Final-output inventory and per-owner type projections, rebuilt every compile; emitted bytes remain part of the oracle. |
+| Tables/views | Final-output table/view inventory; typing and row projection reads belong to each table/view artifact. SQL consumers retain their independent DDIC dependencies. |
+| Ownership | `ownershipSafety(owner)` records the owner's expanded statements and resulting safety projection. Source analysis is rebuilt or reused only with unchanged registry inputs. Cross-class IR ownership analysis still runs outside cached class IR. |
+
+Core's global-definition dispatch is scheduling. Its per-object update/resolution
+reads remain artifact dependencies. The INCLUDE candidate dispatch likewise
+schedules work; named parent/macro resolution remains attributed to its consumer.
+Unclassified scans still appear in `unknownScans` and remain globally guarded.
+
+Bookkeeping exclusions are explicit, audited purposes at named calls, with a
+local comment explaining why they perform no semantic resolution: session
+prepare/finalize, ordered input/cache inventories, digest inventories, and the
+recorder's final artifact-identity snapshot. Metadata assembly walks the shared
+recorded graph instead of querying registry inventories. There is no filename
+whitelist exempting frontend modules. A later unclassified iteration from the
+same module still records an unknown scan.
+
+### Requirements for Step 4 selective validation
+
+Dependency digests alone cannot invalidate every named query. Step 4 must save
+query specifications and re-evaluate them against the new registry, including
+negative and empty answers. In particular:
+
+- `supplied(ZBASE, WORK)` can answer `[]` with providers `[ZBASE, ZCHILD]`;
+  adding a redefinition that tests `IS SUPPLIED` changes that answer.
+- A new interface implementor changes the implementor query's candidate set.
+- Adding an ENQU changes `lock(EZLOCK)` from `MISSING` to a descriptor.
+- Adding a second FUGR with the same FM changes `function-module-owner` under
+  its last-wins enumeration rule.
+
+The newly added provider has no prior dependency digest to compare. Re-running
+the saved named query is required to discover the changed answer.
+
+Selection-dependent IR also requires replay validation for **complete** entries.
+The replay transcript's `wanted` reads guard not-compiled stubs; the supplied
+answer guards contributions from selected classes. Step 4 must evaluate
+`supplied` against the current selection and retain those replay checks even
+when all recorded dependency digests match.
+
+### Fresh-registry contract
+
+A lightweight parse-boundary observer remembers ordered effective inputs and
+config. `compileProgram({registry})` compares current sources, object/file
+inventory, file order, dependency roles and effective configuration against that
+boundary. A source/config/inventory/order edit rebuilds a new registry from the
+ordered effective inputs, with the same dependency roles and effective config,
+and clears retained session analyses before syntax/lowering. Re-parsing an
+edited old registry does not certify its cached consumers as fresh. A prebuilt
+registry without an observed boundary is rebuilt conservatively. The first
+observed parse also remains untrusted if artifacts already existed at entry;
+it cannot certify caches built before the frontend was imported. Folder mode
+already constructs a new registry.
+
+Unchanged supplied-registry/Unit/lexer closure rounds keep the same registry and
+session lowerings. Subsequent calls with the original supplied-registry handle
+reuse its replacement until the original effective inputs change again. Core
+synthesized files at compile completion become part of the completed boundary.
+The provider `TYPE i` → `TYPE int8` regression now resolves the retained
+consumer as **Integer8Type**, including when the caller reparses the old
+registry before compiling and when a session retains diagnostics/lowerings.
+
+### Compact storage and its remaining cost
+
+One ordered input snapshot is shared by freshness, tracing, cache inventories
+and digest ownership/raw hashes. Named rows are deduplicated before allocating
+repeated row objects; immutable artifact identities are memoized. Audited
+repository dispatches use explicit enumeration APIs. External core scan adapters
+still inspect direct call sites and preserve candidate order and early stopping.
+
+Recorded portable lowerings are compacted/validated and serialized **once** at
+the lowering seam. Final guards wrap those immutable bytes. A checksummed,
+content-addressed `.provenance` graph stores own artifact/lowering rows, edges
+and owner digests once per cache version/observation; entry metadata references
+its root using `gogen-dependency-digests-2`. No expanded dependency dictionaries
+are stored per class. Cache reads verify and hydrate that graph; the digest CLI
+expands dictionaries and recomputes completeness only for inspection. The graph
+reference is observational metadata, never a lookup key. Missing/corrupt graphs
+fall back to lowering. Recording-off entries retain the old data shape and no
+provenance metadata.
+
+### First-observed-parse fix round
+
+The dynamic-import regression builds and syntax-checks `ZIF_PROVIDER`,
+`ZIF_CONSUMER` and `ZREADER` before importing the frontend, then changes only
+provider `TYPE i` to `int8`, reparses and compiles the supplied registry. It
+fails without the fix: `RUN` retains `i` while fresh cold produces `int8` and a
+numeric conversion. With the fix the registry is rebuilt and the complete
+method IR equals fresh cold. The entry artifact check uses the existing input
+snapshot; it adds no snapshot work.
+
+Validation: all **240 frontend tests** pass in an isolated serial run (213 s),
+including all **20 query/freshness tests**. Both default and
+`GOGEN_PROVENANCE=1` CI-sized oracle runs pass **seven tests**, each with
+**62 observations / 60 validated mutations and zero mismatches**. Typing-proof
+against a new record from **`06bda3ab`** passes **239 byte-identical artifacts in
+each of six modes**; warm runs reuse 336 classes and lower 25. The initial
+parallel frontend run had one cache-control failure while other tests generated
+tool files; that control passes in isolation and in the full serial run.
+Changed-path size budget, explicit changed-file leak scan, suite registration
+and whitespace checks pass. The recording-time acceptance budget above remains
+**unmet**; this fix does not change that result.
+
+Recording-off recheck: five fresh-process samples per scenario/version, pinned
+CPUs 2–3, alternating version order, complete pinned open-abap-core + ajson.
+Frontend timing includes input loading through cache finalization; emission and
+digest inspection follow the timer. Medians in milliseconds:
+
+| Scenario | `06bda3ab` | Pre-fix `8c5707ec` | Fixed | Fix vs pre-fix |
+| --- | --- | --- | --- | --- |
+| No cache | 1,697.4 | 1,758.5 | 1,735.1 | −1.3% |
+| cacheDir cold | 2,293.3 | 2,207.3 | 2,267.0 | +2.7% |
+| cacheDir warm | 1,891.2 | 1,941.7 | 1,994.4 | +2.7% |
+
+The fix stays within ±3% of pre-fix HEAD in all three scenarios. Relative to
+Step 3 this batch is +2.2% / −1.1% / +5.5%; timings have large outliers (including
+a 3,806.9 ms fixed warm sample), so it does not establish a ±3% warm-path bound
+against Step 3. All **45 captures** have identical emitted-artifact/class-IR and
+resolved-digest hashes. Reports remain local in `.local/s4a1-fix-perf.json`.
+
+A focused follow-up uses seven fresh warm samples per version, each after a
+fresh cold prime, alternating Step 3/fixed order on pinned CPU 14. Warm medians
+are **2,532.0 / 2,557.4 ms (+1.0%)** against `06bda3ab`, within ±3%. All 28
+cold/warm captures have identical artifact/class-IR and resolved-digest hashes.
+This separate batch addresses the noisy warm-path comparison without discarding
+the first batch; `.local/s4a1-fix-warm.json` retains its measurements.
+
+### Step 4a.1 validation and acceptance result
+
+The ordinary artifact manifests have **zero remaining `unknownScans`** on all
+651 pinned open-abap-core + ajson objects and all 344 objects of the 300-control
+oracle corpus, in recorded uncached/cold/warm runs. There are no residual sites
+to list for these corpora. Deliberately unknown loops and unobserved/untraced
+artifacts still produce markers in their negative tests. Prebuilt registries
+whose parsing predates observation can require a conservative rebuild; unchanged
+registries first compiled without recording retain explicit recording-gap markers
+when recording is later enabled.
+
+- The complete frontend command passes **238 tests**, zero failures/skips, on
+  an isolated final source snapshot; the final query/freshness recheck passes
+  **19 tests**, including the additional prebuilt procedural-registry case.
+- Default and `GOGEN_PROVENANCE=1` CI-sized oracle commands each pass all **seven
+  tests**: **62 observations / 60 validated mutations, zero mismatches**, both
+  line modes. The no-version negative controls retain their expected mismatches.
+- The full 27-kind sensitivity matrix is unchanged: **14 covered rows / 28
+  expected mismatches**, with **13 documented coverage limits**.
+- Typing-proof against the pre-edit `5f92e082` record passes **239 raw artifacts
+  in each of six modes**, without normalization. Warm processes reuse 336
+  classes and lower 25 in both sink modes. The final exact-source recheck agrees.
+- The hook sweep kills **40 of 48** mutations. Six getters retain documented
+  alternative provider edges; the two retained-edit marker mutations are
+  defensive fallbacks superseded by fresh-registry rebuilding. Every survivor
+  has an explicit reason; unknown-scan and recording-gap controls are killed.
+- Changed-path size budget (`--changed origin/main`), suite registration,
+  whitespace and the staged-file leak scan exit zero. `frontend.mjs` is **7,047
+  lines**, below its unchanged 7,055-line budget. The unrelated `go:charsearch`
+  main-branch breach is still reported separately, not waived for this change.
+
+Three fresh Node 26.9.0 processes per scenario/setting, medians, complete
+pinned open-abap-core + ajson, all real classes selected. The Step 3 reference is
+an isolated source copy of `5f92e082` with recording off. Both runs use RAM
+scratch and the shared Go build cache; loading, normalization, parse, syntax,
+lowering/replay and cache finalization are timed. Emission, public manifest
+expansion and full diagnostic digest inspection occur after the frontend timer.
+
+| Scenario | Step 3, recording off | Candidate, recording on | Added cost | Budget | Result |
+| --- | --- | --- | --- | --- | --- |
+| No cache | 1,562.7 ms | 1,928.8 ms | +23.4% | +5% | FAIL |
+| cacheDir cold | 2,038.0 ms | 2,686.1 ms | +31.8% | +25% | FAIL |
+| cacheDir warm | 1,721.1 ms | 2,114.7 ms | +22.9% | +10% | FAIL |
+| Cache file bytes | 531,433 | 812,536 | 1.529x | 1.500x | FAIL |
+
+Candidate recording-off medians are 1,625.6 / 2,018.6 / 1,769.6 ms
+(no-cache/cold/warm). All **36** reference/candidate captures share identical
+emitted-artifact/class-IR and fully inspected resolved-digest hashes. Cold and
+uncached runs lower 272 classes; warm runs reuse 251 and lower 21, with zero
+diagnostics. Recording storage is down from the Step 3 recorded 6,550,282 bytes
+to 812,536 bytes, but still exceeds the requested recording-off baseline budget.
+
+The focused CPU profiles start after module imports and stop immediately after
+compilation, before emission and public inspection. They are sampling diagnostics,
+not additional acceptance timing runs. Query recording/hooks/indexes account for
+167 ms of uncached self samples and 192 ms cold; ordered snapshots account for
+25 / 38 ms. Cold digest projection contributes 258 ms of self samples, and
+cache/replay/serialization 209 ms. GC contributes 94 / 123 ms. The rest is chiefly
+parser, syntax and lowering work; profiler overhead is reported separately.
+
+The recording-time gate remains **FAIL**. Further work needs a cheaper observation
+path (for example, core artifact/resolver callbacks plus interned query/owner IDs)
+and cheaper input-snapshot comparison; another closure-format-only change cannot
+remove all measured hook/index/digest costs. Two options remain: keep this
+foundation opt-in for review, or continue a dedicated Step 4a.1 recording-cost
+follow-up before starting 4a.2. Neither option permits weakening completeness
+checks or enabling selective/default lookup on this branch.
+
+Local reports: `.local/step4a1-perf-base-recheck.json`,
+`.local/step4a1-perf-measured.json`, `.local/step4a1-budget.json`,
+`.local/step4a1-oracle-inventory.json`,
+`.local/step4a1-profile-summary.json`, `.local/step4a1-compile-{none,cold}.cpuprofile`,
+`.local/step4a1-sensitivity.json`, and `.local/step4a1-hook-sensitivity.json`.
 
 ## Resolved-artifact digests (step 3)
 
@@ -84,28 +305,23 @@ members are represented only by superclass name, and an exception superclass is
 also a symbolic edge. These external semantics are covered only by provenance
 dependencies: step 4 must key on dependency digests as well as the fingerprint.
 
-Resetting the digest memo does not repair parser artifacts in a retained registry.
-A provider TYPE edit left its consumer's IntegerType in a retained registry;
-a fresh registry resolved Integer8Type. Step 4 must use a fresh registry after
-edits. Core also does not resolve READ-ONLY on DATA attributes: only the tokens
+Resetting the digest memo alone does not repair retained parser artifacts.
+Step 4a.1 now rebuilds edited supplied registries before lowering, repairing the
+provider TYPE edit that previously left a consumer at IntegerType instead of
+Integer8Type. The historical Step 3 measurements below predate that rule. Core also does not resolve READ-ONLY on DATA attributes: only the tokens
 and raw-source hash carry it. Step 6 must account for that resolution boundary.
 
 
-Disk builds record `gogen-dependency-digests-1` metadata only with provenance
-recording (`GOGEN_PROVENANCE=1` / `provenance: true`, or an explicit enclosing
-`recordProvenance` session). Explicit `provenance: false` overrides the environment.
-Metadata contains the owner/entry name, owner digest, a sorted
-`dependencyDigests` dictionary from the final expanded manifest's **hits**, and
-`provenanceComplete`. Filename hits map back to their owning artifact. These
-opt-in diagnostic reads request digests on demand as well; dense manifests can
-request most of the registry. Writes wait until final metadata passes and freeze
-the lowering snapshot so later mutations cannot change it. Without recording,
-writes persist immediately without cloning, provenance hooks or dependency
-metadata. Metadata is **not in the key or a replacement for miss/scan guards**.
-Unknown scans or unavailable digests make completeness false. Inspection labels
-entries without metadata unavailable, including entries built with recording off.
-Enabling recording while reusing such an entry retains the explicit
-`lowering-built-before-recording` marker; it does not invent a transcript.
+Recorded disk builds now use the shared `gogen-dependency-digests-2` graph
+outlined above; explicit `provenance: false` still overrides the environment.
+The historical Step 3 format stored a sorted, expanded `dependencyDigests`
+dictionary per entry. Inspection preserves that view by expanding shared graph
+roots and recomputing `provenanceComplete`. Both formats are diagnostic metadata,
+**outside lookup keys**. Unsupported digests and unknown/untraced observations
+remain incomplete. Recorded replay of an entry built with recording off retains
+`lowering-built-before-recording`; it does not invent a transcript. Recording-off
+entries still persist immediately without provenance metadata. Recorded entries
+freeze serialized lowering bytes before finalized graph guards are available.
 
 ```sh
 # All current artifact digests, or one artifact (no cache needed).
@@ -268,7 +484,7 @@ remains **7,055 lines**. The budget command also reports the existing unrelated
 Reports are local: `.local/digest-lazy-parent-perf-final.json`,
 `.local/digest-lazy-perf-final.json`, and `.local/digest-lazy-profile-{off,on}.json`.
 
-## Semantic provenance (step 2)
+## Semantic provenance (historical step 2)
 
 `compileProgram({provenance: true, ...})` records semantic resolution before
 `reg.parse()`, through global definition passes, syntax checking and lowering.
@@ -742,5 +958,7 @@ does not prove that an incomplete dependency manifest is safe.
    Test retained registries against fresh cold after multi-edit/inventory/config
    sequences; narrow body/interface hashes only after dedicated cases pass.
 
-Steps 4–6 remain plans. Steps 2–3 add provenance, resolved digests and stronger
-replay guards; they implement no selective reuse across registry versions.
+Step 4a.1 query scoping and registry rebuilding are implemented on this branch;
+its recording-time budget remains unmet. Step 4a.2 shadow keys, Step 4b flagged
+selective lookup and Step 4c default recording/lookup remain plans. Steps 2–3
+and this branch implement no selective reuse across registry versions.

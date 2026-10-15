@@ -1,3 +1,6 @@
+import {inputOrigin} from "./frontend-inventory.mjs";
+import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection} from "./frontend-queries.mjs";
+import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
 import {isSourceIdentity, readdirSync, readFileSync} from "./host-io-compat.mjs";
@@ -120,6 +123,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
   const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
+  beginProvenanceCompile(reg);
   // Load every file for resolution; lower and report diagnostics for selected objects.
   const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
   let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
@@ -152,7 +156,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   const diskFrontend = cacheDir ? require("./frontend-object-cache.mjs") : undefined;
   if (diskFrontend) {
     session = diskFrontend.cacheSession(session, reg, cacheDir);
-    diskFrontend.prepareDiskSession(session, reg);
+    auditedBookkeeping("session-prepare", () => diskFrontend.prepareDiskSession(session, reg)); // Input guards only.
   } else {
     if (session?.disk) {
       session.classes.clear();
@@ -160,7 +164,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
       delete session.diskRoot;
       delete session.cacheDir;
     }
-    prepareSession(session, reg);
+    auditedBookkeeping("session-prepare", () => prepareSession(session, reg)); // Input guards only.
   }
   const compile = diskFrontend ? diskFrontend.compileDiskClass : compileClass;
   // abaplint's RAISE syntax checker only accepts ObjectReferenceType, not
@@ -176,7 +180,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   // A literal CALL FUNCTION is a dependency on its function group. The
   // registry already knows each module's group; include it before signatures
   // are built, including calls made by a module in another group.
-  expandProgramSelection(reg, wanted, abaplint);
+  withRole("scheduling", () => expandProgramSelection(reg, wanted, abaplint));
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
@@ -186,7 +190,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
     diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   if (PERSIST_LOWERING) Object.assign(program, {faeN: 0, localDefs: new Map()});
   if (PERSIST_LOWERING) PROGRAM = program;
-  program.supplied = suppliedParams(reg, program.wanted);
+  program.supplied = suppliedIndex(reg, program.wanted, abaplint, suppliedMethods, declaringClass);
   PROGRAM = program;
   const ctx0 = {reg, program};
   // the local classes of the owners that have them compiled (LOCAL_CLASSES),
@@ -196,8 +200,8 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   program.localInterfaces = new Map();
   LOCAL_DEFS.clear();
   const localDefs = [];
-  for (const obj of reg.getObjects()) {
-    if (!(obj instanceof abaplint.Objects.Class) || !wanted.includes(obj.getName().toLowerCase()) || (!includeTests && !LOCAL_CLASSES.has(upper(obj.getName())))) continue;
+  for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && wanted.includes(o.getName().toLowerCase()) && (includeTests || LOCAL_CLASSES.has(upper(o.getName()))))) {
+    localDiscovery(reg, obj, includeTests === true || includeTests?.has?.(upper(obj.getName())), () => {
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
       const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
       for (const file of obj.getABAPFiles()) {
@@ -214,13 +218,14 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
       (PERSIST_LOWERING ? program.localDefs : LOCAL_DEFS).set(l.name, l.def);
       localDefs.push(l);
     }
+    return {names: [...program.localInterfaces.keys(), ...program.locals.values()].filter((k) => k.startsWith(`${upper(obj.getName())}|`) || k.startsWith(`${upper(obj.getName())}:`)), value: undefined}; });
   }
   // parity-wave1: the function groups named are compiled too, one pseudo
   // class FUGR:<group> per group with a static method per module; their
   // signatures are known before any class compiles, so a CALL FUNCTION of
   // one of their modules is a call (functionGroupSignatures, callFunction)
   program.functionModules = new Map();
-  const groups = [...reg.getObjects()].filter((o) => o instanceof abaplint.Objects.FunctionGroup && wanted.includes(o.getName().toLowerCase()));
+  const groups = enumerateObjects(reg, "selected-groups", wanted, "scheduling", (o) => o instanceof abaplint.Objects.FunctionGroup && wanted.includes(o.getName().toLowerCase()));
   // a group the front end cannot even read (an error that is not a refusal)
   // is left out whole, named in skipped, and its modules stay refused
   const readable = groups.filter((g) => {
@@ -238,15 +243,13 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
     PROGRAM = ctx.program; // Global type helpers must use the tracked program too.
     try { return classIr(ctx, obj); } finally { PROGRAM = saved; }
   };
-  for (const obj of reg.getObjects()) {
-    if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(compile(ctx0, obj, lowerClass, session));
-  }
+  for (const obj of enumerateObjects(reg, "selected-classes", wanted, "scheduling", (o) => o instanceof abaplint.Objects.Class && wanted.includes(o.getName().toLowerCase()))) program.classes.push(compile(ctx0, obj, lowerClass, session));
   for (const l of localDefs) program.classes.push(compile(ctx0, l, lowerClass, session));
   for (const g of readable) program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
   program.interfaceMethods = new Map();
-  const ictx = {reg, program};
+  withRole("final-output", () => { const ictx = {reg, program};
   let pending = [...program.interfaces];
   while (pending.length > 0) {
     for (const name of pending) {
@@ -264,14 +267,15 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
     }
     pending = [...program.interfaces].filter((n) => !program.interfaceMethods.has(n));
   }
-  program.rtti = rttiTable(reg, program);
-  program.exceptionSupers = exceptionSupers(reg, program);
-  program.cdsViews = cdsViewsByRegistry.get(reg) ?? {};
-  program.tables = tableRegistry(reg, program);
-  program.lockObjects = lockObjectRegistry(reg, program);
-  finishSession(session, reg);
-  session?.disk?.finish(program);
-  return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg)});
+  });
+  program.rtti = finalOutput(reg, "rtti", () => rttiTable(reg, program));
+  program.exceptionSupers = finalOutput(reg, "exception-supers", () => exceptionSupers(reg, program));
+  program.cdsViews = cdsViewsByRegistry.get(reg) ?? cdsViewsByRegistry.get(inputOrigin(reg)) ?? {};
+  program.tables = finalOutput(reg, "tables", () => tableRegistry(reg, program));
+  program.lockObjects = finalOutput(reg, "locks", () => lockObjectRegistry(reg, program, "final-output"));
+  auditedBookkeeping("session-finalize", () => finishSession(session, reg)); // File guards, no resolution.
+  Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg)});
+  session?.disk?.finish(program); return program;
 });
 
 /**
@@ -313,13 +317,13 @@ export function tableRegistry(reg, program) {
   program.currentClass = undefined;
   program.currentTypes = undefined;
   try {
-    for (const obj of reg.getObjects()) {
+    for (const obj of enumerateObjects(reg, "table-inventory", [], "final-output", (o) => o instanceof abaplint.Objects.Table || o instanceof abaplint.Objects.View)) {
       const view = obj instanceof abaplint.Objects.View;
       if (!(obj instanceof abaplint.Objects.Table) && !view) continue;
-      const name = upper(obj.getName());
+      withArtifact({reg}, obj, () => { const name = upper(obj.getName());
       let st;
-      try { st = obj.parseType(reg); } catch { continue; }
-      if (!(st instanceof BasicTypes.StructureType)) continue;
+      try { st = obj.parseType(reg); } catch { return; }
+      if (!(st instanceof BasicTypes.StructureType)) return;
       let key = [];
       try { key = view ? [] : (obj.listKeys?.(reg) ?? []).map(upper); } catch { key = []; }
       const columns = st.getComponents().map((c) => {
@@ -358,7 +362,7 @@ export function tableRegistry(reg, program) {
         delete entry.row;
         entry.why = e.message;
       }
-      out.push(entry);
+      out.push(entry); }, "table-output");
     }
   } finally {
     [program.currentClass, program.currentTypes] = saved;
@@ -370,14 +374,14 @@ export function tableRegistry(reg, program) {
 }
 
 /** each ENQU object's primary table, keyed by the object name */
-export function lockObjectRegistry(reg, program) {
+export function lockObjectRegistry(reg, program, role = "scheduling") {
   const out = new Map();
-  for (const obj of reg.getObjects()) {
-    if (!(obj instanceof abaplint.Objects.LockObject)) continue;
+  for (const obj of enumerateObjects(reg, "lock-inventory", [], role, (o) => o instanceof abaplint.Objects.LockObject)) {
+    withArtifact({reg}, obj, () => {
     const name = upper(obj.getName());
     const table = upper(obj.getPrimaryTable() ?? "");
     const tableObject = reg.getObject("TABL", table);
-    if (tableObject === undefined) continue;
+    if (tableObject === undefined) return;
     try {
       const key = (tableObject.listKeys?.(reg) ?? []).map(upper);
       const structure = tableObject.parseType(reg);
@@ -396,6 +400,7 @@ export function lockObjectRegistry(reg, program) {
       if (e instanceof Unsupported) throw e;
       // an unreadable table is named by the call's normal dictionary refusal
     }
+    }, "lock-descriptor");
   }
   return out;
 }
@@ -415,7 +420,7 @@ function rttiTable(reg, program) {
     structs.set(name, t.getComponents().map((c) => ({name: upper(c.name), kind: typeKindOf(c.type)})));
   };
   const known = new Set();
-  for (const obj of reg.getObjects()) {
+  for (const obj of enumerateObjects(reg, "rtti-inventory", [], "final-output")) {
     const n = upper(obj.getName());
     if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
     try {
@@ -430,6 +435,7 @@ function rttiTable(reg, program) {
         }
       }
     } catch { /* a type abaplint cannot resolve is simply not described */ }
+    rttiProjection(reg, obj, () => [[...known].filter((k) => k === n || k.startsWith(`${n}=>`)), [...structs].filter(([k]) => k === n || k.startsWith(`${n}=>`))]);
   }
   return {structs, known};
 }
@@ -486,29 +492,15 @@ function suppliedMethods(file) {
   // bring the IS SUPPLIED in (#694 critic)
   for (const m of file.getStructure()?.findAllStructures(Structures.Method) ?? []) {
     const found = [...m.concatTokens().matchAll(/(\w+)\s+IS\s+(?:NOT\s+)?SUPPLIED/gi)].map((x) => upper(x[1]));
-    if (found.length) methods.push({name: upper(m.findFirstExpression(Expressions.MethodName).concatTokens()), found});
+    methods.push({name: upper(m.findFirstExpression(Expressions.MethodName).concatTokens()), found});
   }
   suppliedOfFile.set(file, methods);
   return methods;
 }
 
-function suppliedParams(reg, wanted) {
-  const out = new Map();
-  for (const obj of reg.getObjects()) {
-    if (!(obj instanceof abaplint.Objects.Class) || !wanted.has(upper(obj.getName()))) continue;
-    const file = obj.getMainABAPFile();
-    for (const {name, found} of file ? suppliedMethods(file) : []) {
-      const key = name.includes("~") ? `${name.split("~")[0]}=>${name.split("~")[1]}`
-        : `${declaringClass(reg, upper(obj.getName()), name, "method") ?? upper(obj.getName())}=>${name}`;
-      out.set(key, new Set([...(out.get(key) ?? []), ...found]));
-    }
-  }
-  return out;
-}
-
 /** the hidden SUP_<p> parameters of a method, after its own */
 function withSupplied(program, key, params) {
-  const set = program.supplied?.get(key);
+  const set = suppliedAnswer(program, key);
   if (!set) return params;
   const hidden = params.filter((p) => set.has(p.name)).map((p) => ({name: `SUP_${p.name}`, dir: "importing", byValue: true, type: C(1), optional: true, suppliedOf: p.name}));
   return [...params, ...hidden];
@@ -1097,7 +1089,7 @@ function lockFunctionCall(node, ctx, text, name) {
     return {s: "call_enq", kind: "all", name, args: []};
   }
   const object = name.replace(/^(?:ENQUEUE|DEQUEUE)_/, "");
-  const lock = ctx.program.lockObjects?.get(object);
+  const lock = lockAnswer(ctx, object);
   if (lock === undefined) return undefined;
   const params = new Set(["MANDT", "CLIENT", "_SCOPE", "_WAIT", "_COLLECT", `MODE_${lock.table}`]);
   for (const key of lock.key) {
@@ -4446,7 +4438,7 @@ function constructor(c, ctx, inferred) {
  */
 function methodSignature(ctx, owner, name) {
   const key = `${owner}=>${name}`;
-  if (ctx.program.sigs.has(key)) return ctx.program.sigs.get(key);
+  if (ctx.program.sigs.has(key)) return suppliedSignature(ctx, owner, name, ctx.program.sigs.get(key));
   if (NATIVE_ME.has(key)) { ctx.program.sigs.set(key, nativeMeSig(ctx.program, key, name)); return ctx.program.sigs.get(key); }
   let sig;
   try {
