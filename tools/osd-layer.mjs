@@ -1,7 +1,7 @@
 import {validatePack} from "./osd-layer-pack.mjs";
 // Reproducible abapGit layers and ordered OCI systems (docs/oci-layers.md).
 import {execFileSync, spawnSync} from "node:child_process";
-import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync} from "node:fs";
+import {existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync} from "node:fs";
 import {fileURLToPath} from "node:url";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, resolve} from "node:path";
@@ -80,6 +80,7 @@ export function build(folder, {name, kind, source} = {}) {
  */
 export function readLeakAllow(file) {
   let raw;
+  try { if (statSync(file).size > 1024 * 1024) fail("BAD_ALLOW", `${file}: larger than 1 MiB`); } catch (error) { if (error.code === "BAD_ALLOW") throw error; }
   try { raw = JSON.parse(readFileSync(file, "utf8")); } catch (error) { fail("BAD_ALLOW", `${file}: not readable JSON (${error.name})`); }
   const allow = raw?.allow;
   if (!Array.isArray(allow)) fail("BAD_ALLOW", `${file}: expected {"allow": [...]}`);
@@ -87,15 +88,16 @@ export function readLeakAllow(file) {
     for (const key of ["file", "value", "reason"]) {
       if (typeof entry?.[key] !== "string" || !entry[key].trim()) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty ${key}`);
     }
+    if (entry.layer !== undefined && (typeof entry.layer !== "string" || !entry.layer.trim())) fail("BAD_ALLOW", `${file}: entry ${i} has an empty layer`);
   }
   return allow;
 }
 
 /** Scan the exact publishable tree and metadata, before the first write. */
-export function leakGate(trees, metadata, documents = [], allow = []) {
+export function leakGate(trees, metadata, documents = [], allow = [], layerNames = []) {
   const temp = mkdtempSync(join(tmpdir(), "osd-layer-scan-"));
   try {
-    const paths = [], archivePaths = [], labels = new Map();
+    const paths = [], archivePaths = [], labels = new Map(), archive = [];
     mkdirSync(join(temp, "content"));
     const content = (bytes, label) => {
       if (bytes.length > MAX_SCAN_BYTES) fail("LEAK", `publish refused: ${label} exceeds scanner size limit (${MAX_SCAN_BYTES} bytes)`);
@@ -104,11 +106,14 @@ export function leakGate(trees, metadata, documents = [], allow = []) {
       paths.push(file);
       labels.set(`content/${basename(file)}`, label);
     };
-    for (const files of trees) {
+    for (const [i, files] of trees.entries()) {
       for (const {path, bytes} of files) {
         // the scanner refuses captures by name, which the neutral names below would hide
         if (CAPTURE.test(path)) fail("LEAK", `publish refused: ${path} is a capture file (*.pcap, *.pcapng, *.jsonl are never published)`);
         content(bytes, path);
+        // recorded here, not inferred from labels: an archive file may be
+        // called "OCI metadata", and its exception must not reach the documents
+        archive.push({name: `content/${basename(paths.at(-1))}`, path, layer: layerNames[i]});
         archivePaths.push(path);
       }
     }
@@ -122,12 +127,11 @@ export function leakGate(trees, metadata, documents = [], allow = []) {
     }
     // An entry naming a path the layer does not have is refused, not ignored:
     // a stale exception is how an allow list stops meaning anything.
-    // Only archive paths: the metadata documents are ours, not the layer's.
-    const archive = new Set(archivePaths);
-    const scanned = [...labels].map(([name, label]) => ({name, label})).filter(({label}) => archive.has(label));
+    // Only archive files: the metadata documents are ours, not the layer's. An
+    // entry with a `layer` applies to that layer of a system only.
     const translated = allow.flatMap((entry) => {
-      const hits = scanned.filter(({label}) => label === entry.file);
-      if (!hits.length) fail("BAD_ALLOW", `allow entry for ${entry.file}: no such file in the layer`);
+      const hits = archive.filter(({path, layer}) => path === entry.file && (entry.layer === undefined || layer === entry.layer));
+      if (!hits.length) fail("BAD_ALLOW", `allow entry for ${entry.layer ? `${entry.layer}:` : ""}${entry.file}: no such file in the layer`);
       return hits.map(({name}) => ({file: name, value: entry.value, reason: entry.reason}));
     });
     if (translated.length) writeFileSync(join(temp, ".leak-allow.json"), JSON.stringify({allow: translated}));
@@ -196,7 +200,7 @@ export async function pushSystem(target, refs, options = {}) {
       annotations: {[NAME]: layer.config.name, [KIND]: layer.config.kind, [ORDER]: String(i)}})),
     annotations: systemAnnotations(options.root ?? process.env.OSD_ROOT ?? process.cwd())};
   leakGate(layers.map((l) => l.files), {destination: target, index, layers: layers.map(({layer}) => ({manifest: layer.manifest.json, config: layer.config}))},
-    [jsonBytes(index), ...layers.flatMap(({layer}) => [layer.configBytes, layer.manifest.bytes])], options.allow);
+    [jsonBytes(index), ...layers.flatMap(({layer}) => [layer.configBytes, layer.manifest.bytes])], options.allow, layers.map(({layer}) => layer.config.name));
   const c = client(target, {...options, push: true});
   for (const {ref, layer} of layers) {
     const src = parseRef(ref);
@@ -236,7 +240,7 @@ export async function main(args) {
   if (command === "system" && rest[0] === "push") {
     const refs = [], options = {};
     for (let i = 1; i < rest.length; i++) {
-      if (rest[i] === "--leak-allow" && rest[i + 1]) options.allow = readLeakAllow(rest[++i]);
+      if (rest[i] === "--leak-allow" && rest[i + 1] && !rest[i + 1].startsWith("--")) (options.allow ??= []).push(...readLeakAllow(rest[++i]));
       else if (rest[i].startsWith("--")) fail("USAGE", `invalid option ${rest[i]}`);
       else refs.push(rest[i]);
     }
@@ -250,7 +254,8 @@ export async function main(args) {
     if (rest[i].startsWith("--")) {
       const key = rest[i].slice(2);
       if (!["name", "kind", "source", "out", "leak-allow"].includes(key) || !rest[i + 1] || rest[i + 1].startsWith("--")) fail("USAGE", `invalid option ${rest[i]}`);
-      options[key] = rest[++i];
+      if (key === "leak-allow") (options.allow ??= []).push(...readLeakAllow(rest[++i]));
+      else options[key] = rest[++i];
     } else positionals.push(rest[i]);
   }
   if (positionals.length !== (command === "push" ? 2 : 1)) fail("USAGE", "expected a folder (and a destination for push)");
@@ -262,7 +267,7 @@ export async function main(args) {
     console.log(`treeDigest ${layer.config.treeDigest}\nmanifest ${layer.digest}`);
   } else {
     leakGate([layer.files], {destination: positionals[0], config: layer.config, manifest: layer.manifest}, [layer.configBytes, layer.manifestBytes],
-      options["leak-allow"] ? readLeakAllow(options["leak-allow"]) : []);
+      options.allow, [layer.config.name]);
     const digest = await push(positionals[0], layer);
     console.log(formatRef({...parseRef(positionals[0]), digest}));
   }

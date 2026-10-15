@@ -71,8 +71,10 @@ A layer brings its own exceptions instead: `osd-layer push … --leak-allow
 <file>` and `osd-layer system push … --leak-allow <file>` take a file in the
 format of `.leak-allow.json` whose `file` is the path inside the layer archive.
 Every entry needs a reason, applies to that archive path and value only, and an
-entry naming a path the layer does not have (or the metadata documents) is
-refused rather than ignored. The file belongs in the layer's own repository,
+entry naming a path the layer does not have is refused rather than ignored. An
+entry may add `layer` (the layer's name) to apply to that layer of a system
+only. The flag repeats, and the metadata documents are never covered, whatever
+an archive file is called. The file belongs in the layer's own repository,
 where it is reviewed; abapiti's rules layers use it for a GUID and a hex ID
 that are literals of abaplint's own public tests.
 

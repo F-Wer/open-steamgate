@@ -283,6 +283,26 @@ describe("osd-layer: reproducible publishing", function () {
     }
   });
 
+  it("never lets an archive file's exception reach the metadata documents, whatever it is called", () => {
+    const hit = Buffer.from("forbidden_publish_identifier");
+    for (const name of ["OCI metadata", "paths.txt", "meta.json"]) {
+      const allow = [{file: name, value: "forbidden_publish_identifier", reason: "r"}];
+      expect(() => leakGate([[{path: name, bytes: hit}]], {}, [], allow)).not.to.throw();
+      // the same value in a raw config document (a duplicate key parsing would drop) stays refused
+      expect(() => leakGate([[{path: name, bytes: Buffer.from("safe")}]], {}, [Buffer.from('{"name":"forbidden_publish_identifier","name":"smoke"}')], allow))
+        .to.throw(/publish refused/);
+    }
+  });
+
+  it("scopes an entry with a layer to that layer of a system", () => {
+    const hit = Buffer.from("forbidden_publish_identifier");
+    const trees = [[{path: "src/v.clas.abap", bytes: hit}], [{path: "src/v.clas.abap", bytes: hit}]];
+    const entry = {file: "src/v.clas.abap", value: "forbidden_publish_identifier", reason: "r"};
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "two"])).to.throw(/publish refused/);
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}, {...entry, layer: "two"}], ["one", "two"])).not.to.throw();
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "three"}], ["one", "two"])).to.throw(/BAD_ALLOW|no such file/);
+  });
+
   it("reads an allow file only with a reason on every entry", () => {
     const file = join(root, "allow.json");
     writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", value: "v"}]}));
@@ -291,6 +311,10 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => readLeakAllow(file)).to.throw(/allow/);
     writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", value: "v", reason: "upstream vector"}]}));
     expect(readLeakAllow(file)).to.have.length(1);
+    writeFileSync(file, JSON.stringify({allow: [{file: "a", value: "v", reason: "r", layer: ""}]}));
+    expect(() => readLeakAllow(file)).to.throw(/layer/);
+    writeFileSync(file, " ".repeat(1024 * 1024 + 1));
+    expect(() => readLeakAllow(file)).to.throw(/1 MiB/);
   });
 
   it("refuses oversized content instead of skipping it", () => {
