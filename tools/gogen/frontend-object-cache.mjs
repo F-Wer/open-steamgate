@@ -11,29 +11,33 @@ import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {dependencyGraph} from "./frontend-provenance-metadata.mjs";
 import {inputSnapshot} from "./frontend-inventory.mjs";
 import {sourceKeys} from "./frontend-source-key.mjs";
+import {shadowCache, borrowedOwners} from "./frontend-v3-shadow.mjs";
+import {hashV3, graphRawFiles} from "./frontend-v3-key.mjs";
 
 const here = import.meta.dirname, home = resolve(here, "../..");
 const automatic = new WeakMap();
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const walk = (dir) => readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
-let identity;
-export function toolIdentity() {
-  if (identity) return identity;
+const identities = new Map();
+export function toolIdentity(sourceIndependent = false) {
+  if (identities.has(sourceIndependent)) return identities.get(sourceIndependent);
   const hash = createHash("sha256").update("gogen-object-cache-2");
   // Actual tool sources, locks and installed builds define the compiler.
   // Repository commits (including docs-only ones) do not change its identity.
   for (const file of walk(join(home, "tools")).filter((f) => /\.(mjs|ts|cjs|json)$/.test(f))) {
     hash.update(file.slice(home.length)); hash.update(readFileSync(file));
   }
-  for (const name of ["package-lock.json", "libs.lock.json"]) if (existsSync(join(home, name))) hash.update(readFileSync(join(home, name)));
+  // Library source pins are guarded by per-artifact digests in v3. They remain
+  // part of the production whole-registry tool/version identity.
+  for (const name of sourceIndependent ? ["package-lock.json"] : ["package-lock.json", "libs.lock.json"]) if (existsSync(join(home, name))) hash.update(readFileSync(join(home, name)));
   const require = createRequire(import.meta.url);
   const tr = require.resolve("@abaplint/transpiler/package.json");
   for (const path of [tr, createRequire(tr).resolve("@abaplint/core/package.json")]) {
     hash.update(readFileSync(path));
     for (const file of walk(join(path, "..", "build"))) { hash.update(file.slice(path.length)); hash.update(readFileSync(file)); }
   }
-  return identity = hash.digest("hex");
+  const identity = hash.digest("hex"); identities.set(sourceIndependent, identity); return identity;
 }
 
 // Preserve only data that can be replayed against a different registry. In
@@ -168,6 +172,8 @@ export function objectCache(registry, root) {
   const version = digest(JSON.stringify([toolIdentity(), registry.getConfig().get(),
     fault === "no-version" || drop ? [] : semanticInputs]));
   const sourceKey = sourceKeys(objects, byName, version, drop);
+  const shadow = recordingProvenance() ? shadowCache(registry, root,
+    hashV3(["gogen-entry-3", toolIdentity(true), registry.getConfig().get()]), portable) : undefined;
   // Opening marks the version used, and so does a hit every few minutes, so
   // a long warm run that writes nothing is not taken for an abandoned one.
   let touched = Date.now();
@@ -179,7 +185,8 @@ export function objectCache(registry, root) {
     && (op.kind === "measure" || (op.kind === "read" && !op.method)));
   const pending = [], provenanceGraphs = new Map();
   const cache = {
-    begin() { pending.length = 0; },
+    shadow,
+    begin() { pending.length = 0; shadow?.reset(); },
     read(owner, name, program) {
       // Keep a separate variant only when lowering read the complete closure.
       // Membership-only transcripts remain reusable across different shards.
@@ -229,16 +236,22 @@ export function objectCache(registry, root) {
       // are appended to an envelope, without cloning/serializing that graph again.
       try {
         value = compactLowering(value);
-        if (!portable(value)) return;
+        if (!portable(value)) return false;
         const {provenance, ...payload} = value;
         pending.push({owner, value: {name: value.name}, valueBytes: serialize(payload),
           reads: [...reads], variant: wholeSelection(value) ? selection(program) : ""});
-      } catch { /* Non-portable lowerings compile normally. */ }
+        return true;
+      } catch { return false; } // Non-portable lowerings compile normally.
     },
     finish(program) {
       if (!pending.length) return;
-      const graph = dependencyGraph(registry, pending.map((e) => e.owner));
-      const bytes = deflateRawSync(serialize(graph), {level: 1}), graphHash = digest(bytes);
+      const graph = dependencyGraph(registry, pending.map((e) => e.owner),
+        shadow ? pending.flatMap((e) => [...borrowedOwners(deserialize(e.valueBytes))]) : []);
+      if (shadow) graphRawFiles(graph, registry);
+      shadow?.finish(graph, pending, program);
+      // Shared rows compress better with a modest extra pass (a few ms per
+      // compile); entry payloads and the recording-off path keep level 1.
+      const bytes = deflateRawSync(serialize(graph), {level: 4}), graphHash = digest(bytes);
       const graphFile = join(root, version, `${graphHash}.provenance`);
       try {
         mkdirSync(join(root, version), {recursive: true});
@@ -284,9 +297,9 @@ export function prepareDiskSession(session, registry) {
     const cacheDir = session.cacheDir;
     for (const key of Object.keys(session)) delete session[key];
     Object.assign(session, {registry, config: registry.getConfig(), files, classes: new Map()});
-    if (cacheDir) Object.assign(session, {cacheDir, diskRoot: cacheDir, disk: objectCache(registry, cacheDir)});
+    if (cacheDir) Object.assign(session, {cacheDir, diskRoot: cacheDir, diskRecording: recordingProvenance(), disk: objectCache(registry, cacheDir)});
   }
-  if (session.diskRoot !== session.cacheDir) {
+  if (session.diskRoot !== session.cacheDir || (session.cacheDir && session.diskRecording !== recordingProvenance())) {
     session.classes.clear();
     if (!session.cacheDir) {
       delete session.diskRoot;
@@ -294,6 +307,7 @@ export function prepareDiskSession(session, registry) {
       return;
     }
     session.diskRoot = session.cacheDir;
+    session.diskRecording = recordingProvenance();
     session.disk = objectCache(registry, session.cacheDir);
   }
   session.disk?.begin();
@@ -309,6 +323,8 @@ export const compileDiskClass = artifactLowering(function compileDiskClass(ctx, 
   const file = obj.getMainABAPFile();
   const key = obj.getName().toUpperCase();
   const owner = `${obj.obj?.getType?.() ?? obj.getType?.() ?? "CLAS"} ${obj.owner ?? key}`;
+  const prediction = session?.disk?.shadow?.probe(owner, key, program);
+  if (prediction) session.disk.shadow.validate(prediction, ctx, obj, lower);
   let cached = session?.classes.get(key);
   const replay = (entry) => entry && entry.file === file && entry.structure === file.getStructure()
     && entry.supplied === suppliedKey(program, key) && entry.replay && replayLowering(program, entry.replay);
@@ -324,9 +340,14 @@ export const compileDiskClass = artifactLowering(function compileDiskClass(ctx, 
     counts.reused++;
     counts.reusedClasses.push(key);
     session?.classes.set(key, cached);
+    if (prediction && !prediction.row.wouldReuseV3) {
+      prediction.row.currentComplete = false;
+      prediction.row.completenessReason = "no-validated-v3-candidate";
+    }
     return cached.ir;
   }
   counts.lowered++;
+  if (prediction) prediction.row.actuallyLowered = true;
   counts.loweredClasses.push(key);
   session?.classes.delete(key);
   const run = () => {
@@ -343,7 +364,12 @@ export const compileDiskClass = artifactLowering(function compileDiskClass(ctx, 
   if (entry) {
     entry.provenance = storedProvenance(program.reg, obj);
     const {file: ignoredFile, structure: ignoredStructure, ...portable} = entry;
-    session.disk.write(owner, {...portable, name: key}, reads, program);
+    const persisted = session.disk.write(owner, {...portable, name: key}, reads, program);
+    if (prediction && !persisted) {
+      prediction.row.currentComplete = false; prediction.row.completenessReason = "nonportable-lowering";
+    }
+  } else if (prediction) {
+    prediction.row.currentComplete = false; prediction.row.completenessReason = "unrecordable-lowering";
   }
   return value;
 });

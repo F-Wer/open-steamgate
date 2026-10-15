@@ -1,5 +1,5 @@
 // Observational tracing only: no cache key, parser invalidation or replay decisions.
-import {inputSnapshot, freshRegistry, finishInputs, objectKey} from "./frontend-inventory.mjs";
+import {inputSnapshot, freshRegistry, finishInputs, objectKey, artifactIdentity as artifacts, sameArtifactIdentity} from "./frontend-inventory.mjs";
 import {createRequire} from "node:module";
 import {pathToFileURL} from "node:url";
 import {installHooks} from "./frontend-provenance-hooks.mjs";
@@ -11,9 +11,12 @@ const registries = new WeakMap(), results = new WeakMap(), published = new WeakM
 let active;
 const keyOf = (obj) => obj?.getType ? objectKey(obj) : undefined;
 const empty = () => ({queries: new Map(), edges: new Set()});
-// Identity snapshots of core's cached artifacts: no getter calls or graph walks.
-const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "parsed", "modules", "includes"];
-const artifacts = (obj) => artifactFields.map((name) => obj[name]);
+const scalar = (a) => typeof a === "string" ? a.toUpperCase() : a === undefined ? null : a;
+function branch(node, key) {
+  let child = node.get(key);
+  if (!child) node.set(key, child = new Map());
+  return child;
+}
 
 class Recorder {
   constructor(expose) {
@@ -24,6 +27,8 @@ class Recorder {
     this.suppressed = 0;
     this.auditDepth = 0;
     this.roles = [];
+    this.named = new WeakMap();
+    this.inventories = new WeakMap();
   }
   state(reg) {
     let state = registries.get(reg);
@@ -48,14 +53,38 @@ class Recorder {
   entry(state, key, lowering = false) {
     if (!key) return state.global;
     const entries = lowering ? state.lowerings : state.entries;
-    if (!entries.has(key)) entries.set(key, empty());
-    return entries.get(key);
+    let entry = entries.get(key);
+    if (!entry) entries.set(key, entry = empty());
+    return entry;
   }
-  own(state, key) { return this.entry(state, key, this.current(state)?.lowering); }
+  own(state, key) {
+    const frame = this.current(state);
+    return this.entry(state, key, frame?.key === key && frame?.lowering);
+  }
   role(state) { return this.current(state) ? "artifact" : this.roles.at(-1) ?? "artifact"; }
   current(state) {
-    const top = this.stack.at(-1);
+    const top = this.stack[this.stack.length - 1];
     return top?.state === state ? top : this.stack.findLast((f) => f.state === state);
+  }
+
+  // Repeated core lookups usually observe the same answer. Intern the scalar
+  // tuple before allocating argument/result arrays, a row or its public key.
+  namedQuery(state, kind, args, result) {
+    const frame = this.current(state), owner = frame?.key;
+    let node = frame?.named;
+    if (!node) {
+      const role = this.role(state), phase = frame?.phase ?? "registry";
+      const entry = role === "scheduling" ? state.scheduling : role === "final-output" ? state.finalOutput : this.own(state, owner);
+      node = this.named.get(entry);
+      if (!node) this.named.set(entry, node = new Map());
+      node = branch(branch(branch(node, role), phase), owner);
+      if (frame) frame.named = node;
+    }
+    node = branch(branch(node, kind), args.length);
+    for (let i = 0; i < args.length; i++) node = branch(node, scalar(args[i]));
+    if (node.has(result)) return;
+    node.set(result, true);
+    this.query(state, {kind, args: args.map(scalar), result: result ? [result] : []});
   }
   query(state, query, owner = this.current(state)?.key) {
     if (this.auditDepth) return;
@@ -75,33 +104,72 @@ class Recorder {
 
   link(state, obj) {
     const key = keyOf(obj), from = this.current(state)?.key;
+    if (this.auditDepth) return key;
     if (key) {
       this.entry(state, key);
       if (from && from !== key) this.own(state, from).edges.add(key);
     }
     return key;
   }
+  // These hooks are only used for audited, pure getters in the pinned core.
+  // They cannot resolve anything inside their body, so need no artifact frame.
+  readArtifact(reg, obj) {
+    const state = this.state(reg), key = this.link(state, obj);
+    this.checkArtifact(state, obj, key);
+  }
+  artifactGap(state, key, reason) {
+    // A provider gap belongs to its artifact even inside a consumer lowering.
+    this.stack.push({state, key, phase: "artifact-read"});
+    try { this.query(state, {kind: "unknown-scan", args: [reason], result: []}, key); }
+    finally { this.stack.pop(); }
+  }
   checkArtifact(state, obj, key) {
-    if (this.checked?.has(obj)) return;
-    this.checked ??= new WeakSet();
-    this.checked.add(obj);
-    const previous = state.artifacts.get(obj);
-    if (previous && artifacts(obj).some((value, i) => value !== previous[i])) {
-      this.query(state, {kind: "unknown-scan", args: ["untraced-artifact"], result: []}, key);
+    this.checked ??= new WeakMap();
+    const previous = this.checked.get(obj) ?? state.artifacts.get(obj), now = artifacts(obj);
+    if (previous && !sameArtifactIdentity(previous, now)) {
+      this.artifactGap(state, key, "untraced-artifact");
     } else if (!previous && (obj.syntaxResult || obj.parsedType || obj.def || obj.definition || obj.isDirty?.() === false)) {
-      this.query(state, {kind: "unknown-scan", args: ["artifact-built-before-recording"], result: []}, key);
+      this.artifactGap(state, key, "artifact-built-before-recording");
+    }
+    this.checked.set(obj, now);
+  }
+  leaveArtifact() {
+    const frame = this.stack.pop();
+    // Only recorded builds advance the trusted identity. Audit builds carry an
+    // explicit marker even if an enclosing recorded frame later completes.
+    this.checked.set(frame.obj, artifacts(frame.obj));
+  }
+  auditArtifact(reg, obj, run) {
+    const before = artifacts(obj);
+    try { return run(); } finally {
+      if (!sameArtifactIdentity(before, artifacts(obj))) {
+        const state = this.state(reg), key = keyOf(obj);
+        state.auditBuilt = true;
+        this.auditChanges ??= new Map();
+        this.auditChanges.set(obj, {state, key});
+      }
     }
   }
-  artifact(reg, obj, phase, run) {
-    const key = keyOf(obj), top = this.stack.at(-1);
-    if (!key) return run();
-    if (top?.state.reg === reg && top.key === key && phase === "artifact-read") return run();
+  flushAuditChanges() {
+    for (const {state, key} of this.auditChanges?.values() ?? [])
+      this.artifactGap(state, key, "untraced-artifact");
+    this.auditChanges?.clear();
+  }
+  enterArtifact(reg, obj, phase) {
+    const key = keyOf(obj), top = this.stack[this.stack.length - 1];
+    if (!key) return false;
+    if (top?.state.reg === reg && top.key === key && phase === "artifact-read") return false;
     const state = this.state(reg);
     this.link(state, obj);
     this.entry(state, key, phase === "lowering" || phase === "selection");
     this.checkArtifact(state, obj, key);
     this.stack.push({state, key, obj, phase, lowering: phase === "lowering" || phase === "selection"});
-    try { return run(); } finally { this.stack.pop(); }
+    return true;
+  }
+  artifact(reg, obj, phase, run) {
+    if (this.auditDepth) return this.auditArtifact(reg, obj, run);
+    const entered = this.enterArtifact(reg, obj, phase);
+    try { return run(); } finally { if (entered) this.leaveArtifact(); }
   }
   context(kind, args, run) {
     const frame = {kind, args};
@@ -113,9 +181,13 @@ class Recorder {
   inventory(reg, objects) {
     const state = this.state(reg);
     const configEdited = state.config && state.config !== reg.getConfig();
-    const snapshots = new Map([...inputSnapshot(reg).objects].map(([key, {sources}]) => [key, sources.map((s) => [s.name, s.raw])]));
+    const snapshot = inputSnapshot(reg);
+    if (this.inventories.get(reg) === snapshot && !configEdited) return state;
+    const snapshots = new Map([...snapshot.objects].map(([key, {sources}]) => [key, sources.map((s) => [s.name, s.raw])]));
     const changed = [...snapshots].filter(([key, files]) => state.files.has(key)
-      && JSON.stringify(files) !== JSON.stringify(state.files.get(key))).map(([key]) => key);
+      && (files.length !== state.files.get(key).length || files.some(([name, raw], i) => {
+        const old = state.files.get(key)[i]; return name !== old[0] || raw !== old[1];
+      }))).map(([key]) => key);
     const removed = [...state.files.keys()].filter((key) => !snapshots.has(key));
     const added = [...snapshots.keys()].some((key) => !state.files.has(key));
     const edited = changed.length || removed.length || (state.files.size && added);
@@ -137,6 +209,7 @@ class Recorder {
       this.entry(state, key);
     }
     state.files = snapshots;
+    this.inventories.set(reg, snapshot);
     for (const obj of state.artifacts.keys()) if (!snapshots.has(keyOf(obj))) state.artifacts.delete(obj);
     return state;
   }
@@ -161,7 +234,7 @@ export function recordProvenance(run, {expose = true} = {}) {
   }
 }
 
-/** Recording and dependency metadata are opt-in, including for disk builds. */
+/** Disk builds record internally; expanded public reporting stays opt-in. */
 export function withProvenance(compile) {
   return (options) => {
     const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
@@ -172,22 +245,28 @@ export function withProvenance(compile) {
       finishInputs(program.reg);
       return program;
     };
-    return expose ? recordProvenance(run, {expose}) : run();
+    const record = expose || (options.cacheDir && options.provenance !== false);
+    return record ? recordProvenance(run, {expose}) : run();
   };
 }
 
 export function beginProvenanceCompile(reg) {
   if (!active) return;
   const state = active.state(reg);
+  // Compile-wide refusal expires; provider unknown-scan markers remain in entries.
+  state.auditBuilt = false;
   // Retain provider-building observations, never a previous entry's transcript.
   state.lowerings.clear();
   state.finalOutput = empty();
+  // Lowering/final-output entries are replaced above; scheduling keeps its
+  // entry, so expire its interned tuples along with the pruned query rows.
+  active.named.delete(state.scheduling);
   state.scheduling.queries = new Map([...state.scheduling.queries].filter(([, row]) =>
     row.kind.startsWith("registry-") || ["global-definitions", "include-macro-context"].includes(row.kind)));
 }
 
 export function withArtifact(ctx, obj, run, phase = "lowering") {
-  return active ? active.artifact(ctx.reg, obj.obj ?? obj, phase, run) : run();
+  return active && !active.auditDepth ? active.artifact(ctx.reg, obj.obj ?? obj, phase, run) : run();
 }
 
 export function artifactLowering(lower) {
@@ -328,8 +407,21 @@ export function auditedBookkeeping(purpose, run) {
   // Only named call sites with a local rationale may use this exclusion.
   if (!active) return run();
   active.auditDepth++;
-  try { return run(); } finally { active.auditDepth--; }
+  try { return run(); } finally {
+    if (--active.auditDepth === 0) active.flushAuditChanges();
+  }
 }
+// Digest preparation builds providers under recording, independently of the
+// candidate consumer. Only actual provider construction contributes rows/edges.
+export function recordedArtifactBuild(run) {
+  if (!active) return run();
+  if (active.auditDepth) throw new Error("artifact digest requested under audit");
+  const stack = active.stack;
+  active.stack = [];
+  try { return run(); } finally { active.stack = stack; }
+}
+export const auditBuiltArtifacts = (reg) => !!registries.get(reg)?.auditBuilt;
+export const provenanceAuditActive = () => !!active?.auditDepth;
 export function compilationProvenanceOf(value) {
   const reg = value?.reg ?? value?.registry ?? value;
   const state = (active ? registries : published).get(reg);

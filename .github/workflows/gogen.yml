@@ -132,7 +132,9 @@ jobs:
         # One file at a time: the cache's tool identity hashes tools/**, so a
         # file writing there while another compiles changes that identity
         # mid-test (provenance, digest and query suites were never run here).
-        run: node --test --test-concurrency=1 tools/gogen/frontend-cache.test.mjs tools/gogen/frontend-object-cache.test.mjs tools/gogen/frontend-replay.test.mjs tools/gogen/frontend-portable.test.mjs tools/gogen/frontend-provenance.test.mjs tools/gogen/frontend-provenance-regression.test.mjs tools/gogen/frontend-artifact-digests.test.mjs tools/gogen/frontend-queries.test.mjs tools/gogen/cache-oracle.test.mjs
+        env:
+          GOGEN_CACHE_SHADOW_VALIDATE: "1"
+        run: node --test --test-concurrency=1 tools/gogen/frontend-cache.test.mjs tools/gogen/frontend-object-cache.test.mjs tools/gogen/frontend-replay.test.mjs tools/gogen/frontend-portable.test.mjs tools/gogen/frontend-provenance.test.mjs tools/gogen/frontend-provenance-regression.test.mjs tools/gogen/frontend-provenance-compare.test.mjs tools/gogen/frontend-artifact-digests.test.mjs tools/gogen/frontend-queries.test.mjs tools/gogen/frontend-v3-shadow.test.mjs tools/gogen/frontend-v3-sensitivity.test.mjs tools/gogen/frontend-v3-audit.test.mjs tools/gogen/cache-oracle.test.mjs
       - name: Go byte fixtures and ABAPiti repros
         run: node tools/gogen/unit.mjs --fixture tools/gogen/testdata --jobs 4
       # osabap: a report built into a native command (open-abap-gui's

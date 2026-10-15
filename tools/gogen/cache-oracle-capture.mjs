@@ -47,8 +47,9 @@ export function orderedRegistry(folders, order = [], {parse = true} = {}) {
 // Always called in a fresh child by the oracle. Cache-disabled compilation
 // uses the ordinary frontend, including its different PERSIST_LOWERING path.
 export function captureArtifacts(options) {
-  return options.provenance ?? (process.env.GOGEN_PROVENANCE === "1")
-    ? recordProvenance(() => capture(options)) : capture(options);
+  const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
+  return expose || (options.cacheDir && options.provenance !== false)
+    ? recordProvenance(() => capture(options), {expose}) : capture(options);
 }
 function capture({folders, objects, cacheDir, order, provenance}) {
   const program = compileProgram({folders, objects, cacheDir, provenance, tolerant: true,

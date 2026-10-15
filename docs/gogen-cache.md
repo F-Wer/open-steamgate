@@ -7,6 +7,242 @@ whole-registry version guard: an edit creates a new version and lowers every
 selected class. This is a correctness baseline, not selective reuse after edits.
 Reverting exactly to an earlier version can reuse that version's entries.
 
+## Step 4a.2: schema-v3 keys in shadow mode
+
+Audit-build refusal resets per compile while provider gaps remain fail-closed; digest misses under audit stay uncached for a later recorded read.
+
+Disk builds now record internal provenance whenever `cacheDir` is set. This is
+the explicitly accepted provisional recorder cost, not a claim that the prior
+recording-time budget passed. `provenance: false` keeps the global-only path;
+expanded public reporting still requires `provenance: true` or
+`GOGEN_PROVENANCE=1`. Cache-disabled compilation does not start recording.
+Production lookup remains in the existing globally guarded namespace. The v3
+namespace supplies predictions only; no class is selectively reused in production.
+
+The implemented formula uses SHA-256 over canonical tagged JSON. Dictionary
+keys use code-point sorting; arrays retain their semantic order:
+
+```text
+V = H(["gogen-entry-3", sourceIndependentToolIdentity, effectiveConfig])
+D(object) = gogen-resolved-artifact-2 digest
+D(rawFile) = H(["raw-file", resolver-visible filename, raw source])
+Qid = H(["gogen-query-id-3", saved specification])
+Q = H(["gogen-query-answer-3", saved specification,
+       answer including MISSING, ordered result/provider identities and digests])
+G = H(["gogen-replay-guards-3", ordered replay read/measure transcript])
+
+K3 = H(["gogen-entry-key-3", V, {
+  owner, name,
+  dependencies: sorted [(artifact identity, D(artifact)), ...],
+  rawFiles: sorted [(filename, D(rawFile)), ...],
+  queries: sorted [(Qid, Q), ...],
+  supplied: saved supplied-parameter guard,
+  guards: G
+}])
+```
+
+The owner digest is included in `dependencies`. The closure starts at the
+entry's lowering root and follows provider **artifact-building** edges, including
+borrowed definition owners discovered in replay fingerprints. It does not follow
+another entry's lowering root. Scheduling and final-output rows do not enter the
+key. Source-word/SCC keys remain solely on the global production path. V3 tool
+identity hashes actual tools, the npm lock and installed core/transpiler builds;
+it excludes source-library pins in `libs.lock.json`. Their effective contents
+are guarded by the individual artifact digests.
+
+Completeness is recomputed from the shared graph at storage and candidate
+evaluation. Every reachable artifact needs a supported digest and every explicit
+raw read needs a hash. Every query needs a registered re-evaluator. Any
+`unknown-scan`, including untraced-artifact, built-before-recording,
+lowering-built-before-recording, retained-registry-edit or config-edit markers,
+refuses a key. Nonportable or unrecordable lowerings receive no v3 candidate.
+A known scan ending at a first-match winner is supported: its ordered prefix
+and `complete: false` early-stop answer are retained.
+Candidate reevaluation also rejects an unknown/untraced marker on a current
+dependency or current registry-wide artifact observation; a previously complete
+stored graph cannot override a recording gap in the current compile.
+
+Candidates live in `cache/v3/V/H(owner,name)/index.json`, outside the global
+registry-version directory. An atomic index retains four K3-addressed payloads
+per entry. Payloads and shared provenance graphs have SHA-256 checksums; writes
+use temporary files and atomic renames. Missing/corrupt/racing files cause a
+shadow miss. Incomplete entries retain only the global cache entry.
+
+At the class seam, shadow evaluation discovers stored candidates, recomputes
+dependency digests against the fresh current registry, and re-runs the **saved
+query specifications**. Supplied and local discovery indexes were rebuilt from
+current inputs before this seam; lock queries read current descriptors, and FM
+ownership preserves gogen's last-wins or core's first-match policy. Core named
+lookups, misses, include parents, implicit pools, aliases and semantic scans have
+explicit resolvers. Ordered replay guards and the supplied guard must also
+validate against current program state before `wouldReuseV3` can be true.
+
+`program.frontendCounts.shadowV3` reports each class's `wouldReuseV3`,
+`actuallyLowered`, completeness and reason (dependency, named query, replay
+refusal or unavailable candidate), plus directly timed `recomputeMs`, validation
+count and disagreement count. The timer includes candidate IO/checksums,
+decompression, stored/current key calculation, query and digest reevaluation and
+trial replay. Namespace/tool-identity setup, lowering and emission are outside it.
+
+Set `GOGEN_CACHE_SHADOW_VALIDATE=1` to additionally lower every would-reuse entry
+at that same seam into isolated program collections. Validation compares IR,
+ordered assign/effect operations and resulting written values byte-for-byte with
+the trial replay. A difference throws `SHADOW V3 DISAGREEMENT` outside cache IO
+fallback handling. This flag is enabled in the serial gogen workflow cache step.
+The normal oracle also requires nonzero validated predictions, preventing a
+vacuous zero-disagreement result.
+
+### Fix round: lazy builds during audit and digest probe order
+
+The second critic reproduced a false v3 prediction with a lazy TYPE pool:
+`ZZ_T` resolves through `ZIF_TYPES=>TY_X`. After priming and two unrelated
+edits, validation built the pool under audit in the production registry. Its
+suppressed reads left no pool-to-interface edge. A subsequent interface length
+change (5 to 7) predicted reuse and raised `SHADOW V3 DISAGREEMENT`. An early
+source-only pool digest also survived the later build, making the saved graph
+depend on probe order. The original global production guard was still active.
+
+This fix chooses **identity snapshots and fail-closed markers**, retaining the
+production registry rather than introducing a second registry and remapping
+program-held definitions/types. The recorder snapshots cached artifact fields
+at each check and advances the trusted snapshot only after recorded work.
+`SyntaxLogic.run`, candidate iteration and provider linking respect `auditDepth`.
+Audit hooks compare identities before/after the call without recording semantic
+rows or edges; a changed identity emits `untraced-artifact` on the provider,
+even inside another object's lowering. Later cached reads also compare against
+the checked snapshot, including objects already checked by `reg.parse()`.
+
+Digest construction now resolves lazy ABAP syntax and DDIC types **under
+recording**, in a provider context independent of the probing consumer. The
+projection then only reads those built artifacts under audit. The shared digest
+table checks cached identities before reusing a digest; the separate first-probe
+memo in the key computer is removed. An unbuilt source-only projection can no
+longer become a saved resolved digest. The regression compares the entire saved
+graph for the same corpus with reversed probe order around a lazy build.
+
+As a conservative guard, a compile in which any audit call builds an artifact
+writes **no v3 graph, payload or index**, including entries unrelated to that
+artifact. Query re-evaluation that builds anything also refuses the prediction.
+The report gives `persistenceRefused: audit-built-artifact`. The validator still
+shares the registry, and this guard remains in place for future 4b work.
+
+`frontend-v3-audit.test.mjs` adds six serial workflow regressions. All six fail
+on the pre-fix `5639eead`; the supplied critic harness independently reproduces
+the C4 disagreement there. After the fix, both validation modes run C1–C4 and
+refuse C4 with exactly `dependency:INTF ZIF_TYPES`, without disagreement.
+Additional controls require the marker after an audit build and prove that cold
+validation and query re-evaluation builds leave all existing v3 files untouched.
+The suite is registered in gogen.yml's “Frontend cache validation and replay”
+step with `--test-concurrency=1`.
+
+The dedicated controls live in `frontend-v3-shadow.test.mjs` and
+`frontend-v3-sensitivity.test.mjs`. The latter uses narrow portable replay seams
+so redundant source/definition/program guards cannot conceal the deliberately
+omitted dependency, miss, unknown-observation or query-answer contribution.
+Its FM ownership fixture is a portable semantic-query seam; ordinary FM caller
+lowerings still contain nonportable registry descriptors and remain uncacheable.
+The test-only `GOGEN_CACHE_SHADOW_FAULT` values are `drop-dependency:<regex>`,
+`ignore-miss`, `unknown-complete` and `ignore-query:<kind>`. Each negative control
+primes and evaluates under its fault and requires the cold validator to throw;
+normal validation leaves this variable unset. These faults never change the
+globally guarded production lookup.
+
+```sh
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 GOGEN_CACHE_SHADOW_VALIDATE=1 tools/osd-heavy.sh \
+  node --test --test-concurrency=1 tools/gogen/frontend-*.test.mjs \
+  tools/gogen/cache-oracle.test.mjs
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 GOGEN_CACHE_SHADOW_VALIDATE=1 tools/osd-heavy.sh \
+  node tools/gogen/cache-oracle.mjs --classes 300 --seed 719 --real \
+  --report .local/step4a2-fix-oracle.json
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh \
+  node tools/gogen/frontend-v3-bench.mjs --rounds 3 \
+  --report .local/step4a2-fix-real-predictions.json
+```
+
+### Step 4a.2 gate results
+
+- The final sequential frontend/cache run passes **267 tests**, zero failures or
+  skips, with shadow validation enabled, in **346.0 s**. Types and suite
+  registration pass.
+- The full oracle uses **300 controls + fixtures + complete pinned
+  open-abap-core/ajson**, both line modes: **66 observations / 64 validated
+  mutations**, zero byte mismatches, **38,182 cold-validated shadow predictions
+  and zero shadow disagreements**, in **995.6 s**. The two pool-constant attempts
+  retain their existing documented unsupported/unchanged-refusal classification.
+  Each unchanged/revert control actually reuses 579 global entries and lowers
+  22; edited observations still use the global production guard.
+- The dedicated 300-class corpus predicts exactly **10 lower / 290 reuse** for
+  the ten-class chain base edit, **1 / 299** for the isolated edit, and reuse of
+  all 300 existing entries after an unrelated addition. The new class is cold.
+  Production actually lowers all selected classes after those edits.
+- All four named-query additions are rejected: a new supplied redefinition, a
+  new interface implementor, a new ENQU replacing a named miss, and a second
+  FUGR winning ownership of the same FM. The last is the portable controlled
+  seam described above. All **four sensitivity faults** produce a real shadow
+  disagreement that the cold validator catches. Current unknown markers,
+  missing digests/raw hashes, bounded variants, corruption and opt-out controls
+  pass too.
+- Changed-path size budget (`--changed origin/main`) and changed-file leak scan
+  exit zero; the inherited, untouched `go:charsearch` breach is reported
+  separately by the budget tool. `frontend.mjs` is unchanged.
+- Typing-proof against the pre-edit **`f3e7f76d`** record passes **239
+  byte-identical artifacts in each of six modes** (sink 0/1, no cache/cold/warm),
+  without normalization. Each production warm run still reuses 336 classes and
+  lowers 25.
+
+Three fresh Node 26.9.0 warm processes per scenario, each following an
+independent cold prime, on the complete pinned open-abap-core + ajson trees.
+All 257 real global classes are selected; their local classes bring the total
+to **272 class entries**. RAM scratch and the shared Go build cache use the paths
+in the commands above. Medians:
+
+| Scenario | Would reuse v3 | Would lower/fall back | Actually lowered | Key checking |
+| --- | ---: | ---: | ---: | ---: |
+| Unchanged | 251 | 21 | 21 | 1,950.8 ms |
+| Leaf-class edit | 234 | 38 | 272 | 1,855.9 ms |
+| Widely-used interface edit | 231 | 41 | 272 | 1,915.1 ms |
+
+The leaf edit inserts a method comment in `CL_ABAP_HMAC`, which has no incoming
+references in compiled source (its Unit tests are excluded). Recorded semantic
+closures conservatively include it in 17 cacheable entries, so this is not a
+one-entry real-corpus prediction. The interface edit changes
+`IF_IXML_NODE=>CO_NODE_TEXT` from 16 to 17 and affects 20 cacheable entries.
+The 21 unchanged fallbacks have nonportable or unrecordable lowerings; they are
+reported individually in the JSON. All nine warm outputs equal their fresh cold
+outputs, with zero disagreements. The frontend medians including cold shadow
+validation are 4,788.3 / 5,602.0 / 5,572.0 ms; these are shadow-run costs, not a
+selective-production speedup.
+
+Shared query specifications/answers and their hashes, raw-file hashes and
+built current artifact digests are memoized per compile with identity checks.
+An earlier pre-fix, pre-memoization run spent about 4.8 s checking unchanged
+candidates; those historical timings are not mixed into these fix-round
+three-process medians. The original recorder-time
+acceptance budget remains unmet; the user explicitly accepted its cacheDir-only
+cost provisionally for this step.
+
+The critic separately measured a warm key check of approximately **1.43 s**
+against only **0.228 s saved by global warm reuse**, across 272 entries. This is
+recorded as a cost finding, without optimization in this fix. Step 4b must not
+claim a speed improvement until key checking is made cheap and its total cost
+is measured against the saving. The existing recorder-time budget also remains
+unmet.
+
+Local fix-round evidence: `.local/step4a2-fix-before-final.log` (six failures on
+`5639eead`), `.local/step4a2-harness-before.log`,
+`.local/step4a2-harness-after.log` (both validation modes),
+`.local/step4a2-fix-frontend-final.log`, `.local/step4a2-fix-v3.log`,
+`.local/step4a2-fix-oracle.json`, `.local/step4a2-fix-real-predictions.json`,
+`.local/step4a2-fix-typing-final.log`, `.local/step4a2-fix-size.log` and
+`.local/step4a2-fix-leak.log`. Drivers remove corpus copies and cache scratch in
+`finally`; no shared library checkout is edited.
+
+Step 4b (flagged selective production lookup) and Step 4c (default selective
+lookup and its performance acceptance gates) remain future work.
+
 ## Keys today
 
 The version hashes the cache schema, effective abaplint config, actual tool
@@ -35,10 +271,12 @@ Neither source words nor lowering-time reads cover every semantic dependency.
 
 ## Step 4a.1: scoped queries and registry freshness
 
-This branch implements query scoping and registry rebuilding. It **does not pass
-its recording-time acceptance budget**; recording remains opt-in. The global
-version guard, source-word/SCC keys and replay validation stay in force. No v3
-lookup, selective reuse, shadow key or cache-default change is implemented.
+At the Step 4a.1 snapshot, query scoping and registry rebuilding were implemented
+but **did not pass the recording-time acceptance budget**; recording remained
+opt-in. The global version guard, source-word/SCC keys and replay validation
+stayed in force. That step implemented no v3 lookup, selective reuse, shadow
+key or cache-default change. The Step 4a.2 section above supersedes its recording
+default and adds observational keys.
 
 `provenanceOf(program)` reports artifact dependencies. The separate
 `compilationProvenanceOf(program)` returns `{scheduling, finalOutput}` query
@@ -253,6 +491,100 @@ Local reports: `.local/step4a1-perf-base-recheck.json`,
 `.local/step4a1-oracle-inventory.json`,
 `.local/step4a1-profile-summary.json`, `.local/step4a1-compile-{none,cold}.cpuprofile`,
 `.local/step4a1-sensitivity.json`, and `.local/step4a1-hook-sensitivity.json`.
+
+### Recorder-cost follow-up: acceptance remains unmet
+
+The recorder follow-up on `perf/gogen-cache-recorder` retains opt-in recording.
+It improves storage, but the final paired timing batch still fails the default-on
+budget. No default-recording or selective-lookup change is enabled.
+
+The implemented changes intern repeated `getObject` tuples per owner/phase
+before allocating normalized arguments, result arrays and public query keys.
+The pinned core's pure `getABAPFiles` and class/interface `getDefinition`
+getters retain provider edges and recording-gap checks without an artifact
+frame. Other artifact adapters open/close frames directly, avoiding a callback
+allocation per invocation. Retained input comparisons use ordered filename/raw
+pairs instead of serializing both inventories; identical snapshots can be
+shared across recorder hooks. The shared provenance graph uses deflate level 4;
+entry payloads and the recording-off serialization path retain level 1.
+Existing immutable lowering bytes and shared graph storage are preserved.
+
+Three fresh Node 26.9.0 processes per version/setting/scenario, complete pinned
+open-abap-core + ajson, alternating version and recording order, pinned CPU 14,
+RAM scratch and the shared Go build cache. The reference is the unchanged
+`67358147` source snapshot. Each version's recording-on times are compared with
+**that same version's recording-off** times. Loading/normalization, parse, syntax,
+lowering/replay and cache finalization are timed; emission, public manifest
+expansion and full diagnostic digest inspection follow the timer. Values are
+medians in milliseconds; OFF / ON columns show the two settings.
+
+| Scenario | Before OFF / ON | Before overhead | After OFF / ON | After overhead | Budget | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| Uncached | 2,317.4 / 2,684.5 | +15.8% | 2,338.2 / 2,671.1 | +14.2% | +5% | FAIL |
+| cacheDir cold | 2,768.9 / 3,513.3 | +26.9% | 2,787.5 / 3,511.8 | +26.0% | +25% | FAIL |
+| cacheDir warm | 2,513.8 / 2,839.1 | +12.9% | 2,510.7 / 2,855.7 | +13.7% | +10% | FAIL |
+| Cache file bytes | 531,454 / 812,261 | 1.528x | 531,451 / 787,320 | 1.481x | 1.500x | PASS |
+
+Recording-off changes against the reference are **+0.9% / +0.7% / -0.1%**
+(uncached/cold/warm), within the requested ±3%. All **36 captures** have identical
+emitted-artifact/class-IR and resolved-digest hashes. Uncached/cold runs lower
+272 classes; warm runs reuse 251 and lower 21, with zero diagnostics. Earlier
+exploratory batches are retained locally; this isolated paired batch is the
+acceptance result. The historical Step 3 comparison above is a different baseline.
+
+Correctness gates:
+
+- **249 tests pass**, zero failures/skips, in the serial combined frontend/cache/
+  oracle command, including provenance, digests, freshness and both new canonical
+  comparison tests.
+- Default and `GOGEN_PROVENANCE=1` CI-sized oracles each pass all **seven tests**,
+  **62 observations / 60 validated mutations / zero mismatches**, both line modes.
+  Their no-version negative controls retain the expected mismatches.
+- The unchanged hook sweep kills **40 of 48** mutations, with the same eight
+  documented survivors as the parent branch.
+- The new `frontend-provenance-compare.mjs` compares all **344 oracle-corpus**
+  and **651 pinned-library** artifact manifests plus scheduling/final-output
+  manifests against the parent in uncached/cold/warm processes. All match,
+  together with raw emitted output and resolved digests. Query dictionaries and
+  row properties are canonicalized; ordered results/providers/arguments, phase,
+  policy, early stopping, misses, unknown markers and duplicate rows are retained.
+- Changed-path size budget (`--changed origin/main`), suite registration,
+  whitespace and the explicit changed-file/staged-file leak scans pass. The
+  inherited `go:charsearch` breach remains reported separately.
+
+The focused profiles start after imports and stop before emission or public
+inspection. After-change self samples total about **186 / 209 ms** in query
+recording/hooks/indexes and **32 / 36 ms** in ordered snapshots (uncached/cold).
+Cold resolved projection/hashing contributes **379 ms**, and cache/replay/
+serialization **215 ms**. GC contributes **256 / 287 ms**; these are whole-compile
+GC totals, not an estimate of recording-only GC. Profiler overhead is separate.
+The uncached diagnostic run sees about 49,000 named lookups but constructs
+normalized query inputs for only about 7,900 of them; intern-table work and
+other hooks consume much of the saving. The wall-time budget therefore remains
+**FAIL**.
+
+Next options are a core observer seam that reports resolver/artifact events
+without per-getter wrappers (while retaining cached-provider edges and unknown
+iteration detection), and compact interned query/owner/phase IDs for all query
+kinds. Cheaper resolved-digest projection could reduce cold cost, but cannot
+repair the uncached gate, which performs no digest work. Keep this foundation
+opt-in until a callback-based path meets all budgets; Step 4c remains blocked.
+
+Run the comparator through the established heavy-run wrapper. Record the parent,
+then compare the candidate; repeat both commands with `--real`:
+
+```sh
+node tools/gogen/frontend-provenance-compare.mjs --compiler <parent-checkout> \
+  --report .local/manifests-before.json
+node tools/gogen/frontend-provenance-compare.mjs \
+  --compare .local/manifests-before.json
+```
+
+Reports remain local in `.local/recorder-paired.json`,
+`.local/recorder-profile-summary.json`, `.local/recorder-profile-{before,after}-{none,cold}.cpuprofile`,
+`.local/manifests-{base,candidate}-{oracle,real}.json`, and
+`.local/recorder-hook-sensitivity.json`. Disposable compiler copies and cache
+scratch are removed after validation.
 
 ## Resolved-artifact digests (step 3)
 
@@ -958,7 +1290,8 @@ does not prove that an incomplete dependency manifest is safe.
    Test retained registries against fresh cold after multi-edit/inventory/config
    sequences; narrow body/interface hashes only after dedicated cases pass.
 
-Step 4a.1 query scoping and registry rebuilding are implemented on this branch;
-its recording-time budget remains unmet. Step 4a.2 shadow keys, Step 4b flagged
-selective lookup and Step 4c default recording/lookup remain plans. Steps 2–3
-and this branch implement no selective reuse across registry versions.
+Step 4a.1 query scoping and registry rebuilding and Step 4a.2 shadow keys are
+implemented. The recorder-time budget remains unmet and its cacheDir-only cost
+is provisionally accepted for this shadow step. Step 4b flagged selective lookup
+and Step 4c default selective lookup remain plans. Production still performs no
+selective reuse across registry versions.

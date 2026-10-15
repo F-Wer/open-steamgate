@@ -173,7 +173,7 @@ test("old version directories are pruned, recent and foreign ones kept", () => {
     writeFileSync(join(dir, "zcl_base.clas.abap"), source("zcl_base", "rv = 7."));
     const args = {folders: [dir], objects: ["ZCL_BASE"], cacheDir};
     compileProgram(args);
-    const [current] = readdirSync(cacheDir);
+    const [current] = readdirSync(cacheDir).filter((n) => /^[0-9a-f]{64}$/.test(n));
     const version = (i) => String(i).padStart(64, "0"), hours = (h) => new Date(Date.now() - h * 3600e3);
     // six stale versions (2..7 hours old), five opened within the hour, one foreign directory
     const at = (name, h) => { mkdirSync(join(cacheDir, name)); utimesSync(join(cacheDir, name), hours(h), hours(h)); };
@@ -186,7 +186,7 @@ test("old version directories are pruned, recent and foreign ones kept", () => {
     assert.deepEqual(next.frontendCounts.reusedClasses, ["ZCL_BASE"]);
     // keep 4 = the current one + three others by last use; more recent ones than
     // that are kept as well, and the current one was marked used by opening it
-    assert.deepEqual(readdirSync(cacheDir).sort(), [...recent, current, "notes"].sort());
+    assert.deepEqual(readdirSync(cacheDir).sort(), [...recent, current, "notes", "v3"].sort());
     assert.ok(Date.now() - statSync(join(cacheDir, current)).mtimeMs < 60e3);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
@@ -220,7 +220,7 @@ ENDCLASS.`;
     // the leaf superclass changes emitted owner IR and exception metadata
     assert.notEqual(outputs[0], outputs[1]);
     // and the entry's key names the hierarchy it read, not only the global version
-    const entries = readdirSync(cacheDir, {recursive: true}).filter((f) => f.endsWith(".bin"))
+    const entries = readdirSync(cacheDir, {recursive: true}).filter((f) => /^[0-9a-f]{64}\//.test(f) && f.endsWith(".bin"))
       .map((f) => deserialize(inflateRawSync(readFileSync(join(cacheDir, f)).subarray(65))));
     for (const name of ["ZCL_CATCHER", "ZCL_CATCHER2"]) {
       const catcher = entries.filter((e) => e.value.name === name);

@@ -125,6 +125,9 @@ export function runOracle({classes = 300, seed = 719, real = false, scenarios,
           const noEdit = {...compareArtifacts(unchanged, prime), scenario: scenario.name, kind: "unchanged", noline, ...unchanged.counts};
           summaries.push(noEdit);
           if (!noEdit.equal) throw new Error(`unchanged warm differs: ${JSON.stringify(noEdit)}`);
+          if (env.GOGEN_CACHE_SHADOW_VALIDATE === "1" && !env.GOGEN_CACHE_ORACLE_FAULT
+              && (!noEdit.shadowV3?.validated || noEdit.shadowV3.disagreements))
+            throw new Error("shadow oracle requires validated v3 predictions, not vacuous zero disagreements");
           noEdit.featureCoverage = corpus.featureClasses.map((name) => {
             const reused = unchanged.counts.reusedClasses.includes(name), reason = uncacheableFeatures[name];
             if (!reused && !reason) throw new Error(`feature fixture never cached: ${name}`);
@@ -152,6 +155,7 @@ export function runOracle({classes = 300, seed = 719, real = false, scenarios,
           const row = {...compareArtifacts(warm, cold), scenario: scenario.name, kind: mutation.kind, noline,
             loweredClasses: warm.counts.loweredClasses, reusedClasses: warm.counts.reusedClasses,
             lowered: warm.counts.lowered, reused: warm.counts.reused, coldCounts: cold.counts,
+            shadowV3: warm.counts.shadowV3,
             differences: artifactDifferences(warm, cold), coldChange, ...(expected ? {expectedNoChange: expected} : {}), dependentChanges};
           previousCold = cold;
           rows.push(row); onResult(row); save();

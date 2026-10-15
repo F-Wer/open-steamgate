@@ -4,7 +4,7 @@ import {provenanceGraph} from "./frontend-provenance.mjs";
 import {artifactDigestOf} from "./frontend-artifact-digests.mjs";
 import {inputSnapshot} from "./frontend-inventory.mjs";
 
-export function dependencyGraph(reg, roots) {
+export function dependencyGraph(reg, roots, extraArtifacts = []) {
   const trace = provenanceGraph(reg) ?? {artifacts: new Map(), lowerings: new Map(), global: {queries: new Map()}}, inventory = inputSnapshot(reg), nodes = {};
   const identity = (key) => inventory.objects.has(key) ? key : inventory.fileOwners.get(key);
   const build = (key, lowering = false) => {
@@ -26,6 +26,7 @@ export function dependencyGraph(reg, roots) {
     return id;
   };
   for (const root of roots) build(root, true);
+  for (const key of extraArtifacts) build(key);
   return {format: "gogen-provenance-graph-1", nodes};
 }
 
