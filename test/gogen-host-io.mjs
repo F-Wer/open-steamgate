@@ -37,6 +37,7 @@ const exceptions = {
   "tools/gogen/frontend-provenance-hooks.mjs": {"node:path": ["relative", "isAbsolute"], "node:url": ["fileURLToPath"]},
   "tools/gogen/frontend-source-key.mjs": {"node:crypto": ["createHash"]},
   "tools/gogen/frontend-artifact-digests.mjs": {"node:crypto": ["createHash"], "node:path": ["basename"]},
+  "tools/gogen/frontend-inventory.mjs": {"node:crypto": ["createHash"], "node:module": ["createRequire"]},
 };
 const hostImports = {"node:fs": ["readFileSync", "readdirSync", "writeFileSync"],
   "node:path": ["*"], "node:child_process": ["execFileSync"]};
