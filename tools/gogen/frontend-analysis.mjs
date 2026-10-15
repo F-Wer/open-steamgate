@@ -105,7 +105,7 @@ function sqlViewName(annotations) {
 }
 
 // Typed host methods keep their parsed signature; generic ones use NATIVE_ME.
-export function nativeMethodBody(nativeMe, className, name) {
+/** @param {typeof import("./frontend-classes-native.mjs").NATIVE_ME} nativeMe @param {string} className @param {string} name @returns {string | undefined} */ export function nativeMethodBody(nativeMe, className, name) {
   if (className === "CL_ABAP_CLASSDESCR" && name === "GET_SUPER_CLASS_TYPE") return "Native_GET_SUPER_CLASS_TYPE";
   return nativeMe.get(`${className}=>${name}`)?.fn;
 }

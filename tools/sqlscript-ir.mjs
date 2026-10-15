@@ -39,6 +39,7 @@ export const T = {
 
 // ---------------------------------------------------------------- expressions
 
+/** @param {string} [source] */
 export const col = (name, type, source) => source === undefined
   ? ({node: "col", name, type}) : ({node: "col", name, type, source});
 export const lit = (value, type) => ({node: "lit", value, type});
