@@ -1,5 +1,5 @@
 import {append} from "./append.ts";
-import {objectRttiJs, exceptionClass} from "./emit-exception.mjs";
+import {objectRttiJs, exceptionClass} from "./emit-exception.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {constructorFactories} from "./emit-constructors.ts";
 import {emitCondition} from "./emit-js-condition.mjs";

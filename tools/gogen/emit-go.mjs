@@ -11,7 +11,7 @@ import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.ts";
 import {emitBuiltinGo} from "./emit-builtins.mjs";
 import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.mjs";
-import {objectRttiGo, exceptionClass, nativeMessageText} from "./emit-exception.mjs";
+import {objectRttiGo, exceptionClass, nativeMessageText} from "./emit-exception.ts";
 import {emitByteStatement} from "./emit-bytes.mjs";
 // IR -> Go source, for the Go backend spike.
 //
