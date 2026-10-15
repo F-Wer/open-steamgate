@@ -7,9 +7,6 @@ import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
 const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
 const abaplint = transpilerRequire("@abaplint/core");
-const {CDSLexer} = transpilerRequire("@abaplint/core/build/src/cds/cds_lexer");
-const {seq, star, opt} = transpilerRequire("@abaplint/core/build/src/abap/2_statements/combi");
-const {Result} = transpilerRequire("@abaplint/core/build/src/abap/2_statements/result");
 const {Expressions, ExpressionsCDS, Nodes} = abaplint;
 
 const trees = new WeakMap();
@@ -56,10 +53,6 @@ export function samcOf(folders) {
 // view. The map belongs to the registry, including reused registry compiles.
 const cdsFailures = new WeakMap();
 export const cdsMappingError = (views, name) => cdsFailures.get(views)?.get(name);
-// Let core parse the header even when the SELECT body cannot be parsed. This
-// preserves the definition name when the abapGit object has a different name.
-const cdsHeader = seq(star(ExpressionsCDS.CDSAnnotation), opt("DEFINE"), opt("ROOT"),
-  opt("WRITABLE"), "VIEW", opt("ENTITY"), ExpressionsCDS.CDSName);
 function sqlViewName(annotations) {
   for (const annotation of annotations) {
     const key = annotation.getChildren().filter(c => c instanceof Nodes.TokenNode)
@@ -91,13 +84,9 @@ export function cdsSqlViews(sources) {
     const tree = obj?.getTree();
     if (!tree) {
       const message = `${filename}: DDLS view mapping could not be read`;
+      // Without a tree there is no definition or SQL view name to read; the
+      // abapGit object name (the file name) is what a failure can be found by.
       if (obj) failures.set(obj.getName().toUpperCase(), message);
-      const tokens = CDSLexer.run(file).filter(t => !(t instanceof abaplint.Tokens.Comment));
-      const header = cdsHeader.run([new Result(tokens, 0)])[0]?.getNodes() ?? [];
-      const name = header.find(n => n.get() instanceof ExpressionsCDS.CDSName)?.concatTokens().toUpperCase();
-      if (name) failures.set(name, message);
-      const sql = sqlViewName(header.filter(n => n.get() instanceof ExpressionsCDS.CDSAnnotation));
-      if (sql) failures.set(sql, message);
       continue;
     }
     if (!(tree.get() instanceof ExpressionsCDS.CDSDefineView)) continue;
