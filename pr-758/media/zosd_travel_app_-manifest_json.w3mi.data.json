@@ -1,0 +1,135 @@
+{
+  "_version": "1.59.0",
+  "sap.app": {
+    "id": "stg.travel",
+    "type": "application",
+    "title": "Travels",
+    "description": "open-steamgate demo list report over ZSTG_DEMO_SRV",
+    "applicationVersion": {
+      "version": "0.0.1"
+    },
+    "dataSources": {
+      "mainService": {
+        "uri": "../../../../opu/odata/sap/ZSTG_DEMO_SRV/",
+        "type": "OData",
+        "settings": {
+          "odataVersion": "2.0"
+        }
+      }
+    },
+    "crossNavigation": {
+      "inbounds": {
+        "Travel-manage": {
+          "semanticObject": "Travel",
+          "action": "manage",
+          "signature": {
+            "parameters": {},
+            "additionalParameters": "allowed"
+          }
+        }
+      },
+      "outbounds": {
+        "BookingDisplay": {
+          "semanticObject": "Booking",
+          "action": "display"
+        }
+      }
+    }
+  },
+  "sap.ui": {
+    "technology": "UI5",
+    "deviceTypes": {
+      "desktop": true,
+      "tablet": true,
+      "phone": true
+    }
+  },
+  "sap.ui5": {
+    "dependencies": {
+      "minUI5Version": "1.120.0",
+      "libs": {
+        "sap.m": {},
+        "sap.f": {},
+        "sap.ui.core": {},
+        "sap.ui.comp": {},
+        "sap.ui.generic.app": {},
+        "sap.suite.ui.generic.template": {}
+      }
+    },
+    "contentDensities": {
+      "compact": true,
+      "cozy": true
+    },
+    "models": {
+      "i18n": {
+        "type": "sap.ui.model.resource.ResourceModel",
+        "settings": {
+          "bundleName": "stg.travel.i18n.i18n",
+          "supportedLocales": [
+            ""
+          ],
+          "fallbackLocale": ""
+        }
+      },
+      "": {
+        "dataSource": "mainService",
+        "preload": true,
+        "settings": {
+          "useBatch": true,
+          "defaultCountMode": "Inline",
+          "defaultBindingMode": "TwoWay",
+          "refreshAfterChange": false
+        }
+      }
+    }
+  },
+  "sap.ui.generic.app": {
+    "_version": "1.3.0",
+    "settings": {
+      "flexibilityEnabled": false,
+      "flexibleColumnLayout": {
+        "defaultTwoColumnLayoutType": "TwoColumnsMidExpanded",
+        "defaultThreeColumnLayoutType": "ThreeColumnsEndExpanded"
+      }
+    },
+    "pages": {
+      "ListReport|Travel": {
+        "entitySet": "TravelSet",
+        "component": {
+          "name": "sap.suite.ui.generic.template.ListReport",
+          "list": true,
+          "settings": {
+            "dataLoadSettings": {
+              "loadDataOnAppLaunch": "always"
+            },
+            "smartVariantManagement": false,
+            "condensedTableLayout": true
+          }
+        },
+        "pages": {
+          "ObjectPage|Travel": {
+            "entitySet": "TravelSet",
+            "component": {
+              "name": "sap.suite.ui.generic.template.ObjectPage",
+              "settings": {
+                "editableHeaderContent": false
+              }
+            },
+            "pages": {
+              "ObjectPage|to_Bookings": {
+                "navigationProperty": "to_Bookings",
+                "entitySet": "BookingSet",
+                "component": {
+                  "name": "sap.suite.ui.generic.template.ObjectPage",
+                  "settings": {
+                    "editableHeaderContent": false
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
