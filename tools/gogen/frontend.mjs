@@ -18,11 +18,11 @@ import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // why; a method that calls a skipped one is refused in turn.
 import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
 import {prepareSession, finishSession, compileClass} from "./frontend-session.mjs";
-import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
+import {syntaxDiagnostics} from "./frontend-diagnostics.ts";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
 import {lowerBoolx} from "./frontend-boolx.mjs";
 import {builtin} from "./frontend-builtins.mjs";
-import {literalText, textLiteral} from "./frontend-literals.mjs";
+import {literalText, textLiteral} from "./frontend-literals.ts";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";

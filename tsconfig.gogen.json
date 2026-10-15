@@ -18,6 +18,8 @@
     "tools/gogen/ir.ts",
     "tools/gogen/fold-scalars.ts",
     "tools/gogen/append.ts",
+    "tools/gogen/frontend-diagnostics.ts",
+    "tools/gogen/frontend-literals.ts",
     "tools/gogen/symbols.ts",
     "tools/gogen/go-symbols.ts",
     "tools/gogen/emit-constructors.ts",
