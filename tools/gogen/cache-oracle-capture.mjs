@@ -6,8 +6,7 @@ import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
-import {lowerBoolx} from "./frontend-boolx.ts";
-import {lowerNarrowSubmit} from "../osd-narrow-submit.mjs";
+import {normalizeSource} from "./frontend-source.mjs";
 
 const require = createRequire(import.meta.url);
 const abaplint = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
@@ -39,7 +38,7 @@ export function orderedRegistry(folders, order = [], {parse = true} = {}) {
   const selected = order.map((name) => files.find((f) => f.name === name));
   slots.forEach((slot, i) => { files[slot] = selected[i]; });
   for (const {name, path} of files) registry.addFile(new abaplint.MemoryFile(name,
-    lowerNarrowSubmit(lowerBoolx(readFileSync(path, "utf8"), name, abaplint), name, abaplint)));
+    normalizeSource(readFileSync(path, "utf8"), name, abaplint)));
   if (parse) registry.parse();
   return registry;
 }

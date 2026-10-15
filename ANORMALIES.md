@@ -30,18 +30,16 @@ Format adapted from `larshp/hithub` (MIT).
 
 ## Open anomalies
 
-### ANOMALY-2026-10-15-tabl-elementary-builtins -- Elementary TABL fields without ROLLNAME
+### ANOMALY-2026-10-15-tabl-elementary-builtins -- TABL field with COMPTYPE E and no ROLLNAME
 
-- Status: `workaround` in the native compiler input path.
-- Affected version: `@abaplint/core 2.120.73` (also consumed by the pinned transpiler's database setup).
-- Reproducer: `tools/gogen/osabap.test.mjs`, "built-in DDIC fields with elementary COMPTYPE need no data element".
-- Input: an abapGit TABL field with `COMPTYPE=E`, `DATATYPE=CLNT`, `LENG=3` and no `ROLLNAME`; the same shape occurs for CHAR, INT4 and other built-in DDIC types.
-- Expected: DATATYPE/LENG/DECIMALS define the elementary field when there is no data-element reference.
-- Actual: core's `objects/table.js` takes every `COMPTYPE=E` through `DDIC.lookupDataElement`, producing UnknownType for the absent ROLLNAME. The transpiler's `DatabaseSetup` subsequently refuses the column; changing SQL type generation alone would leave ABAP typing broken.
-- Workaround: `tools/gogen/frontend-ddic.mjs` clears COMPTYPE on built-in TABL fields lacking a nonempty ROLLNAME before registry parsing. Named data elements and non-elementary components retain their original definitions; source files are unchanged.
-- Validation: native report builds its schema and inserts/reads CLNT, CHAR, NUMC, DATS, TIMS, RAW, STRG, RSTR and DEC fields; INT1/INT2/INT4/INT8/CURR/QUAN schema generation is covered too.
-- Upstream: needs an issue in abaplint/abaplint; no upstream submission in this local-only task.
-- Upstream version containing a fix: unknown.
+- Status: `refused` -- no workaround. gogen names the field and stops before the transpiler's DatabaseSetup (`tools/gogen/frontend-ddic.mjs`, called by `osabap.mjs` and `osg-build.mjs`).
+- Affected version: `@abaplint/core 2.120.73`.
+- Input: an abapGit TABL field with `COMPTYPE=E`, a `DATATYPE` (e.g. `CLNT`, `LENG=3`) and no `ROLLNAME`. Written by one third-party generator, not seen in a system export.
+- SAP: an abapGit import of such a table on A4H was accepted and the tests that use it ran (reported by the generator's author, v0.5.0/v0.5.1; how the system stored the field is unmeasured; measure on A4H).
+- abaplint: `objects/table.js` takes every `COMPTYPE=E` through `DDIC.lookupDataElement`, so the field is UnknownType; the transpiler's DatabaseSetup then fails with "todo toType handle: UnknownType", naming neither table nor cause. The Node build path has the same failure.
+- Decision: the generator moves its tables to data elements (ROLLNAME); OSG refuses the shape with a message naming table, field and DATATYPE. Fields are read from abaplint's parsed XML (`getFields`), not from the text.
+- Tests: `tools/gogen/frontend-ddic.test.mjs` (CDATA, empty and self-closing ROLLNAME, comments), `tools/gogen/osabap.test.mjs` "a TABL field with COMPTYPE E and no ROLLNAME is refused by name".
+- Upstream: none until a real system export with this shape is seen.
 
 ### ANOMALY-2026-10-10-get-run-time-wrap -- GET RUN TIME does not wrap at 2^31
 

@@ -1,7 +1,6 @@
 // Focused end-to-end check for the native report host. It intentionally uses
 // the local open-abap-gui/core checkouts, just like osabap.mjs itself.
 import test from "node:test";
-import {builtinTableFields} from "./frontend-ddic.mjs";
 import assert from "node:assert/strict";
 import {execFileSync, spawn, spawnSync} from "node:child_process";
 import {cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
@@ -735,40 +734,19 @@ START-OF-SELECTION.
 });
 
 
-test("built-in DDIC fields with elementary COMPTYPE need no data element", () => {
+test("a TABL field with COMPTYPE E and no ROLLNAME is refused by name", () => {
   const dir = mkdtempSync(join(tmpdir(), "osabap-builtin-ddic-"));
   try {
-    const fields = [["MANDT", "CLNT", 3], ["ID", "INT4", 10], ["TEXT", "CHAR", 12],
-      ["NUM", "NUMC", 4], ["DAY", "DATS", 8], ["TIME", "TIMS", 6], ["BYTES", "RAW", 2],
-      ["STR", "STRG", 0], ["XSTR", "RSTR", 0], ["AMOUNT", "DEC", 7],
-      ["SMALL", "INT1", 3], ["SHORT", "INT2", 5], ["BIG", "INT8", 19],
-      ["CURRENCY", "CURR", 9], ["QUANTITY", "QUAN", 9]];
     writeFileSync(join(dir, "zprobe.tabl.xml"), `<?xml version="1.0" encoding="utf-8"?>
 <abapGit version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
 <DD02V><TABNAME>ZPROBE</TABNAME><TABCLASS>TRANSP</TABCLASS><CLIDEP>X</CLIDEP></DD02V>
-<DD03P_TABLE>${fields.map(([name, datatype, length], i) => `<DD03P><FIELDNAME>${name}</FIELDNAME>${i < 2 ? "<KEYFLAG>X</KEYFLAG>" : ""}<COMPTYPE>E</COMPTYPE><DATATYPE>${datatype}</DATATYPE><LENG>${length}</LENG><DECIMALS>${["DEC", "CURR", "QUAN"].includes(datatype) ? 2 : 0}</DECIMALS></DD03P>`).join("")}</DD03P_TABLE>
+<DD03P_TABLE><DD03P><FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><COMPTYPE>E</COMPTYPE><DATATYPE>CLNT</DATATYPE><LENG>3</LENG></DD03P></DD03P_TABLE>
 </asx:values></asx:abap></abapGit>`);
     const report = join(dir, "zprobe.prog.abap");
-    writeFileSync(report, `REPORT zprobe.
-PARAMETERS p_id TYPE i DEFAULT 1.
-START-OF-SELECTION.
-  DATA row TYPE zprobe.
-  row-mandt = sy-mandt. row-id = p_id. row-text = 'hello'. row-num = '0012'.
-  row-day = '20261015'. row-time = '123456'. row-bytes = 'ABCD'.
-  row-str = 'long text'. row-xstr = '012345'. row-amount = '12.34'.
-  INSERT zprobe FROM @row.
-  ASSERT sy-subrc = 0.
-  CLEAR row.
-  SELECT SINGLE mandt, text, num, day, time, bytes, str, xstr, amount FROM zprobe INTO CORRESPONDING FIELDS OF @row WHERE id = 1.
-  ASSERT 0 = sy-subrc.
-  ASSERT row-num = '0012'. ASSERT row-bytes = 'ABCD'.
-  ASSERT row-str = 'long text'. ASSERT row-xstr = '012345'. ASSERT row-amount = '12.34'.
-  WRITE: / row-mandt, row-text, row-day, row-time.
-`);
-    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
-    const result = run(["-db", join(dir, "probe.db"), "--p_id", "1"]);
-    assert.equal(result.status, 0, result.stderr + result.stdout);
-    assert.match(result.stdout, /123 hello.*20261015.*123456/);
+    writeFileSync(report, "REPORT zprobe.\nSTART-OF-SELECTION.\n  DATA row TYPE zprobe.\n  WRITE / row-mandt.\n");
+    const built = spawnSync(process.execPath, [builder, report], {encoding: "utf8"});
+    assert.notEqual(built.status, 0);
+    assert.match(built.stderr, /TABL field with COMPTYPE E and no ROLLNAME: ZPROBE-MANDT \(DATATYPE CLNT\)/);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
@@ -800,6 +778,8 @@ START-OF-SELECTION.
   ENDTRY.
   CALL METHOD ('ZCL_OPTIONAL_RECEIVER')=>('EVENT') EXPORTING value = value.
   ASSERT zcl_optional_receiver=>last = value.
+  CALL METHOD ('ZCL_OPTIONAL_RECEIVER')=>('EVENT') EXPORTING value = 'IMPORTING'.
+  ASSERT zcl_optional_receiver=>last = 'IMPORTING'.
   WRITE / 'continued'.
 `);
     execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
@@ -810,15 +790,3 @@ START-OF-SELECTION.
 });
 
 
-test("DDIC normalization preserves references and non-elementary components", () => {
-  const field = (body) => `<DD03P>${body}</DD03P>`;
-  for (const body of [
-    '<COMPTYPE>E</COMPTYPE><DATATYPE>CHAR</DATATYPE><ROLLNAME>ZTEXT</ROLLNAME>',
-    '<COMPTYPE>R</COMPTYPE><DATATYPE>CHAR</DATATYPE>',
-    '<COMPTYPE>E</COMPTYPE><ROLLNAME>ZTEXT</ROLLNAME>',
-    '<DATATYPE>CHAR</DATATYPE>',
-  ]) assert.equal(builtinTableFields(field(body), "zprobe.tabl.xml"), field(body));
-  const input = field('<COMPTYPE>E</COMPTYPE><ROLLNAME/><DATATYPE>CHAR</DATATYPE>');
-  assert.equal(builtinTableFields(input, "zprobe.tabl.xml"), input.replace('<COMPTYPE>E</COMPTYPE>', '<COMPTYPE></COMPTYPE>'));
-  assert.equal(builtinTableFields(input, "zprobe.dtel.xml"), input);
-});

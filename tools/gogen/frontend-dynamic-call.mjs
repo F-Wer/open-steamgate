@@ -20,7 +20,10 @@ export function dynamicStaticCall(node, ctx, {Expressions, isTok, isExpr, source
   } else throw new Unsupported(`CALL METHOD form: ${text}`);
   const body = node.findDirectExpression(Expressions.MethodCallBody);
   const mp = body?.findDirectExpression(Expressions.MethodParameters);
-  if (mp && /\b(IMPORTING|CHANGING|RECEIVING|EXCEPTIONS)\b/i.test(mp.concatTokens())) throw new Unsupported(`CALL METHOD by name with ${mp.concatTokens()}`);
+  // Only EXPORTING is passed by name. The section keywords are direct token
+  // children of MethodParameters; a literal 'IMPORTING' in an argument is not.
+  const sections = ["IMPORTING", "CHANGING", "RECEIVING", "EXCEPTIONS"];
+  if (mp?.getChildren().some((c) => sections.some((k) => isTok(c, k)))) throw new Unsupported(`CALL METHOD by name with ${mp.concatTokens()}`);
   if (body && !mp) throw new Unsupported(`CALL METHOD form: ${text}`);
   const args = (mp?.findAllExpressions(Expressions.ParameterS) ?? []).map((p) => ({name: p.findDirectExpression(Expressions.ParameterName).concatTokens().toUpperCase(),
     value: convert(source(p.findDirectExpression(Expressions.Source), ctx), {k: "data"})}));

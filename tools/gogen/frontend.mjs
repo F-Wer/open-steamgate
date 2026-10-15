@@ -1,4 +1,4 @@
-import {builtinTableFields} from "./frontend-ddic.mjs";
+import {normalizeSource} from "./frontend-source.mjs";
 import {dynamicStaticCall} from "./frontend-dynamic-call.mjs";
 import {inputOrigin} from "./frontend-inventory.mjs";
 import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection} from "./frontend-queries.mjs";
@@ -26,7 +26,6 @@ import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
 import {prepareSession, finishSession, compileClass} from "./frontend-session.mjs";
 import {syntaxDiagnostics} from "./frontend-diagnostics.ts";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
-import {lowerBoolx} from "./frontend-boolx.ts";
 import {builtin} from "./frontend-builtins.mjs";
 import {literalText, textLiteral} from "./frontend-literals.ts";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
@@ -35,7 +34,6 @@ import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
 import {samcOf, cdsSqlViews, rearrangedClass, inlineTableLocals} from "./frontend-analysis.mjs";
-import {lowerNarrowSubmit} from "../osd-narrow-submit.mjs";
 import {createRequire} from "node:module";
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
@@ -142,7 +140,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
         // Later rounds can select any loaded object. Normalize once before
         // parsing so newly selected app classes match a fresh final registry.
         reg.addFile(new abaplint.MemoryFile(e.name,
-          builtinTableFields(lowerNarrowSubmit(lowerBoolx(source, e.name, abaplint), e.name, abaplint), e.name)));
+          normalizeSource(source, e.name, abaplint)));
       }
       // a CDS view's source: its SQL view name, for the table registry
       else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
