@@ -473,7 +473,7 @@ func extendedPCRE(p string) string {
 			}
 		}
 		if anchor, size := pcregeneric.AbsoluteAnchor(p, i); size > 0 {
-			out.WriteString(anchor)
+			out.WriteString("(?:" + anchor + ")")
 			i += size - 1
 			continue
 		}

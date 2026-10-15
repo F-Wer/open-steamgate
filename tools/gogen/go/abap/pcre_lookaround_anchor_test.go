@@ -79,3 +79,92 @@ func TestPCRELookaroundAnchors(t *testing.T) {
 		}()
 	}
 }
+
+func TestPCREBareAnchorEmoji(t *testing.T) {
+	for _, pair := range []string{"", `\s\S`, `\S\s`, `\d\D`, `\D\d`, `\w\W`, `\W\w`} {
+		for _, start := range []bool{true, false} {
+			p := "(?![" + pair + "])"
+			if start {
+				p = "(?<![" + pair + "])"
+			}
+			if pair == "" {
+				p = `\z`
+				if start {
+					p = `\A`
+				}
+			}
+			for _, off := range []int32{0, 1, 2, 3} {
+				sec := SubS("😀a", off, NoLength)
+				pos := Strlen(sec)
+				if start {
+					pos = 0
+				}
+				want := fmt.Sprintf("1[%d,0;]", pos)
+				for _, all := range []bool{false, true} {
+					if got := fmtRes(FindResults(sec, p, 'P', false, all)); got != want {
+						t.Errorf("%s offset %d: %s want %s", p, off, got, want)
+					}
+				}
+				wantText := "😀aX"
+				if start {
+					wantText = SubS("😀a", 0, off) + "X" + sec
+				}
+				if got, rc := ReplaceStmt("😀a", p, "X", true, true, false, off, NoLength, -1, true); got != wantText || rc != 0 {
+					t.Errorf("replace %s offset %d: %q/%d want %q", p, off, got, rc, wantText)
+				}
+			}
+		}
+	}
+}
+
+func TestPCREQuantifiedLookaroundAnchors(t *testing.T) {
+	for _, pair := range []string{`\s\S`, `\S\s`, `\d\D`, `\D\d`, `\w\W`, `\W\w`} {
+		for _, start := range []bool{true, false} {
+			anchor := "(?![" + pair + "])"
+			if start {
+				anchor = "(?<![" + pair + "])"
+			}
+			for _, q := range []string{"*", "+", "?", "{0}", "{1}"} {
+				for _, s := range []string{"", "ab", "😀a"} {
+					positions := []int32{0}
+					var pos int32
+					for _, c := range s {
+						pos++
+						if c > 0xffff {
+							pos++
+						}
+						positions = append(positions, pos)
+					}
+					if q == "+" || q == "{1}" {
+						pos = Strlen(s)
+						if start {
+							pos = 0
+						}
+						positions = []int32{pos}
+					}
+					want := ""
+					for _, i := range positions {
+						want += fmt.Sprintf("%d,0;", i)
+					}
+					for _, all := range []bool{false, true} {
+						expected := fmt.Sprintf("%d[%s]", len(positions), want)
+						if !all {
+							expected = fmt.Sprintf("1[%d,0;]", positions[0])
+						}
+						if got := fmtRes(FindResults(s, anchor+q, 'P', false, all)); got != expected {
+							t.Errorf("%s%s %q: %s want %s", anchor, q, s, got, expected)
+						}
+					}
+					expected := s
+					for i := len(positions) - 1; i >= 0; i-- {
+						n := positions[i]
+						expected = SubS(expected, 0, n) + "X" + SubS(expected, n, NoLength)
+					}
+					if got, rc := ReplaceStmt(s, anchor+q, "X", true, true, false, 0, NoLength, -1, true); got != expected || rc != 0 {
+						t.Errorf("replace %s%s %q: %q/%d want %q", anchor, q, s, got, rc, expected)
+					}
+				}
+			}
+		}
+	}
+}

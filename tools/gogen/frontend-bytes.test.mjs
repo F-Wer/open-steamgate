@@ -486,3 +486,37 @@ test("matches with PCRE remains outside the frontend subset", () => {
   assert.equal(p.partial.length, 1);
   assert.match(p.partial[0], /comparison matches/);
 });
+
+// Scalar boundary expectations; native V8 lookaround is not an emoji oracle.
+test("PCRE bare anchors keep emoji boundaries in first/all and replacement sections", async () => {
+  const a = await import("./js/abap.mjs");
+  const pairs = ["sS", "Ss", "dD", "Dd", "wW", "Ww"];
+  for (const pair of [null, ...pairs]) for (const start of [true, false]) {
+    const p = pair === null ? (start ? "\\A" : "\\z") :
+      `${start ? "(?<!" : "(?!"}[\\${pair[0]}\\${pair[1]}])`;
+    for (const off of [0, 1, 2, 3]) {
+      const sec = "😀a".slice(off), span = [[start ? 0 : sec.length, 0]];
+      for (const all of [false, true]) {
+        assert.deepEqual(a.FindResults(sec, p, "P", false, all), span, `${p} offset ${off}`);
+      }
+      const expected = start ? "😀a".slice(0, off) + "X" + sec : "😀aX";
+      assert.deepEqual(a.ReplaceStmt("😀a", p, "X", true, true, false, off, a.NoLength, -1, true), [expected, 0]);
+    }
+  }
+});
+
+test("PCRE lookaround anchors remain quantifiable", async () => {
+  const a = await import("./js/abap.mjs");
+  for (const pair of ["sS", "Ss", "dD", "Dd", "wW", "Ww"]) for (const start of [true, false]) {
+    const anchor = `${start ? "(?<!" : "(?!"}[\\${pair[0]}\\${pair[1]}])`;
+    for (const q of ["*", "+", "?", "{0}", "{1}"]) for (const s of ["", "ab", "😀a"]) {
+      const required = q === "+" || q === "{1}";
+      const spans = required ? [[start ? 0 : s.length, 0]] :
+        [...s].reduce((out, c) => [...out, [out.at(-1)[0] + c.length, 0]], [[0, 0]]);
+      for (const all of [false, true]) assert.deepEqual(a.FindResults(s, anchor + q, "P", false, all), all ? spans : spans.slice(0, 1), `${anchor}${q} ${s}`);
+      let expected = s;
+      for (const [i] of [...spans].reverse()) expected = expected.slice(0, i) + "X" + expected.slice(i);
+      assert.deepEqual(a.ReplaceStmt(s, anchor + q, "X", true, true, false, 0, a.NoLength, -1, true), [expected, 0]);
+    }
+  }
+});
