@@ -1,13 +1,13 @@
 export function replaceStatement(node, ctx, text, h) {
   const {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS} = h;
-  const section = /^REPLACE SECTION(?: OFFSET)?(?: LENGTH)? OF WITH(?: IN (?:BYTE|CHARACTER) MODE)?$/.test(node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(k.concatTokens())).filter((w) => w !== ".").join(" "));
-  const bytes = /^REPLACE SECTION(?: OFFSET)?(?: LENGTH)? OF WITH IN BYTE MODE$/.test(node.getChildren().filter((k) => k instanceof Nodes.TokenNode).map((k) => upper(k.concatTokens())).filter((w) => w !== ".").join(" "));
-  // REPLACE [FIRST OCCURRENCE OF | ALL OCCURRENCES OF] [REGEX] p IN
-  // [SECTION [OFFSET o] [LENGTH l] OF] v WITH w [IGNORING CASE]; every rule
-  // measured on A4H 2026-09-23, see abap.ReplaceStmt
-  if (!bytes && /\b(RESPECTING|IN\s+BYTE\s+MODE|REPLACEMENT|RESULTS|INTO)\b/i.test(text)) throw new Unsupported(`REPLACE form: ${text}`);
   const kids = node.getChildren();
   const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
+  const tw = words.filter((w) => w !== "" && w !== ".").join(" ");
+  const matches = (...parts) => keywordForm(tw, ...parts);
+  const section = matches("REPLACE SECTION", ["", "OFFSET"], ["", "LENGTH"], "OF WITH", ["", "IN BYTE MODE", "IN CHARACTER MODE"]);
+  const bytes = matches("REPLACE SECTION", ["", "OFFSET"], ["", "LENGTH"], "OF WITH IN BYTE MODE");
+  const hasKeywords = (...seq) => words.some((_, i) => seq.every((w, j) => words[i + j] === w));
+  if (!bytes && (words.some((w) => ["RESPECTING", "REPLACEMENT", "RESULTS", "INTO"].includes(w)) || hasKeywords("IN", "BYTE", "MODE"))) throw new Unsupported(`REPLACE form: ${text}`);
   if (!section && words.includes("SECTION") && !words.includes("OCCURRENCE") && !words.includes("OCCURRENCES")) throw new Unsupported(`REPLACE SECTION form: ${text}`);
   const ft = node.findDirectExpression(Expressions.FindType);
   const kind = ft ? upper(ft.concatTokens()) : "";
@@ -46,7 +46,7 @@ export function replaceStatement(node, ctx, text, h) {
   const w = source(wth, ctx);
   if (!charlike(p.type) || !charlike(w.type)) throw new Unsupported(`REPLACE operands of ${p.type.k} / ${w.type.k}`);
   return {s: "replace", target, pattern: convert(p, S), with: convert(w, S), regex, pcre: kind === "PCRE", all: words.includes("ALL"),
-    icase: /\bIGNORING\s+CASE\b/i.test(text), off: off ? convert(source(off, ctx, I), I) : null, len: len ? convert(source(len, ctx, I), I) : null,
+    icase: hasKeywords("IGNORING", "CASE"), off: off ? convert(source(off, ctx, I), I) : null, len: len ? convert(source(len, ctx, I), I) : null,
     cLen: target.type.k === "c" ? target.type.len : -1};
 }
 
@@ -54,7 +54,7 @@ export function replaceStatement(node, ctx, text, h) {
 export function lowerByteFind(node, ctx, text, kids, words, tw, h) {
   const {Expressions, isExpr, source, lvalue, convert, Unsupported, I, XS} = h;
   // A4H oracle P2 ALL C3: non-overlapping byte results, with optional count.
-  if (/^FIND ALL OCCURRENCES OF IN IN BYTE MODE( MATCH COUNT)?( RESULTS)?$/.test(tw)
+  if (keywordForm(tw, "FIND ALL OCCURRENCES OF IN IN BYTE MODE", ["", "MATCH COUNT"], ["", "RESULTS"])
     && !node.findDirectExpression(Expressions.FindType)) {
     let count = null, resultNode = null;
     for (let i = 0; i < kids.length; i++) {
@@ -67,8 +67,8 @@ export function lowerByteFind(node, ctx, text, kids, words, tw, h) {
     if (![p, s].every((x) => ["x", "xstring"].includes(x.type.k))) throw new Unsupported(`FIND IN BYTE MODE operands: ${text}`);
     return {s: "find_bytes_all", pattern: convert(p, XS), subject: convert(s, XS), count};
   }
-  if (!/^FIND (FIRST OCCURRENCE OF )?IN (SECTION (OFFSET )?(LENGTH )?OF )?IN BYTE MODE( MATCH OFFSET)?( MATCH LENGTH)?$/.test(tw)
-    || /\b(REGEX|PCRE)\b/i.test(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "")) return null;
+  if (!keywordForm(tw, "FIND", ["", "FIRST OCCURRENCE OF"], "IN", ["", "SECTION OF", "SECTION OFFSET OF", "SECTION LENGTH OF", "SECTION OFFSET LENGTH OF"], "IN BYTE MODE", ["", "MATCH OFFSET"], ["", "MATCH LENGTH"])
+    || ["REGEX", "PCRE"].includes(h.upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? ""))) return null;
   const srcs = node.findDirectExpressions(Expressions.Source);
   const pat = source(srcs[0], ctx), subject = source(srcs.at(-1), ctx);
   for (const x of [pat, subject]) if (x.type.k !== "x" && x.type.k !== "xstring") throw new Unsupported(`FIND IN BYTE MODE of a ${x.type.k}`);
@@ -84,4 +84,10 @@ export function lowerByteFind(node, ctx, text, kids, words, tw, h) {
     }
   }
   return out;
+}
+
+// Match alternatives of direct keyword tokens; operands never enter these forms.
+function keywordForm(text, ...parts) {
+  return parts.reduce((forms, part) => forms.flatMap((form) =>
+    (Array.isArray(part) ? part : [part]).map((p) => [form, p].filter(Boolean).join(" "))), [""]).includes(text);
 }
