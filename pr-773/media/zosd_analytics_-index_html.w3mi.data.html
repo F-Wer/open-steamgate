@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <link rel="icon" type="image/svg+xml" href="../osg.svg">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>open-steamgate demo: Flight analytics</title>
+  <style>
+    html, body { height: 100%; margin: 0; }
+  </style>
+  <script id="sap-ui-bootstrap"
+    src="https://ui5.sap.com/1.120.50/resources/sap-ui-core.js"
+    data-sap-ui-theme="sap_horizon"
+    data-sap-ui-libs="sap.m,sap.ui.generic.app,sap.suite.ui.generic.template"
+    data-sap-ui-compatVersion="edge"
+    data-sap-ui-async="true"
+    data-sap-ui-frameOptions="allow"
+    data-sap-ui-xx-componentPreload="off"
+    data-sap-ui-flexibilityServices=""
+    data-sap-ui-resourceroots='{"stg.analytics": "./"}'
+    data-sap-ui-oninit="module:sap/ui/core/ComponentSupport"></script>
+</head>
+<body class="sapUiBody" id="content">
+  <div data-sap-ui-component data-name="stg.analytics" data-id="container" data-height="100%" data-settings='{"id": "stg.analytics"}' style="height: 100%"></div>
+</body>
+</html>
