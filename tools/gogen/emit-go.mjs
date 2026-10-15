@@ -31,7 +31,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
   + "panic print println real recover bool byte error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 "
   + "uint32 uint64 uintptr true false nil iota me s math abap").split(" "));
 
-/** @type {boolean} */ let exportedFields = false, /** @type {import("./emit-go-types.ts").Ownership} */ OWNERSHIP, /** @type {import("./emit-go-types.ts").SymbolCollector | null} */ SYMBOLS;
+/** @type {boolean} */ let exportedFields = false, /** @type {import("./emit-go-types.ts").Ownership | undefined} */ OWNERSHIP, /** @type {import("./emit-go-types.ts").SymbolCollector | null | undefined} */ SYMBOLS;
 /** @param {import("./emit-go-types.ts").Field} v @returns {string} */ const ownedType = (v) => OWNERSHIP.declarations.has(v) ? (HELPER_IMPORTS.add("xbuf"), (v.type.k === "x" ? `[${v.type.len}]byte` : "hXbuf.Buffer")) : goType(v.type);
 /** @param {string} name @returns {string} */ export const ident = (name) => {
   // INTF~ATTR, an interface's attribute in the object, keeps the ~ apart
@@ -63,7 +63,7 @@ const GO_RESERVED = new Set(("break default func interface select case defer go 
 }
 
 /** @type {Set<string>} */ let STABLE_ROWS = new Set();
-/** @type {import("./emit-go-types.ts").MovePair} */ let movePair;
+/** @type {import("./emit-go-types.ts").MovePair | undefined} */ let movePair;
 /** @param {import("./emit-go-types.ts").TypeProbe} t @returns {boolean | undefined} */ const stable = (t) => t?.stable || (t?.k === "table" && STABLE_ROWS.has(t.row.go ?? `${t.row.k}:${t.row.len ?? ""}`));
 /** @param {import("./emit-go-types.ts").Type} t @returns {string} */ export function goType(t) {
   switch (t.k) {
@@ -829,8 +829,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 }
 
 /** a signature whose every type is declared in this program */
-/** @param {import("./emit-go-types.ts").ProgramInput} program @param {import("./emit-go-types.ts").Signature} m @returns {boolean} */ export function definable(program, m) {
-  /** @param {import("./emit-go-types.ts").Type | undefined} t @returns {boolean} */ const ok = (t) => {
+/** @param {import("./emit-go-types.ts").ProgramInput} program @param {import("./emit-go-types.ts").Signature} m @returns {boolean | undefined} */ export function definable(program, m) {
+  /** @param {import("./emit-go-types.ts").Type | undefined} t @returns {boolean | undefined} */ const ok = (t) => {
     if (!t) return true;
     if (t.k === "struct") return program.structs.has(t.go);
     if (t.k === "table") return ok(t.row);
@@ -871,7 +871,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   // a structured constant: its components, an unset one initial
   if (c.type.k === "struct") {
     const fields = STRUCTDEFS.get(c.type.go)?.fields ?? [];
-    return `${c.type.go}{${fields.map((f) => `${ident(f.name)}: ${(/** @type {Readonly<Record<string, import("./emit-go-types.ts").LiteralValue>>} */ (c.value))[f.name] === undefined ? zero(f.type) : constLiteral({type: f.type, value: (/** @type {Readonly<Record<string, import("./emit-go-types.ts").LiteralValue>>} */ (c.value))[f.name]})}`).join(", ")}}`;
+    return `${c.type.go}{${fields.map((f) => `${ident(f.name)}: ${(/** @type {Readonly<Record<string, import("./emit-go-types.ts").LiteralValue | undefined>>} */ (c.value))[f.name] === undefined ? zero(f.type) : constLiteral({type: f.type, value: (/** @type {Readonly<Record<string, import("./emit-go-types.ts").LiteralValue | undefined>>} */ (c.value))[f.name]})}`).join(", ")}}`;
   }
   if (c.type.k === "i") return String(Number(c.value));
   // int8: the digits as written, a JS number would round 9223372036854775807
@@ -883,7 +883,9 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   throw new Error(`constant of type ${c.type.k}`);
 }
 
-/** @param {import("./emit-go-types.ts").ClassName} cls @param {import("./ir.ts").Method} m @param {boolean} [inInterface] @returns {string} */ function signature(cls, m, inInterface = false) {
+/** @overload @param {import("./emit-go-types.ts").ClassName} cls @param {import("./emit-go-types.ts").Method} m @param {false} [inInterface] @returns {string} */
+/** @overload @param {import("./emit-go-types.ts").InterfaceClassName} cls @param {import("./emit-go-types.ts").Method} m @param {true} inInterface @returns {string} */
+/** @param {import("./emit-go-types.ts").InterfaceClassName} cls @param {import("./emit-go-types.ts").Method} m @param {boolean} [inInterface] @returns {string} */ function signature(cls, m, inInterface = false) {
   const params = ["s *abap.Session", ...m.params.map((p) => `${ident(p.name)} ${p.dir === "importing" && !byRef(p) ? "" : "*"}${goType(p.type)}`)];
   const ret = m.returning ? ` (${ident(m.returning.name)} ${goType(m.returning.type)})` : "";
   if (inInterface) return `${typeName(m.name)}(${params.join(", ")})${ret}`;
@@ -1128,7 +1130,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
  * strings.Builder for it and writes v back once after the loop.
  */
 /** @param {import("./emit-go-types.ts").Expr} e @returns {import("./emit-go-types.ts").Expr} */ const leftmost = (e) => { while (e?.e === "concat") e = e.l; return e; };
-/** @param {import("./emit-go-types.ts").Stmt | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !st.target.ref && st.target.type.k === "string"
+/** @param {import("./emit-go-types.ts").WalkNode | null | undefined} st @param {string} [name] @returns {boolean} */ const isAppend = (st, name) => st?.s === "assign" && st.target.e === "var" && !st.target.ref && st.target.type.k === "string"
   && (name === undefined || st.target.name === name) && st.value.e === "concat" && leftmost(st.value).e === "var" && leftmost(st.value).name === st.target.name;
 
 /** @param {readonly import("./emit-go-types.ts").Stmt[]} body @param {import("./emit-go-types.ts").Context} ctx @param {readonly unknown[]} [outside] @returns {string[]} */ function builders(body, ctx, outside = []) {
@@ -1136,7 +1138,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   /** @param {unknown} n @returns {void} */ const walk = (n) => {
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
-    if (isAppend(/** @type {import("./emit-go-types.ts").Stmt} */ (n))) names.add((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).target.name);
+    if (isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (n))) names.add((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).target.name);
     for (const k of Object.keys(n)) if (k !== "type") walk((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   walk(body);
@@ -1161,7 +1163,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     if (Array.isArray(n)) { n.forEach(walk); return; }
     if (!n || typeof n !== "object") return;
     if ((/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).e === "var" && (/** @type {import("./emit-go-types.ts").WalkNode} */ (n)).name === name) refs += 1;
-    if (isAppend(/** @type {import("./emit-go-types.ts").Stmt} */ (n), name)) appends += 1;
+    if (isAppend(/** @type {import("./emit-go-types.ts").WalkNode} */ (n), name)) appends += 1;
     for (const k of Object.keys(n)) if (k !== "type") walk((/** @type {import("./emit-go-types.ts").WalkNode} */ (n))[k]);
   };
   walk(body);
@@ -1755,7 +1757,7 @@ ${t}	}`));
     case "insert_sorted": {
       const tb = place(st.table, ctx);
       const n = ctx.loop++;
-      /** @param {string} r @param {import("./ir.ts").SortKey} k @returns {string} */ const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
+      /** @param {string} r @param {import("./emit-go-types.ts").SortKey} k @returns {string} */ const get = (r, k) => (k.line ? r : `${r}.${ident(k.name)}`);
       const cmp = st.keys.map((k) => `if a, b := ${get(`r${n}`, k)}, ${get(`v${n}`, k)}; a != b { if a > b { c${n} = 1 } else { c${n} = -1 }; goto done${n} }`);
       return [`${t}{`, `${t}	v${n} := ${st.value.e === "lrow" && needsCopy(st.value.type) ? `${cloneName(st.value.type)}(${rowValue(st.table.type, expr(st.value, ctx))})` : copied(st.value.e === "lrow" ? rowValue(st.table.type, expr(st.value, ctx)) : expr(st.value, ctx), st.value.type, st.value)}`, `${t}	pos${n} := len(${tb})`, `${t}	s.Sy.Subrc = 0`,
         `${t}	for i${n}, r${n} := range ${tb} {`, `${t}		c${n} := 0`, ...cmp.map((x) => `${t}		${x}`), `${t}	done${n}:`,
@@ -2190,10 +2192,10 @@ ${t}	}`));
 // a DEC column read into a p field, rounded to the field's decimals
 /** @param {string} v @param {import("./emit-go-types.ts").Type} ft @returns {string} */ const dbP = (v, ft) => `abap.DBP(${v}, ${ft.len ?? 8}, ${ft.dec ?? 0})`;
 
-/** @type {Record<string, string>} */ const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
-/** @type {Record<string, string>} */ const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
-/** @type {Record<string, string>} */ const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
-/** @type {Record<string, string>} */ const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
+/** @type {Partial<Record<string, string>>} */ const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
+/** @type {Partial<Record<string, string>>} */ const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
+/** @type {Partial<Record<string, string>>} */ const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
+/** @type {Partial<Record<string, string>>} */ const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
 
 /** @param {import("./emit-go-types.ts").Expr} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function expr(e, ctx) {
   const owned = (/** @type {import("./emit-go-types.ts").OwnedExpression} */ (ownedExpression))(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
@@ -2241,7 +2243,7 @@ ${t}	}`));
       if (e.type.k === "xstring") return `abap.BitXS(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "p") return `${P_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
-      if (e.type.k === "int8") return `${(/** @type {Readonly<Record<string, string>>} */ (I8_OPS))[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
+      if (e.type.k === "int8") return `${(/** @type {Readonly<Partial<Record<string, string>>>} */ (I8_OPS))[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
