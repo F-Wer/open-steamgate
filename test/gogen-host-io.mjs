@@ -133,6 +133,7 @@ describe("gogen compiler host boundary", () => {
     mkdirSync(path.join(dir, "a-dir"));
     symlinkSync("a-dir", path.join(dir, "link"), "dir");
     assert.equal(host.readText(path.join(dir, "z.txt")), "é😀\n");
+    assert.equal(compat.readFileSync(path.join(dir, "z.txt"), "utf8"), "é😀\n");
     assert.deepEqual(readFileSync(path.join(dir, "z.txt")), Buffer.from("é😀\n", "utf8"));
     assert.deepEqual(host.listDir(dir), readdirSync(dir));
     assert.deepEqual(host.listEntries(dir), readdirSync(dir, {withFileTypes: true}).map((e) => [e.name, e.isDirectory()]));

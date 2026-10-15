@@ -6,8 +6,7 @@ import {readFileSync, readdirSync, writeFileSync} from "node:fs";
 import * as path from "node:path";
 
 /** Read a whole file synchronously as UTF-8 (invalid bytes become U+FFFD).
- * Follows symlinks; propagates Node filesystem errors. No newline conversion.
- * JS callers may retain their old, redundant second argument "utf8". */
+ * Follows symlinks; propagates Node filesystem errors. No newline conversion. */
 export function readText(file: string): string {
   return readFileSync(file, "utf8");
 }
