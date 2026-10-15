@@ -1,0 +1,24 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3-cockpit",
+  "generator_version": "0.7",
+  "lines": [
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 1, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 1},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 2, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 2},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 3, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 3},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 4, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 4},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 5, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 5},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 6, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 6},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 7, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 7},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 8, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 8},
+    {"file": "cockpit/zosd_fleet2_s/index.html", "line": 9, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 9}
+  ],
+  "model": "sha256:204c9c4a972314ea503b6b11cc5e2dc9762525d233afae99ed3ab36e8a31c7ec",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "cockpit/zosd_fleet2_s/index.html", "hash": "sha256:3ff99334b51c8056aa3bd9aa23c3125fed37240272700a0e3ca05098782db810"}
+  ],
+  "set": "src/l2demo/fleet2.l3.yaml",
+  "template": "recipes/l3-cockpit/set/index.html",
+  "templates": {"recipes/l3-cockpit/set/index.html": "sha256:e4da3be9bb6a6b264962c9eae9f4dfeecd7b68dc31bf873ba8c4943b84ff7029"}
+}
