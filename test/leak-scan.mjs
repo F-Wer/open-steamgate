@@ -50,6 +50,51 @@ describe("leak scanner", () => {
     assert.match(result.stderr, /192\.168\.1\.42/);
   });
 
+  // A SHA-256 digest packing a private prefix by chance, padded to 64 hex
+  // (its halves do not read as UUIDs: no version nibble at 12, no variant at 16).
+  const digest = "aaaaaaaaaaaa0aaa0a" + "c0a8012a" + "aaaaaa" + "bbbbbbbbbbbb0bbb0bbbbbbbbbbbbbbb";
+  // Two session GUIDs back to back, privateAddress packed in both node fields.
+  const guid = (n) => `00112233445546778899c0a8012a000${n}`;
+  const guids = guid(1) + guid(2);
+  // A 32-byte IPv4/UDP packet whose source address is privateAddress.
+  const packet = "4500002000004000401100" + "00" + "c0a8012a" + "c0a80101" + "1f9000350008" + "0000" + "deadbeef";
+  const digestFile = (name, body) => { const file = join(folder, name); writeFileSync(file, body); return file; };
+
+  it("does not decode a 64-hex SHA-256 digest in its canonical spellings as packed addresses", () => {
+    assert.equal(digest.length, 64);
+    for (const [name, body] of [["sha.txt", `sha256:${digest}\n`], ["sri.txt", `integrity sha256-${digest}\n`],
+      ["shape.abap", `* TS: shape.${digest}\n`], ["oci.json", JSON.stringify({digest: `sha256:${digest}`})]]) {
+      const result = scan(digestFile(name, body));
+      assert.ok([0, 2].includes(result.status), `${name}: ${result.stderr}`);
+    }
+  });
+
+  it("still decodes generic labels, other lengths, GUIDs and captures as packed addresses", () => {
+    assert.equal(guid(1).length, 32);
+    assert.equal(packet.length, 64);
+    for (const [name, body] of [["bare.txt", `value ${digest}\n`], ["hash.txt", `hash:${digest}\n`],
+      ["digest-key.json", JSON.stringify({digest})], ["rehash.txt", `rehash:${digest}\n`],
+      ["long.txt", `sha256:${digest}a\n`], ["short.txt", `sha256:${digest.slice(0, 63)}\n`],
+      ["guid.txt", `session ${guid(1)}\n`], ["guid-after-marker.txt", `sha256:${guid(1)}\n`],
+      ["guids-after-hash.txt", `hash:${guids}\n`], ["guids-after-sha.txt", `sha256:${guids}\n`],
+      ["packet-digest.json", JSON.stringify({digest: packet})]]) {
+      const result = scan(digestFile(name, body));
+      assert.equal(result.status, 1, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /192\.168\.1\.42/, name);
+    }
+  });
+
+  it("still finds a dotted address and decoded text beside an exempt digest", () => {
+    let result = scan(digestFile("mixed-digest.txt", `sha256:${digest} host ${privateAddress}\n`));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /частный адрес \(текст\): 192\.168\.1\.42/);
+    // the hex→ascii text view of the run itself is still matched for dotted addresses
+    const dotted = Buffer.from(` ${privateAddress} `.padEnd(32, " ")).toString("hex");
+    result = scan(digestFile("dotted-in-digest.txt", `sha256:${dotted}\n`));
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /hex→ascii\): 192\.168\.1\.42/);
+  });
+
   describe("redacted output for a public log", () => {
     const root = mkdtempSync(join(tmpdir(), "osd-leak-redact-"));
     const category = "zz secret category";

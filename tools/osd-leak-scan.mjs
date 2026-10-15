@@ -74,6 +74,18 @@ function encodedPayloadText(name, text) {
   return text.replace(OPAQUE_VECTOR_HEX, "$1$2");
 }
 
+// Only the canonical spellings: an OCI/SRI "sha256:"/"sha256-" digest and
+// abapiti's "shape." identity. A generic label ("hash:", "digest") also sits in
+// front of capture bytes, and two session GUIDs back to back are 64 hex too,
+// so a run either half of which reads as a UUID (version and variant nibbles)
+// is decoded as before whatever precedes it.
+const DIGEST_MARKER = /(?:^|[^0-9a-z])(?:sha256[:-]|shape\.)$/i;
+const UUID_HALF = /^[0-9a-f]{12}[1-8][0-9a-f]{3}[89ab]/i;
+function isDigest(text, at, run) {
+  return run.length === 64 && DIGEST_MARKER.test(text.slice(Math.max(0, at - 16), at))
+    && !UUID_HALF.test(run.slice(0, 32)) && !UUID_HALF.test(run.slice(32));
+}
+
 function views(name, text) {
   // Every way these bytes could be read, each one worth matching against.
   const out = [{ how: "текст", text }];
@@ -81,9 +93,15 @@ function views(name, text) {
   out.push({ how: "utf-16le", text: bytes.toString("utf16le") });
 
   const encodedPayloads = encodedPayloadText(name, text);
-  for (const run of encodedPayloads.match(HEX_RUN) ?? []) {
+  for (const m of encodedPayloads.matchAll(HEX_RUN)) {
+    const run = m[0];
     const b = Buffer.from(run.length % 2 ? run.slice(0, -1) : run, "hex");
-    out.push({ how: "hex→ascii", text: b.toString("latin1"), packed: b });
+    // A SHA-256 digest is 32 random bytes, and one in ~120 of them packs a
+    // 192.168 or 172.16-31 prefix by chance; generated code and manifests carry
+    // thousands. Exactly 64 hex characters right after a digest marker are not
+    // decoded as packed addresses; every other view of them still is, and a
+    // 32-hex GUID (where a real address hides in the node field) is untouched.
+    out.push({ how: "hex→ascii", text: b.toString("latin1"), packed: isDigest(encodedPayloads, m.index, run) ? undefined : b });
     out.push({ how: "hex→utf-16le", text: b.toString("utf16le") });
   }
   for (const run of encodedPayloads.match(B64_RUN) ?? []) {
