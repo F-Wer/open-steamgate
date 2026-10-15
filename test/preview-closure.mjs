@@ -81,3 +81,70 @@ describe("what the preview bundle can reach", () => {
     expect(state).to.be.an("array");
   });
 });
+
+// Exercise the actual webpack rule and graph guard, including a plain JS .ts
+// file which webpack could otherwise accept without ever running the loader.
+describe("preview TypeScript boundary in webpack", function () {
+  this.timeout(30000);
+  let scratch;
+  let webpack;
+  let configuration;
+  before(async () => {
+    const {mkdtempSync, mkdirSync} = await import("node:fs");
+    const {createRequire} = await import("node:module");
+    const require = createRequire(import.meta.url);
+    webpack = require("webpack");
+    configuration = require("../webpack.config.cjs");
+    mkdirSync(".local", {recursive: true});
+    scratch = mkdtempSync(resolve(".local/preview-typescript-"));
+  });
+  after(async () => {
+    const {rmSync} = await import("node:fs");
+    rmSync(scratch, {recursive: true, force: true});
+  });
+
+  const compile = (entry) => new Promise((fulfil, reject) => {
+    const compiler = webpack({
+      mode: "development", target: configuration.target, context: process.cwd(), entry,
+      output: {path: resolve(scratch, "bundle"), filename: "worker.js"},
+      devtool: false, module: configuration.module,
+      plugins: configuration.plugins.filter(plugin => plugin.constructor.name === "PreviewTypeScriptBoundaryPlugin"),
+    });
+    compiler.run((error, stats) => {
+      compiler.close(closeError => {
+        if (error || closeError) reject(error || closeError);
+        else fulfil(stats);
+      });
+    });
+  });
+
+  it("strips both approved paths and keeps classic-worker module lowering", async () => {
+    const {writeFileSync} = await import("node:fs");
+    const entry = resolve(scratch, "entry.mjs");
+    writeFileSync(entry, `import {parseSamc} from "../../tools/osd-samc.ts";
+import {typeName} from "../../tools/gogen/go-symbols.ts";
+self.result = [parseSamc(""), typeName("a")];`);
+    const stats = await compile(entry);
+    expect(stats.hasErrors(), stats.toString({errorDetails: true})).to.equal(false);
+    const resources = [...stats.compilation.modules].map(module => module.resource).filter(Boolean);
+    expect(resources).to.include(resolve("tools/osd-samc.ts"));
+    expect(resources).to.include(resolve("tools/gogen/go-symbols.ts"));
+    const {runInNewContext} = await import("node:vm");
+    const scope = {self: {}};
+    runInNewContext(readFileSync(resolve(scratch, "bundle/worker.js"), "utf8"), scope);
+    expect(JSON.stringify(scope.self.result)).to.equal('[[],"A"]');
+  });
+
+  for (const contents of ["export const value = 1;", "export const value: number = 1;"]) {
+    it(`fails the build for an unapproved .ts module (${contents.includes(":") ? "typed" : "plain JS"})`, async () => {
+      const {writeFileSync} = await import("node:fs");
+      const entry = resolve(scratch, "entry.mjs");
+      writeFileSync(resolve(scratch, "unapproved.ts"), contents);
+      writeFileSync(entry, 'import {value} from "./unapproved.ts"; self.result = value;');
+      const stats = await compile(entry);
+      expect(stats.hasErrors()).to.equal(true);
+      expect(stats.toString({errorDetails: true})).to.include("Preview TypeScript outside allowlist:")
+        .and.to.include("unapproved.ts");
+    });
+  }
+});
