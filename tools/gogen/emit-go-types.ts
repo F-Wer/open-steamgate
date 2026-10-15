@@ -221,7 +221,7 @@ export type OwnedExpression = (e: Expr, ctx: Context, helpers: ExprHelpers) => s
 export type OwnedStatement = (st: Stmt, ctx: Context, indent: string, helpers: StatementHelpers) => string[] | null;
 export type EmitByteConcat = (st: Extract<Stmt, {s: 'concat_bytes'}>, ctx: Context, indent: string, helpers: Pick<StatementHelpers, 'expr' | 'place' | 'rowValue'>) => string[];
 export type EmitByteStatement = (st: Stmt, ctx: Context, indent: string, helpers: Pick<ExprHelpers, 'expr' | 'place'>) => string[];
-export type EmitBuiltinGo = (e: Builtin, args: readonly string[], names: Readonly<Record<string, string | undefined>>, imports: Set<string>) => string;
+export type EmitBuiltinGo = (e: Builtin, args: readonly string[], names: ReadonlyMap<string, string>, imports: Set<string>) => string;
 export type EmitPackedInt8 = (e: Conversion, render: (e: Expr) => string, helper: RenderName) => string | null;
 export type EmitPackedComparison = (c: Condition, render: (e: Expr) => string) => string | null;
 export type ExceptionClass = (cls: Partial<Class> | null | undefined, classes: ReadonlyMap<string, Class>) => boolean;
@@ -241,7 +241,7 @@ export interface ConstantHelpers {
   readonly struct: (type: StructType, value: string) => string;
 }
 export type LocalConstant = (constant: Constant, helpers: ConstantHelpers) => string | undefined;
-export interface ConstantDeclarationHelpers { readonly type: RenderType; readonly literal: (constant: Constant) => string }
+export interface ConstantDeclarationHelpers { readonly js?: false; readonly type: RenderType; readonly literal: (constant: Constant) => string }
 export type LocalConstantDeclarations = (constants: ReadonlyMap<string, Constant>, helpers: ConstantDeclarationHelpers) => string[];
 
 // Object walkers inspect a few fields and recurse over all remaining values.
