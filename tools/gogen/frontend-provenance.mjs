@@ -71,21 +71,34 @@ function loadRecorder() {
     const obj = withRole("scheduling", () => reg.getObject("CLAS", wanted[i]) ?? reg.getObject("FUGR", wanted[i]));
     const run = () => {
       for (const file of obj?.getABAPFiles() ?? []) {
-        const statements = file.getStatements();
+        // Expansion tokens have virtual call-site positions. Select from the
+        // original definition instead, including macros that are never invoked.
+        const statements = file.getStatements().filter((statement) =>
+          !statement.getTokens().some((token) => token.getStart() instanceof abaplint.VirtualPosition));
         // Preserve the per-file order: all FM ownership queries precede static
         // attribute lookups, even when those accesses occur earlier in the file.
         for (const statement of statements) {
-          if (!(statement.get() instanceof abaplint.Statements.CallFunction)) continue;
-          if (statement.getTokens()[1]?.getStr().toUpperCase() !== "FUNCTION") continue;
-          const name = statement.findDirectExpression(abaplint.Expressions.FunctionName)?.getFirstToken();
-          if (!(name instanceof abaplint.Tokens.StringToken)) continue;
-          const literal = name.getStr();
-          if (!literal.startsWith("'") || !literal.endsWith("'") || literal.length <= 2) continue;
-          const functionName = upper(literal.slice(1, -1));
-          const group = fmGroups.get(functionName);
-          semanticQuery(reg, "function-module-owner", [functionName],
-            group ? [`FUGR ${upper(group)}`] : [], {policy: "gogen-last-wins"});
-          if (group && !wanted.includes(group)) wanted.push(group);
+          const names = [];
+          if (statement.get() instanceof abaplint.MacroContent) {
+            const tokens = statement.getTokens();
+            for (let i = 0; i + 2 < tokens.length; i++) {
+              if (upper(tokens[i].getStr()) === "CALL" && upper(tokens[i + 1].getStr()) === "FUNCTION")
+                names.push(tokens[i + 2]);
+            }
+          } else if (statement.get() instanceof abaplint.Statements.CallFunction
+              && upper(statement.getTokens()[1]?.getStr()) === "FUNCTION") {
+            names.push(statement.findDirectExpression(abaplint.Expressions.FunctionName)?.getFirstToken());
+          }
+          for (const name of names) {
+            if (!(name instanceof abaplint.Tokens.StringToken)) continue;
+            const literal = name.getStr();
+            if (!literal.startsWith("'") || !literal.endsWith("'") || literal.length <= 2) continue;
+            const functionName = upper(literal.slice(1, -1));
+            const group = fmGroups.get(functionName);
+            semanticQuery(reg, "function-module-owner", [functionName],
+              group ? [`FUGR ${upper(group)}`] : [], {policy: "gogen-last-wins"});
+            if (group && !wanted.includes(group)) wanted.push(group);
+          }
         }
         // A PUBLIC CLASS-DATA read is a dependency too. Only identifier tokens
         // surrounding a static arrow count; comments and literal text do not.

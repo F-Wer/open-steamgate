@@ -390,6 +390,33 @@ test("selection uses parsed calls and static identifiers, preserving per-file qu
 });
 
 
+for (const used of [false, true]) test(`macro definition selection preserves source order (used=${used})`, () => {
+  const c = syntheticCorpus({classes: 4});
+  c.files["zcl_select.clas.abap"] = classSource("zcl_select", `
+    DEFINE invoke.
+      CALL FUNCTION 'ZORACLE_FUNCTION'.
+      rv = zcl_first=>value.
+    END-OF-DEFINITION.
+    CALL FUNCTION 'ZLATER'.
+    rv = zcl_later=>value.
+    ${used ? "invoke." : ""}
+  `);
+  for (const name of ["zcl_first", "zcl_later"])
+    c.files[`${name}.clas.abap`] = classSource(name, "rv = 7.", "i", "CLASS-DATA value TYPE i.");
+  c.files["zlater_group.fugr.xml"] = c.files["zoracle_group.fugr.xml"].replaceAll("ZORACLE_FUNCTION", "ZLATER").replaceAll("ZORACLE_GROUP", "ZLATER_GROUP");
+  const reg = registry(c.files);
+  recordProvenance(() => {
+    reg.parse();
+    const wanted = ["zcl_select"];
+    expandProgramSelection(reg, wanted, core);
+    assert.deepEqual(wanted, ["zcl_select", "zoracle_group", "zlater_group", "zcl_first", "zcl_later"]);
+    const rows = storedProvenance(reg, reg.getObject("CLAS", "ZCL_SELECT")).rows;
+    assert.deepEqual(rows.filter(q => q.kind === "function-module-owner").map(q => q.args), [["ZORACLE_FUNCTION"], ["ZLATER"]]);
+    assert.deepEqual(rows.filter(q => q.kind === "getObject" && ["ZCL_FIRST", "ZCL_LATER"].includes(q.args[1])).map(q => q.args[1]), ["ZCL_FIRST", "ZCL_LATER"]);
+  });
+});
+
+
 for (const method of ["storedProvenance", "inheritStoredProvenance", "provenanceOf", "provenanceGraph", "compilationProvenanceOf"])
   test(`idle ${method} preserves the parent result without loading the recorder`, () => {
     const code = `

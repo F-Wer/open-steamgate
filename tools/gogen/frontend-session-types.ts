@@ -193,6 +193,8 @@ export interface ProvenanceGraph {
 }
 // Selection needs only these public core members; tests also pass this seam.
 export interface SelectionCore {
+  VirtualPosition: typeof Core.VirtualPosition;
+  MacroContent: typeof Core.MacroContent;
   Objects: {FunctionGroup: typeof Core.Objects.FunctionGroup};
   Visibility: {Public: Core.Visibility};
   Statements: {CallFunction: typeof Core.Statements.CallFunction};
