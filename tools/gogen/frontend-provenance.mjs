@@ -44,11 +44,11 @@ function loadRecorder() {
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactInput} obj @returns {import('./frontend-session-types.ts').StoredProvenance | undefined} */ export function storedProvenance(reg, obj) {
-  return loadRecorder().storedProvenance(reg, obj);
+  return recorder?.storedProvenance(reg, obj);
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').ArtifactInput} obj @param {import('./frontend-session-types.ts').StoredProvenance | undefined} stored @returns {void} */ export function inheritStoredProvenance(reg, obj, stored) {
-  loadRecorder().inheritStoredProvenance(reg, obj, stored);
+  recorder?.inheritStoredProvenance(reg, obj, stored);
 }
 
 /** @param {import('./frontend-session-types.ts').LoweringContext} ctx @param {string} name @returns {import('./frontend-session-types.ts').FunctionModule | undefined} */ export function resolvedFunctionModule(ctx, name) {
@@ -111,7 +111,7 @@ function loadRecorder() {
 }
 
 /** @param {import('./frontend-session-types.ts').ProvenanceInput} value @param {{internal?: boolean}} options @returns {Map<string, import('./frontend-session-types.ts').Manifest>} */ export function provenanceOf(value, {internal = false} = {}) {
-  return loadRecorder().provenanceOf(value, {internal});
+  return recorder?.provenanceOf(value, {internal}) ?? new Map();
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').Role} role @param {(obj: import('./frontend-session-types.ts').ArtifactObject) => boolean} predicate @returns {import('./frontend-session-types.ts').ArtifactObject[]} */ export function enumerateObjects(reg, kind, args = [], role = "scheduling", predicate = () => true) {
@@ -143,9 +143,9 @@ function loadRecorder() {
 }
 
 /** @param {import('./frontend-session-types.ts').ProvenanceInput} value @returns {{scheduling: import('./frontend-session-types.ts').QueryRow[], finalOutput: import('./frontend-session-types.ts').QueryRow[]}} */ export function compilationProvenanceOf(value) {
-  return loadRecorder().compilationProvenanceOf(value);
+  return recorder?.compilationProvenanceOf(value) ?? {scheduling: [], finalOutput: []};
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @returns {import('./frontend-session-types.ts').ProvenanceGraph | undefined} */ export function provenanceGraph(reg) {
-  return loadRecorder().provenanceGraph(reg);
+  return recorder?.provenanceGraph(reg);
 }

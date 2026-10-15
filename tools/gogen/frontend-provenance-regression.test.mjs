@@ -314,7 +314,12 @@ test("plain class compilation and inactive hooks never load the recorder", () =>
     const reg = new core.Registry();
     reg.addFile(new core.MemoryFile('zcl_a.clas.abap', classSource('zcl_a')));
     assert.equal(require.cache[recorder], undefined);
-    const p = compileProgram({registry: reg, folders: [], objects: ['ZCL_A']});
+    const session = {};
+    const options = {registry: reg, folders: [], objects: ['ZCL_A'], session};
+    const p = compileProgram(options);
+    const warm = compileProgram(options);
+    assert.ok(warm.frontendCounts.reusedClasses.includes('ZCL_A'));
+    assert.equal(require.cache[recorder], undefined);
     assert.equal(p.classes[0].name, 'ZCL_A');
     const inaccessible = new Proxy({}, {get() { throw new Error('unexpected argument read'); }});
     const value = {};
@@ -327,6 +332,11 @@ test("plain class compilation and inactive hooks never load the recorder", () =>
     }
     assert.equal(facade.semanticQuery(inaccessible, 'unknown-scan', [], [], inaccessible), undefined);
     assert.equal(facade.beginProvenanceCompile(inaccessible), undefined);
+    assert.equal(facade.storedProvenance(inaccessible, inaccessible), undefined);
+    assert.equal(facade.inheritStoredProvenance(inaccessible, inaccessible, inaccessible), undefined);
+    assert.deepEqual(facade.provenanceOf(p), new Map());
+    assert.equal(facade.provenanceGraph(reg), undefined);
+    assert.deepEqual(facade.compilationProvenanceOf(p), {scheduling: [], finalOutput: []});
     assert.equal(facade.recordingProvenance(), false);
     assert.equal(facade.provenanceAuditActive(), false);
     assert.equal(facade.auditBuiltArtifacts(inaccessible), false);
@@ -339,7 +349,7 @@ test("plain class compilation and inactive hooks never load the recorder", () =>
     assert.equal(facade.recordingProvenance(), false);
   `;
   execFileSync(process.execPath, ["--input-type=module", "-e", code], {
-    cwd: process.cwd(), env: {...process.env, GOGEN_PROVENANCE: "0"}, encoding: "utf8",
+    cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "GOGEN_PROVENANCE")), encoding: "utf8",
   });
 });
 
@@ -378,3 +388,19 @@ test("selection uses parsed calls and static identifiers, preserving per-file qu
     assert.ok(relevant.every(q => q.phase === "selection"));
   });
 });
+
+
+for (const method of ["storedProvenance", "inheritStoredProvenance", "provenanceOf", "provenanceGraph", "compilationProvenanceOf"])
+  test(`idle ${method} preserves the parent result without loading the recorder`, () => {
+    const code = `
+      import assert from 'node:assert/strict';
+      import {createRequire} from 'node:module';
+      import * as facade from './tools/gogen/frontend-provenance.mjs';
+      const require = createRequire(import.meta.url);
+      const value = facade.${method}({}, {}, undefined);
+      const expected = ${method === "provenanceOf" ? "new Map()" : method === "compilationProvenanceOf" ? "{scheduling: [], finalOutput: []}" : "undefined"};
+      assert.deepEqual(value, expected);
+      assert.equal(require.cache[require.resolve('./tools/gogen/frontend-provenance-recorder.mjs')], undefined);
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+  });
