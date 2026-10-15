@@ -1,8 +1,8 @@
 import {test} from "node:test";
 import assert from "node:assert/strict";
-import {mkdirSync, symlinkSync, mkdtempSync, writeFileSync, readFileSync, rmSync} from "node:fs";
+import {mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync} from "node:fs";
 import {tmpdir} from "node:os";
-import {basename, dirname, join} from "node:path";
+import {basename, join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {spawnSync} from "node:child_process";
 import {createRequire} from "node:module";
@@ -13,14 +13,16 @@ import {emitJs} from "./emit-js.mjs";
 const require = createRequire(import.meta.url);
 const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 const goRoot = new URL("./go/", import.meta.url).pathname;
-function compile(body, extra = {}) {
+function compile(body, extra = {}, inspect = () => {}) {
   const dir = mkdtempSync(join(tmpdir(), "gogen-tokens-"));
   try {
     writeFileSync(join(dir, "zcl_tokens.clas.abap"), `CLASS zcl_tokens DEFINITION PUBLIC FINAL CREATE PUBLIC.
 PUBLIC SECTION. CLASS-METHODS run RETURNING VALUE(rv) TYPE i. ENDCLASS.
 CLASS zcl_tokens IMPLEMENTATION. METHOD run. ${body} ENDMETHOD. ENDCLASS.`);
     for (const [name, text] of Object.entries(extra)) writeFileSync(join(dir, name), text);
-    return compileProgram({folders: [dir], objects: ["ZCL_TOKENS", ...Object.keys(extra).filter(n => n.endsWith(".clas.abap")).map(n => n.split(".")[0].toUpperCase())], tolerant: true});
+    const program = compileProgram({folders: [dir], objects: ["ZCL_TOKENS", ...Object.keys(extra).filter(n => n.endsWith(".clas.abap")).map(n => n.split(".")[0].toUpperCase())], tolerant: true});
+    inspect(program, dir);
+    return program;
   } finally { rmSync(dir, {recursive: true, force: true}); }
 }
 function clean(p) {
@@ -199,7 +201,11 @@ test("round 2 analysis loads the transpiler core instance", async () => {
     writeFileSync(join(top, "package.json"), JSON.stringify({main: "index.js"}));
     writeFileSync(join(top, "index.js"), 'throw new Error("loaded root core instead of transpiler core");');
     writeFileSync(join(nested, "../../package.json"), '{}');
-    symlinkSync(dirname(createRequire(require.resolve("@abaplint/transpiler/package.json")).resolve("@abaplint/core/package.json")), join(nested, "core"), "dir");
+    // Forward to the real transpiler core so --preserve-symlinks also keeps
+    // its dependency resolution and instanceof identity intact.
+    mkdirSync(join(nested, "core"));
+    writeFileSync(join(nested, "core/package.json"), JSON.stringify({main: "index.js"}));
+    writeFileSync(join(nested, "core/index.js"), `module.exports = require(${JSON.stringify(createRequire(require.resolve("@abaplint/transpiler/package.json")).resolve("@abaplint/core"))});`);
     let source = readFileSync(new URL("./frontend-analysis.mjs", import.meta.url), "utf8");
     // Relocate only this module; keep its unrelated local dependencies in place.
     source = source.replace('"./host-io.ts"', JSON.stringify(new URL("./host-io.ts", import.meta.url).href))
@@ -268,14 +274,15 @@ test("round 3 unreadable unused DDLS does not abort compileProgram", () => {
 // so a failure is found by the CDS name the file carries.
 test("round 3 unreadable used DDLS reports its original filename", async (t) => {
   for (const name of ["zgogen_t_dbwc"]) await t.test(name, () => {
-    const p = compile(`SELECT id FROM ${name} INTO TABLE @DATA(rows).`, {
+    compile(`SELECT id FROM ${name} INTO TABLE @DATA(rows).`, {
       ...viewFixture(), "ZGOGEN_T_DBWC.DDLS.ASDDLS": "// define view ZFAKE\n@View: 'VIEW'\n" + viewCds + " invalid syntax!!",
+    }, (p) => {
+      assert.deepEqual(p.skipped, []);
+      assert.match(JSON.stringify(p.partial), /ZGOGEN_T_DBWC\.DDLS\.ASDDLS.*view mapping could not be read/);
+      const reused = compileProgram({registry: p.reg, folders: [], objects: ["ZCL_TOKENS"], tolerant: true});
+      assert.match(JSON.stringify(reused.partial), /ZGOGEN_T_DBWC\.DDLS\.ASDDLS.*view mapping could not be read/);
+      const strict = compileProgram({registry: p.reg, folders: [], objects: ["ZCL_TOKENS"]});
+      assert.match(JSON.stringify(strict.partial), /ZGOGEN_T_DBWC\.DDLS\.ASDDLS.*view mapping could not be read/);
     });
-    assert.deepEqual(p.skipped, []);
-    assert.match(JSON.stringify(p.partial), /ZGOGEN_T_DBWC\.DDLS\.ASDDLS.*view mapping could not be read/);
-    const reused = compileProgram({registry: p.reg, folders: [], objects: ["ZCL_TOKENS"], tolerant: true});
-    assert.match(JSON.stringify(reused.partial), /ZGOGEN_T_DBWC\.DDLS\.ASDDLS.*view mapping could not be read/);
-    const strict = compileProgram({registry: p.reg, folders: [], objects: ["ZCL_TOKENS"]});
-    assert.match(JSON.stringify(strict.partial), /ZGOGEN_T_DBWC\.DDLS\.ASDDLS.*view mapping could not be read/);
   });
 });

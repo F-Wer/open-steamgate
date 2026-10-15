@@ -1,7 +1,7 @@
 // Re-evaluable query specifications for the pinned core. Unknown contracts
 // refuse a v3 key. Array order and first/last winner policies are semantic.
 import {createRequire} from "node:module";
-import {core, inputSnapshot, objectKey} from "./frontend-inventory.mjs";
+import {core, inputSnapshot, objectKey, cdsInputDigest} from "./frontend-inventory.mjs";
 import {currentQueryAnswer} from "./frontend-queries.mjs";
 import {sourceOwnershipSafety} from "./frontend-owned.ts";
 const require = createRequire(createRequire(import.meta.url).resolve("@abaplint/transpiler/package.json"));
@@ -11,7 +11,7 @@ const {IncludeGraph} = require("@abaplint/core/build/src/utils/include_graph");
 const {CrossIncludeMacros} = require("@abaplint/core/build/src/abap/cross_include_macros");
 const methods = {"implicit-type-pool": "findTypePoolType", "implicit-type-pool-constant": "findTypePoolConstant",
   "badi-definition": "isBadiDef", "behavior-definition": "findBehaviorDefinition", "function-module-owner": "findFunctionModule"};
-const simple = new Set(["getObject", "getFileByName", "findObjectForFile", "getFirstObject", "supplied", "locals", "lock", "ownershipSafety", "include-parent", "function-group-include", "cds-alias", ...Object.keys(methods)]);
+const simple = new Set(["getObject", "getFileByName", "findObjectForFile", "getFirstObject", "supplied", "locals", "lock", "ownershipSafety", "include-parent", "function-group-include", "cds-alias", "cds-mapping", ...Object.keys(methods)]);
 const scans = new Set(["function-module-owner", "function-group-include", "cds-alias", "badi-definition", "include-macro-context"]);
 export const supportedQuery = (q) => q.role === "artifact" && (q.scan ? scans : simple).has(q.kind)
   && (!q.scan || q.kind === "include-macro-context" || q.queryArgs?.length > 0);
@@ -53,6 +53,7 @@ export function queryEvaluator(program) {
       }
       return {result, complete: true};
     }
+    if (q.kind === "cds-mapping") return {result: [], descriptor: cdsInputDigest(reg)};
     const indexed = currentQueryAnswer(program, q);
     if (indexed) return indexed;
     const [name] = q.args;
