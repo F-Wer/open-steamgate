@@ -43,8 +43,11 @@ function seam(cacheDir, files, lowering = lower, retained) {
 }
 function scratch(validate, run) {
   const dir = mkdtempSync(join(tmpdir(), "gogen-v3-audit-")), previous = process.env.GOGEN_CACHE_SHADOW_VALIDATE;
+  const exhaustive = process.env.GOGEN_CACHE_SHADOW_EXHAUSTIVE;
+  process.env.GOGEN_CACHE_SHADOW_EXHAUSTIVE = "1";
   if (validate) process.env.GOGEN_CACHE_SHADOW_VALIDATE = "1"; else delete process.env.GOGEN_CACHE_SHADOW_VALIDATE;
   try { run(dir); } finally {
+    if (exhaustive === undefined) delete process.env.GOGEN_CACHE_SHADOW_EXHAUSTIVE; else process.env.GOGEN_CACHE_SHADOW_EXHAUSTIVE = exhaustive;
     if (previous === undefined) delete process.env.GOGEN_CACHE_SHADOW_VALIDATE; else process.env.GOGEN_CACHE_SHADOW_VALIDATE = previous;
     rmSync(dir, {recursive: true, force: true});
   }

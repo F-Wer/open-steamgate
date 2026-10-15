@@ -1295,3 +1295,9 @@ implemented. The recorder-time budget remains unmet and its cacheDir-only cost
 is provisionally accepted for this shadow step. Step 4b flagged selective lookup
 and Step 4c default selective lookup remain plans. Production still performs no
 selective reuse across registry versions.
+
+Step 4b.1 adds the [global-first fast path](gogen-cache-global-first.md): ordinary
+compilation probes v3 only after exact global/replay misses. Exhaustive shadow
+validation remains available for the oracle. The global certificate now also
+covers dependency roles and Node/V8 identity; both tool-identity variants share
+actual source/build hashing.
