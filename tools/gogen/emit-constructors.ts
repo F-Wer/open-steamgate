@@ -1,5 +1,6 @@
 import type {Program, Class, Argument} from './ir.ts';
-import {omittedFactoryCall, Unsupported} from './frontend.mjs';
+import {omittedFactoryCall} from './frontend-expressions-calls.mjs';
+import {Unsupported} from './frontend-base.mjs';
 
 // Resolve all omitted constructor arguments before emitting declarations:
 // DEFAULT may register a structured constant or an anonymous type. A class

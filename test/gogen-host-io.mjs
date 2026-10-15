@@ -21,7 +21,7 @@ const exceptions = {
   "tools/gogen/frontend-base.mjs": {"node:module": ["createRequire"]},
   "tools/gogen/frontend-analysis.mjs": {"node:module": ["createRequire"]},
   // Pure deep comparison of IR, with no host I/O. Keep its exact semantics.
-  "tools/gogen/emit-table-move.mjs": {"node:util": ["isDeepStrictEqual"]},
+  "tools/gogen/emit-table-move.ts": {"node:util": ["isDeepStrictEqual"]},
   // Not a host-io gap: the object cache (and its provenance/digest files) is an
   // optional HOST module injected through session/cacheDir, outside the compiler
   // closure that compileProgram loads without a cacheDir. abapiti/Go builds run

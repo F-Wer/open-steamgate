@@ -123,7 +123,7 @@ jobs:
       - name: Semantics, Go and IR-as-JS against the measured answers
         run: node tools/gogen/semantics.mjs
       - name: Byte ownership and frontend emission
-        run: node --test tools/gogen/emit-large.test.mjs tools/gogen/frontend-owned.test.mjs tools/gogen/frontend-ddic.test.mjs tools/gogen/frontend-bytes.test.mjs tools/gogen/emit-go.test.mjs tools/gogen/emit-sink-locals.test.mjs tools/gogen/symbols.test.mjs tools/gogen/local-constants.test.mjs tools/gogen/cfit.test.mjs tools/gogen/session-statics.test.mjs tools/gogen/frontend-supplied.test.mjs tools/gogen/sink-locals.test.mjs tools/gogen/ir-children.test.mjs tools/gogen/frontend-token-parsers.test.mjs
+        run: node --test tools/gogen/emit-large.test.mjs tools/gogen/frontend-owned.test.mjs tools/gogen/frontend-ddic.test.mjs tools/gogen/frontend-bytes.test.mjs tools/gogen/emit-go.test.mjs tools/gogen/emit-sink-locals.test.mjs tools/gogen/symbols.test.mjs tools/gogen/local-constants.test.mjs tools/gogen/cfit.test.mjs tools/gogen/session-statics.test.mjs tools/gogen/frontend-supplied.test.mjs tools/gogen/sink-locals.test.mjs tools/gogen/ir-children.test.mjs tools/gogen/frontend-token-parsers.test.mjs tools/gogen/ir-children-completeness.test.mjs
       # frontend-artifact-digests.test.mjs compares Node and Bun digests
       - uses: oven-sh/setup-bun@v2
         with:

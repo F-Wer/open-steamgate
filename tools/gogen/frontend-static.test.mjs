@@ -8,7 +8,7 @@ import {compileProgram} from "./frontend.mjs";
 import {emitSectionStatement} from "./emit-js-section.mjs";
 import * as abap from "./js/abap.mjs";
 import {emitJs} from "./emit-js.mjs";
-import {analyzeOwnership} from "./frontend-owned.mjs";
+import {analyzeOwnership} from "./frontend-owned.ts";
 
 const fixtures = new URL("./testdata/", import.meta.url).pathname;
 const objects = ["staticstate", "staticwrite", "staticoracle", "staticrec", "chunkstate", "chunk_a", "chunk_b"].map((s) => `ZCL_GOGEN_T_${s.toUpperCase()}`);

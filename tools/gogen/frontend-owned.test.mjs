@@ -5,7 +5,7 @@ import {mkdtempSync, writeFileSync, rmSync, cpSync, mkdirSync, readFileSync} fro
 import {join} from "node:path";
 import {execFileSync} from "node:child_process";
 import {compileProgram} from "./frontend.mjs";
-import {analyzeOwnership} from "./frontend-owned.mjs";
+import {analyzeOwnership} from "./frontend-owned.ts";
 import {emitJs} from "./emit-js.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
