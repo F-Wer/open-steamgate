@@ -12,6 +12,7 @@ import {home} from "./home.mjs";
 import {checkLibPins} from "./lib-pins.mjs";
 import {libraryPath} from "../osd-lib-path.mjs";
 import {prepareF4} from "./osabap-f4.mjs";
+import {assertTableFieldsTyped} from "./frontend-ddic.mjs";
 
 const here = import.meta.dirname;
 // node tools/gogen/osabap.mjs [report.prog.abap] [--lib <folder>]...
@@ -266,6 +267,7 @@ const tables = ddic.filter((file) => /\.tabl\.xml$/i.test(file)).map((file) => f
 let schema = [];
 if (tables.length > 0) {
   const {DatabaseSetup} = await import(join(home, "node_modules", "@abaplint", "transpiler", "build", "src", "db", "index.js"));
+  assertTableFieldsTyped(program.reg);
   const own = new Set(tables.map((t) => t.toLowerCase()));
   schema = new DatabaseSetup(program.reg).run().schemas.sqlite
     .filter((sql) => own.has(/^CREATE\s+TABLE\s+['"]?([\w/]+)/i.exec(sql)?.[1]?.toLowerCase()));

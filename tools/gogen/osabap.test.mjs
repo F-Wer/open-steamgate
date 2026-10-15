@@ -732,3 +732,61 @@ START-OF-SELECTION.
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+
+test("a TABL field with COMPTYPE E and no ROLLNAME is refused by name", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-builtin-ddic-"));
+  try {
+    writeFileSync(join(dir, "zprobe.tabl.xml"), `<?xml version="1.0" encoding="utf-8"?>
+<abapGit version="v1.0.0"><asx:abap xmlns:asx="http://www.sap.com/abapxml" version="1.0"><asx:values>
+<DD02V><TABNAME>ZPROBE</TABNAME><TABCLASS>TRANSP</TABCLASS><CLIDEP>X</CLIDEP></DD02V>
+<DD03P_TABLE><DD03P><FIELDNAME>MANDT</FIELDNAME><KEYFLAG>X</KEYFLAG><COMPTYPE>E</COMPTYPE><DATATYPE>CLNT</DATATYPE><LENG>3</LENG></DD03P></DD03P_TABLE>
+</asx:values></asx:abap></abapGit>`);
+    const report = join(dir, "zprobe.prog.abap");
+    writeFileSync(report, "REPORT zprobe.\nSTART-OF-SELECTION.\n  DATA row TYPE zprobe.\n  WRITE / row-mandt.\n");
+    const built = spawnSync(process.execPath, [builder, report], {encoding: "utf8"});
+    assert.notEqual(built.status, 0);
+    assert.match(built.stderr, /TABL field with COMPTYPE E and no ROLLNAME: ZPROBE-MANDT \(DATATYPE CLNT\)/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+test("an absent optional dynamic static method raises a catchable illegal class", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-optional-call-"));
+  try {
+    writeFileSync(join(dir, "zcl_optional_receiver.clas.abap"), `
+CLASS zcl_optional_receiver DEFINITION PUBLIC FINAL CREATE PUBLIC.
+  PUBLIC SECTION. CLASS-DATA last TYPE string.
+    CLASS-METHODS event IMPORTING value TYPE string.
+ENDCLASS.
+CLASS zcl_optional_receiver IMPLEMENTATION.
+  METHOD event. last = value. ENDMETHOD.
+ENDCLASS.`);
+    const report = join(dir, "zoptional.prog.abap");
+    writeFileSync(report, `REPORT zoptional.
+START-OF-SELECTION.
+  DATA value TYPE string VALUE 'event'.
+  TRY.
+    CALL METHOD ('ZCL_LNT_TEST_LOG_BAL')=>('EVENT') EXPORTING value = value.
+    ASSERT 1 = 2.
+  CATCH cx_sy_dyn_call_illegal_class.
+    WRITE / 'illegal class'.
+  ENDTRY.
+  TRY.
+    CALL METHOD ('ZCL_LNT_TEST_LOG_BAL')=>('EVENT') EXPORTING value = value.
+  CATCH cx_sy_dyn_call_error.
+    WRITE / 'optional swallowed'.
+  ENDTRY.
+  CALL METHOD ('ZCL_OPTIONAL_RECEIVER')=>('EVENT') EXPORTING value = value.
+  ASSERT zcl_optional_receiver=>last = value.
+  CALL METHOD ('ZCL_OPTIONAL_RECEIVER')=>('EVENT') EXPORTING value = 'IMPORTING'.
+  ASSERT zcl_optional_receiver=>last = 'IMPORTING'.
+  WRITE / 'continued'.
+`);
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const result = run([]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /illegal class\noptional swallowed\ncontinued\n$/);
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+
