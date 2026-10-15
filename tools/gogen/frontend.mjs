@@ -143,7 +143,7 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
           normalizeSource(source, e.name, abaplint)));
       }
       // a CDS view's source: its SQL view name, for the table registry
-      else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push(readFileSync(path, "utf8"));
+      else if (/\.ddls\.asddls$/i.test(e.name)) ddls.push({filename: path, source: readFileSync(path, "utf8")});
     }
   };
   if (!registry) {

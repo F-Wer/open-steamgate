@@ -2,9 +2,11 @@
 import {readText, listEntries, join} from "./host-io.ts";
 import {parseSamc} from "../osd-samc.ts";
 
-// package.json overrides pin the transpiler to this same core copy.
-import * as abaplint from "@abaplint/core";
-const {Statements, Expressions, ExpressionsCDS, Nodes} = abaplint;
+// Match frontend.mjs: AST instanceof checks must use the transpiler's core.
+import {createRequire} from "node:module";
+const require = createRequire(import.meta.url);
+const abaplint = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
+const {Expressions, ExpressionsCDS, Nodes} = abaplint;
 
 const trees = new WeakMap();
 const inlineTables = new WeakMap();
@@ -18,7 +20,6 @@ export function inlineTableLocals(body) {
   if (!inlineTables.has(body)) {
     const names = new Set();
     for (const st of body.findAllStatementNodes()) {
-      if (!(st.get() instanceof Statements.Select) && !(st.get() instanceof Statements.SelectLoop)) continue;
       for (const into of st.findAllExpressions(Expressions.SQLIntoTable)) {
         for (const inline of into.findAllExpressions(Expressions.InlineData)) {
           const name = inline.findFirstExpression(Expressions.TargetField);
@@ -50,18 +51,22 @@ export function samcOf(folders) {
 // A CDS view entity has no SQL view name and is left out.
 export function cdsSqlViews(sources) {
   const out = {};
-  for (const [index, src] of sources.entries()) {
-    // The loader supplies source strings. Give abaplint a DDLS object without
+  for (const [index, input] of sources.entries()) {
+    const {filename, source} = typeof input === "string"
+      ? {filename: `gogen_${index}.ddls.asddls`, source: input} : input;
+    const src = source.startsWith("\uFEFF") ? source.slice(1) : source;
+    // Give abaplint a DDLS object with its source filename for diagnostics, without
     // adding the CDS sources to the ABAP registry used for type checking.
     const reg = new abaplint.Registry();
-    reg.addFile(new abaplint.MemoryFile(`gogen_${index}.ddls.asddls`, src));
+    reg.addFile(new abaplint.MemoryFile(filename, src));
     reg.parse();
     const obj = reg.getFirstObject();
-    const cds = obj.getDefinitionName();
     // Pinned core's getSQLViewName() searches raw text and includes comments.
     // Its parsed CDS annotations exclude comments and expose the string token.
-    const tree = obj.getTree();
-    if (!tree || !(tree.get() instanceof ExpressionsCDS.CDSDefineView)) continue;
+    const tree = obj?.getTree();
+    if (!tree) throw new Error(`${filename}: DDLS view mapping could not be read`);
+    if (!(tree.get() instanceof ExpressionsCDS.CDSDefineView)) continue;
+    const cds = obj.getDefinitionName();
     if (tree.getChildren().some((c) => c instanceof Nodes.TokenNode && c.getFirstToken().getStr().toUpperCase() === "ENTITY")) continue;
     for (const annotation of tree.findDirectExpressions(ExpressionsCDS.CDSAnnotation)) {
       const key = annotation.getChildren().filter((c) => c instanceof Nodes.TokenNode)

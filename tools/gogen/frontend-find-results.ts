@@ -7,9 +7,10 @@ export function inlineFindResultTypes(body: abaplint.Nodes.StructureNode | undef
   const types = new Map<string, Type>();
   for (const st of body?.findAllStatementNodes() ?? []) {
     if (!(st.get() instanceof Statements.Find)) continue;
-    const target = st.findDirectExpression(Expressions.Target);
+    const children = st.getChildren();
+    const target = st.findDirectExpressions(Expressions.Target).find(t => children[children.indexOf(t) - 1]?.getFirstToken() === st.findDirectTokenByText("RESULTS"));
     const inline = target?.findFirstExpression(Expressions.InlineData);
-    if (!inline || !st.findDirectTokenByText("RESULTS")) continue;
+    if (!inline) continue;
     const name = inline.findFirstExpression(Expressions.TargetField)!.concatTokens().toUpperCase();
     const ddicName = st.findDirectTokenByText("ALL") !== undefined ? "MATCH_RESULT_TAB" : "MATCH_RESULT";
     const obj = ctx.reg.getObject(ddicName.endsWith("_TAB") ? "TTYP" : "TABL", ddicName);
@@ -67,7 +68,6 @@ export function lowerFindResults(node: abaplint.Nodes.StatementNode, ctx: FindCo
   return {s: "find_results", all, bytes, mode: kind === "PCRE" ? "P" : kind === "REGEX" ? "R" : "", pattern: convert(patX, bytes ? XS : S), subject: convert(subjX, bytes ? XS : S),
     icase: node.findDirectTokenByText("IGNORING") !== undefined, target, table, row, sub, f};
 }
-
 interface FindContext { readonly reg: abaplint.IRegistry; readonly program: Program }
 interface InlineHelpers { readonly Statements: typeof abaplint.Statements; readonly Expressions: typeof abaplint.Expressions; readonly typeOf: (type: abaplint.AbstractType, where: string, program: Program) => Type; readonly Unsupported: new (message: string) => Error }
 interface LowerHelpers {
