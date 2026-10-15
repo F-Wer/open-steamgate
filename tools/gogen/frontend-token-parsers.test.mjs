@@ -286,3 +286,17 @@ test("round 3 unreadable used DDLS reports its original filename", async (t) => 
     });
   });
 });
+
+// Core stores global FRIENDS as names, whereas LOCAL FRIENDS is a separate
+// statement (also exercised by testdata/zcl_gogen_t_staticfriend's unit test).
+test("global friend elements are strings, including the private static access path", async () => {
+  const p = compile("rv = zcl_friend_state=>value.", {
+    "zcl_friend_state.clas.abap": `CLASS zcl_friend_state DEFINITION PUBLIC FINAL FRIENDS zcl_tokens.
+PRIVATE SECTION. CLASS-DATA value TYPE i VALUE 7. ENDCLASS.
+CLASS zcl_friend_state IMPLEMENTATION. ENDCLASS.`,
+  });
+  const friends = p.reg.getObject("CLAS", "ZCL_FRIEND_STATE").getDefinition().getFriends();
+  assert.deepEqual(friends, ["zcl_tokens"]);
+  assert.ok(friends.every((friend) => typeof friend === "string"));
+  await both(p, 7);
+});

@@ -215,7 +215,7 @@ import {P_GENERIC} from "./frontend-classes-native.mjs";
   if (ctx.reg.getObject("CLAS", t) || ctx.reg.getObject("INTF", t)) return {k: "ref", name: t, intf: ctx.reg.getObject("INTF", t) !== undefined};
   const m = /^(\w+)=>(\w+)$/.exec(t);
   if (m) {
-    const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? clasDef(ctx.reg, m[1]);
+    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? clasDef(ctx.reg, m[1]);
     const td = owner?.getTypeDefinitions().getByName(m[2]);
     if (td === undefined) throw new Unsupported(`type ${text}`);
     return typeOf(td.getType(), text, ctx.program);

@@ -155,7 +155,7 @@ import {textLiteral} from "./frontend-literals.ts";
       if (!Number.isSafeInteger(value)) throw new Unsupported(`integer literal ${value}`);
       return {e: "int", value, type: I};
     }
-    const lit = textLiteral(n, Expressions);
+    const lit = textLiteral(n, Expressions.ConcatenatedConstant);
     if (lit.refusal !== undefined) throw new Unsupported(`literal ${n.concatTokens()}${lit.refusal}`);
     return lit.quote === "`" ? {e: "str", value: lit.value, type: S} : {e: "chars", value: lit.value.replace(/ +$/, ""), type: C(Math.max(1, lit.value.length))};
   }

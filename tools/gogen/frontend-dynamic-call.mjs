@@ -1,7 +1,8 @@
+import {Expressions, isTok, isExpr, S, Unsupported} from "./frontend-base.mjs";
 // Static dispatch through a run-time class name. Parenthesized literal
 // method names share the same adapter as an ordinary identifier; the class
 // stays dynamic even when both names happen to be literals.
-export function dynamicStaticCall(node, ctx, {Expressions, isTok, isExpr, sourceOperand, source, convert, S, Unsupported}) {
+export function dynamicStaticCall(node, ctx, {sourceOperand, source, convert}) {
   const text = node.concatTokens();
   const kids = node.findDirectExpression(Expressions.MethodSource).getChildren();
   if (kids.length !== 3 || !isTok(kids[1], "=>")) throw new Unsupported(`CALL METHOD form: ${text}`);

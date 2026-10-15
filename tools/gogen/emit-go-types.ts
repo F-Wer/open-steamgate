@@ -25,26 +25,34 @@ export type CallExpr = RuntimeFields<Omit<RawCall, 'owner' | 'static' | 'callee'
 export interface SubstringExpr extends Omit<RuntimeFields<Extract<IR.Expr, {e: 'substr'}>>, 'base'> {
   readonly base?: IR.Type;
 }
-export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'substr'}>> | CallExpr | SubstringExpr
+export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'struct' | 'upcast' | 'substr'}>> | CallExpr | SubstringExpr
+  | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'struct'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'struct'}>}) | (RuntimeFields<Omit<Extract<IR.Expr, {e: 'upcast'}>, 'type'>> & {readonly type: Extract<IR.Type, {k: 'ref'}>})
   | {readonly e: 'int' | 'float'; readonly value: number; readonly type?: IR.Type};
 export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
-type StatementFields<T> = T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly fields?: readonly LockField[]}
+export interface NativeArgument { readonly value: Expr; readonly ref?: boolean }
+export interface ArithmeticBranchProbe { readonly e?: string; readonly reason?: string }
+type StatementFields<T> = T extends {s: 'native'} ? Omit<T, 'args'> & {readonly args?: readonly NativeArgument[]}
+  : T extends {s: 'kernel_loop'} ? Omit<T, 'args' | 'pos'> & {readonly args: readonly NativeArgument[]; readonly pos?: IR.Position}
+  : T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly fields?: readonly LockField[]}
   : T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
   : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}
-  : T extends {s: 'stub' | 'kernel_loop'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
+  : T extends {s: 'stub'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
   : T extends {s: 'call_dyn_static'} ? Omit<T, 'cls'> & {readonly cls: string | Expr}
   : T extends {s: 'loop'} ? Omit<T, 'key' | 'dynamicKeys'> & {
     readonly key?: IR.ResolvedKey | null;
     readonly dynamicKeys?: {readonly value: Expr; readonly options: readonly IR.ResolvedKey[]} | null;
   } : T extends {s: 'insert_sorted'} ? Omit<T, 'keys' | 'refInto'> & {
     readonly keys: readonly SortKey[]; readonly refInto?: Expr | null; readonly unique?: boolean;
-  } : T extends {s: 'select_loop' | 'select_table' | 'select_single' | 'select_aggregate'} ? Omit<T, 'target'> & {readonly target: Expr | null}
+  } : T extends {s: 'select_loop' | 'select_single' | 'select_aggregate'} ? Omit<T, 'target'> & {readonly target: Expr | null}
     : T;
 export type Stmt = StatementFields<RuntimeFields<IR.Stmt>> & {readonly pos?: IR.Position; readonly moveTable?: boolean};
 export type Condition = RuntimeFields<Exclude<IR.Condition, {c: 'cmp'}>>
   | (RuntimeFields<Omit<Extract<IR.Condition, {c: 'cmp'}>, 'type'>> & {readonly type?: IR.Type});
 export type Argument = RuntimeFields<IR.Argument>;
-export type Where = RuntimeFields<IR.Where>;
+// whereOf emits INITIAL only with fx, and comparisons only with a value.
+export type Where = {readonly op: 'initial' | 'notinitial'; readonly fx: Expr}
+  | {readonly op: '=' | '<>' | '<' | '<=' | '>' | '>='; readonly name?: string;
+    readonly fx?: Expr; readonly ftype?: IR.Type; readonly value: Expr; readonly calc?: IR.Type};
 export type Catch = RuntimeFields<Omit<IR.Catch, 'into' | 'intoKind' | 'intoType' | 'classes'>> & {
   readonly classes?: readonly string[]; readonly into?: string | null;
   readonly intoKind?: 'exc' | 'ref' | null; readonly intoType?: IR.Type | null;
@@ -55,11 +63,14 @@ export type SqlArgument = RuntimeFields<IR.SqlArgument>;
 export type SqlPredicate = Omit<IR.SqlPredicate, 'range' | 'type' | 'kind' | 'lowLen'> & {
   readonly range: Expr; readonly type: IR.WriteType; readonly kind?: string; readonly lowLen?: number;
 };
+// Emitter metadata on the shared frontend identity token.
+export interface LoopCursor { idxVar?: string }
 export type TableType = Extract<IR.Type, {k: 'table'}>;
 export type StructType = Extract<IR.Type, {k: 'struct'}>;
 export type PackedType = Extract<IR.Type, {k: 'p'}>;
 export type Conversion = Extract<Expr, {e: 'conv'}>;
 export type Builtin = Extract<Expr, {e: 'fn'}>;
+export interface DynamicLoopBranch { readonly name: string; readonly key: IR.ResolvedKey | null }
 export type KeyLoop = Extract<Stmt, {s: 'loop'}> & {readonly key: IR.ResolvedKey};
 export type KeyRead = Extract<Stmt, {s: 'read_seckey'}>;
 export type Loop = Extract<Stmt, {s: 'loop' | 'loop_data'}>;
