@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
-import {lowerBoolx} from "./frontend-boolx.mjs";
+import {lowerBoolx} from "./frontend-boolx.ts";
 import {lowerNarrowSubmit} from "../osd-narrow-submit.mjs";
 
 const require = createRequire(import.meta.url);

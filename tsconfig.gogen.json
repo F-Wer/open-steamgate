@@ -20,6 +20,7 @@
     "tools/gogen/append.ts",
     "tools/gogen/frontend-diagnostics.ts",
     "tools/gogen/frontend-literals.ts",
+    "tools/gogen/frontend-boolx.ts",
     "tools/gogen/symbols.ts",
     "tools/gogen/go-symbols.ts",
     "tools/gogen/emit-constructors.ts",
