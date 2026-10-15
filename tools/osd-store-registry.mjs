@@ -1,3 +1,4 @@
+import {activeSystem, matchesSourcePath} from "./osd-system.mjs";
 import {layers} from "./osd-inputs.mjs";
 // Registry construction, diagnostics and temporary source borrowing.
 import {readFileSync, readdirSync, realpathSync, statSync} from "node:fs";
@@ -102,7 +103,7 @@ export function updateRegistryFiles(registry, replacements) {
   registry.parse();
 }
 
-export function walkStoreFiles(store, dir, out) {
+export function walkStoreFiles(store, dir, out, system = activeSystem(store.root)) {
   let entries;
   try {
     // sorted, so two walks of one tree index it the same way
@@ -116,11 +117,11 @@ export function walkStoreFiles(store, dir, out) {
     }
     const relative = join(dir, entry);
     if (statSync(join(store.root, relative)).isDirectory()) {
-      walkStoreFiles(store, relative, out);
+      walkStoreFiles(store, relative, out, system);
     } else {
       // the build's exclusions, matched the way the transpiler matches them
       // -- against the path with a leading slash
-      if (store.excluded.some((re) => re.test("/" + relative))) {
+      if (matchesSourcePath(store.root, system ? join(store.root, relative) : "/" + relative, store.excluded, system ?? null)) {
         continue;
       }
       out.push(relative);
@@ -177,7 +178,7 @@ export function buildRegistry(store, configPath = "abaplint.jsonc") {
   // everything, not only what the index calls an object: a class needs its
   // local includes, and a type pool is not an ADT object but the check
   // still needs it
-  const hidden = new Set(layers(store.root, {input_folder: store.roots.map(r => r.path)}, {OSD_PACKS: "", OSD_LAYERS: "", OSD_TMP: "off", OSD_LAYER_DISCOVERY_ONLY: "1"}).hidden);
+  const hidden = new Set(layers(store.root, {input_folder: store.roots.map(r => r.path)}, process.env, {discoveryOnly: true}).hidden);
   for (const root of [...store.roots, ...store.libs]) {
     for (const file of root.files ?? walkStoreFiles(store, root.path, [])) {
       if (hidden.has(file) || /\.(abap|xml|asddls)$/.test(file) === false) {

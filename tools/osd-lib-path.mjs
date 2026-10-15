@@ -1,3 +1,4 @@
+import {activeSystem, layerDir} from "./osd-system.mjs";
 // Where a locked library is read from, and the pin gate in front of it.
 //
 // Kept apart from tools/osd-lock.mjs on purpose: osd-lock is imported by
@@ -27,6 +28,12 @@ export function isCheckout(root) {
 
 /** Resolve a library at its established path, checking the checkout itself. */
 export function libraryPath(root, folder, env = process.env) {
+  const system = activeSystem(root, env);
+  if (system) {
+    const layer = system.layers.find(l => l.kind === "lib" && l.name === folder);
+    if (!layer) throw new Error(`system ${system.digest} does not provide library ${folder}`);
+    return layerDir(root, layer);
+  }
   const pin = readLock(root).libraries.find((lib) => lib.folder === folder);
   if (!pin) throw new Error(`libs.lock.json has no pin for ${folder}`);
   const key = envKey(folder);

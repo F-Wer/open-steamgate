@@ -35,7 +35,7 @@ eight public abapGit repositories of the closure corpus, the SAP sample
 projects exported from A4H ([`/IWBEP/GWSAMPLE_BASIC`](https://help.sap.com/docs/ABAP_PLATFORM_NEW/68bf513362174d54b58cddec28794093/59283fc4528f486b83b1a58a4f1063c0.html), `EPM-RFC-SAMPLE`,
 `ERROR-LOG-SAMPLE`, `DRAFT-ADMIN-SAMPLE`, `EPM-CDS-SAMPLE`,
 `EPM-SADL-TX-SAMPLE`, `SEARCH-ODATA-SAMPLE`, `UCON-HTTP-SAMPLE-PROJECT`) and one project
-from the Lars clones. 53 tables, `src/segw/segw-tables.json`.
+from the Lars clones. 53 tables, `tools/segw-tables.json`.
 
 The two hand-written fixtures under `test/fixtures/segw/` and stg-compile's
 output are not a source: they are written from the spec, not the other way
@@ -93,7 +93,7 @@ The hand-written fixtures `zstg_mapped.iwpr.xml` and `zstg_mini.iwpr.xml`
 were re-sorted to that shape (table blocks alphabetical, fields in the
 spec's order) and round trip byte for byte too. `stg-compile` writes the
 tree from the same spec: every row's fields in the order
-`src/segw/segw-tables.json` gives, a field the spec does not know refused
+`tools/segw-tables.json` gives, a field the spec does not know refused
 at write time, SEGW's label fields in the text tables (`ET_LABEL`,
 `ESET_LABEL`, `PROP_LABEL`, `NAVP_LABEL`, `ASSOC_LABEL`, `ASST_LABEL`,
 `FI_LABEL`, `FI_PARAM_LABEL`; a `DESCRIPTION` only in `SBD_DST`, `SBD_MDT`,

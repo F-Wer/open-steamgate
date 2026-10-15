@@ -1,3 +1,4 @@
+import {activeSystem, logicalSystemPath, matchesSourcePath} from "./osd-system.mjs";
 // The transpile as a library call: what abap_transpile does, done in this
 // process (backlog N3).
 //
@@ -25,7 +26,7 @@ import {createRequire} from "node:module";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, relative, resolve, sep} from "node:path";
 import {hostModules} from "./osd-host.mjs";
-import {isSourceIdentity} from "./osd-packs.mjs";
+import {isSourceIdentity, inputFoldersOf} from "./osd-packs.mjs";
 import {mapStatementStarts} from "./osd-source-map-starts.mjs";
 import {lowerNarrowSubmit} from "./osd-narrow-submit.mjs";
 import {installRfcMessage} from "./osd-rfc-message.mjs";
@@ -173,8 +174,11 @@ export async function readAll(files, relativeTo, transform = (source) => source,
 // expressions of input_filter and exclude_filter over the absolute path
 export async function loadFiles(root, config, core, onRead = undefined) {
   const {wanted, skipped} = listFiles(root, config);
-  return {files: await readAll(wanted, resolve(root, config.output_folder),
-    (source, filename) => lowerNarrowSubmit(source, filename, core), onRead), skipped};
+  const files = await readAll(wanted, resolve(root, config.output_folder),
+    (source, filename) => lowerNarrowSubmit(source, filename, core), onRead);
+  const system = activeSystem(root) ?? null;
+  if (system) for (const file of files) file.relative = relative(resolve(root, config.output_folder), dirname(logicalSystemPath(root, file.path, system)));
+  return {files, skipped};
 }
 
 // the same list, unread: a caller that keeps the files it read (a warm
@@ -182,16 +186,17 @@ export async function loadFiles(root, config, core, onRead = undefined) {
 export function listFiles(root, config) {
   const include = regexps(config.input_filter);
   const exclude = regexps(config.exclude_filter);
-  const folders = Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder];
+  const system = activeSystem(root) ?? null;
+  const folders = system ? inputFoldersOf(root, config) : Array.isArray(config.input_folder) ? config.input_folder : [config.input_folder];
   const wanted = [];
   let skipped = 0;
   for (const folder of folders) {
     for (const filename of walk(resolve(root, folder))) {
-      if (isSourceIdentity(filename)) {
+      if (isSourceIdentity(filename) || system && [".osd-layer.json", ".abapgit.xml"].includes(basename(filename))) {
         skipped++;
-      } else if (include.length > 0 && include.some((r) => r.test(filename)) === false) {
+      } else if (include.length > 0 && matchesSourcePath(root, filename, include, system) === false) {
         skipped++;
-      } else if (exclude.length > 0 && exclude.some((r) => r.test(filename))) {
+      } else if (exclude.length > 0 && (matchesSourcePath(root, filename, exclude, system) || exclude.some(r => r.test(filename)))) {
         skipped++;
       } else {
         wanted.push(filename);
@@ -205,10 +210,11 @@ export function listFiles(root, config) {
 // clone into a temporary folder when there is only a URL, gone after
 export async function loadLibs(root, config, log = () => {}, onRead = undefined) {
   const files = [];
+  const system = activeSystem(root) ?? null;
   for (const lib of config.libs ?? []) {
     let dir;
     let cleanup = false;
-    if (existsSync(join(root, "libs.lock.json"))) {
+    if (system || existsSync(join(root, "libs.lock.json"))) {
       dir = libraryPath(root, basename(lib.folder));
       log(`lib from locked folder: ${lib.folder}`);
     } else
@@ -229,8 +235,9 @@ export async function loadLibs(root, config, log = () => {}, onRead = undefined)
     // the CLI's one rule of its own: a library's test classes are not read
     // at all, so a dependency is never tested and never gets a test module
     const found = matching(dir, patterns)
+      .filter(f => !system || ![".osd-layer.json", ".abapgit.xml"].includes(basename(f)))
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
-      .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);
+      .filter((f) => exclude.length === 0 || matchesSourcePath(root, f, exclude, system) === false);
     files.push(...await readAll(found, root, undefined, onRead, cleanup));
     log(`\t${found.length} files added from lib`);
     if (cleanup) {

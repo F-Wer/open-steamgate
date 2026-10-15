@@ -22,7 +22,7 @@ classes and leaves `_EXT` alone, which is what SEGW's "Generate" does.
 
 Node identifiers in the tree are a hash of project, kind and name, so the
 same file gives the same bytes; a diff of two compiles is a diff of the
-model. The tree is written in SEGW's own shape (`src/segw/segw-tables.json`,
+model. The tree is written in SEGW's own shape (`tools/segw-tables.json`,
 the field set and order derived from real projects, `docs/segw-tree.md`):
 `npm run segw:tree import` takes a compiled file into the `ZSTG_SB*` tables
 and `export` gives the same bytes back.

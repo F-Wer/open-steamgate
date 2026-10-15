@@ -29,6 +29,12 @@ import {runsAs} from "./osd-main.mjs";
 import {pull, treeDigest} from "./osd-oci.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
 export {MARKER, markerOf};
+// loaded on demand: a system install pulls in the layer zip encoder, which
+// costs ~0.3 s to import, and every build imports this module for unfetched()
+// (the warm compiler worker's startup deadline is 500 ms in its tests)
+export async function fetchSystem(...args) {
+  return (await import("./osd-system-fetch.mjs")).fetchSystem(...args);
+}
 
 
 function git(args, cwd) {
@@ -271,6 +277,11 @@ export class FetchFailed extends Error {
 
 export async function main(args) {
   const root = resolve(process.env.OSD_ROOT ?? process.cwd());
+  if (args[0] === "--system") {
+    if (args.length !== 2) throw new Error("usage: osd-fetch --system <ref@digest | index.json>");
+    await fetchSystem(root, args[1], {log: console.log});
+    return 0;
+  }
   if (args.includes("--check")) {
     const missing = unfetched(root);
     for (const m of missing) {

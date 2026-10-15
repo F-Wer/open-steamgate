@@ -1457,42 +1457,42 @@
   {
    "field": "ZSTG_SBD_AT-TYPE",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZSTG_SBD_AT-VALUE",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZSTG_SBD_GA-HASH",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZSTG_SBD_MD-VERSION",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZSTG_SBD_NOI-TYPE",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZSTG_SBD_SV-VERSION",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZSTG_SBD_VL-VALUE",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZSTG_SBD_VM-VALUE",
    "kind": "system-has-it",
-   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (src/segw/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
+   "why": "a column name of SAP's own SEGW project tables, which an IWPR export carries row by row (tools/segw-tables.json is derived from 21 of them): a system holds the same name in its own transparent table"
   },
   {
    "field": "ZOSD_ISSUE_S-RULE",

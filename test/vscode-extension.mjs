@@ -8,7 +8,7 @@ import express from "express";
 import {mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import path from "node:path";
-import {fileURLToPath} from "node:url";
+import {fileURLToPath, pathToFileURL} from "node:url";
 import {createRequire} from "node:module";
 import {checkReportDocument, activationSuccessDocument, activationFailureDocument, uriOf as facadeUriOf} from "../tools/adt-documents.mjs";
 import {entitySetMapFor} from "../tools/segw-entityset-map.mjs";
@@ -1146,6 +1146,49 @@ describe("editors/vscode: the extension's logic", function () {
     } finally {
       rmSync(dir, {recursive: true, force: true});
     }
+  });
+
+  it("round 2 item 3: discovers installed sources and binds debugger maps to those same files", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "osd-system-debug-"));
+    try {
+      const layers = [{name: "src", kind: "input", path: "inputs/src"},
+        {name: "custom", kind: "customer", path: "inputs/custom"},
+        {name: "demo", kind: "pack", path: "packs/demo"}, {name: "lib", kind: "lib", path: "libs/lib"}];
+      const system = path.join(dir, ".local/system"), output = path.join(dir, "build/by-input/g1/output");
+      mkdirSync(output, {recursive: true}); mkdirSync(system, {recursive: true});
+      writeFileSync(path.join(system, ".osd-system.json"), JSON.stringify({layers}));
+      const cases = [["src/zfoo.prog.abap", "inputs/src/code/zfoo.prog.abap"],
+        ["custom/zbar.prog.abap", "inputs/custom/src/zbar.prog.abap"],
+        ["packs/demo/src/zpack.prog.abap", "packs/demo/src/zpack.prog.abap"],
+        [".local/lars/lib/src/cl_lib.clas.abap", "libs/lib/src/cl_lib.clas.abap"]];
+      for (const layer of layers) {
+        const base = path.join(system, layer.path); mkdirSync(base, {recursive: true});
+        writeFileSync(path.join(base, ".abapgit.xml"), `<STARTING_FOLDER>/${layer.name === "src" ? "code" : "src"}/</STARTING_FOLDER>`);
+      }
+      for (const [logical, installed] of cases) {
+        const actual = path.join(system, installed), checkout = path.join(dir, logical);
+        mkdirSync(path.dirname(actual), {recursive: true}); writeFileSync(actual, "* installed");
+        mkdirSync(path.dirname(checkout), {recursive: true}); writeFileSync(checkout, "* unrelated");
+        writeFileSync(path.join(output, path.basename(logical) + ".mjs.map"), JSON.stringify({version: 3,
+          sources: [path.relative(output, checkout).replaceAll("\\", "/")], mappings: ""}));
+      }
+      symlinkSync(output, path.join(dir, "output"), "dir");
+      const running = runningAbapSources(dir), attach = debuggerConfiguration(9341, {root: dir});
+      expect(running.files.size).to.equal(cases.length);
+      for (const [logical, installed] of cases) {
+        const actual = path.join(system, installed), checkout = path.join(dir, logical);
+        expect(breakpointWarning(actual, running)).to.equal(undefined);
+        expect(breakpointWarning(checkout, running).counterpart).to.equal(actual);
+        const override = entry => {
+          for (const [pattern, target] of Object.entries(attach.sourceMapPathOverrides)) {
+            const prefix = pattern.slice(0, -1);
+            if (entry.startsWith(prefix)) return target.replace("*", entry.slice(prefix.length));
+          }
+        };
+        expect(override(path.relative(output, checkout).replaceAll("\\", "/"))).to.equal(actual);
+        expect(override(pathToFileURL(checkout).href)).to.equal(actual);
+      }
+    } finally { rmSync(dir, {recursive: true, force: true}); }
   });
 
   it("the taxi sample data: the next year to make, what a reset removes, and the tree's action", () => {

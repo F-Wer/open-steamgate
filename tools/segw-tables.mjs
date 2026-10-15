@@ -11,7 +11,7 @@
 // DDIC order), the longest value seen, and the key: the shortest prefix
 // of the fields that is unique (PROJECT + NODE_UUID; SYLANGU + PROJECT +
 // NODE_UUID for texts; PROJECT + NODE_UUID + DS_ATT_PATH for mapping
-// rules). The spec lands in src/segw/segw-tables.json.
+// rules). The spec lands in tools/segw-tables.json.
 //
 // Without arguments the script turns the spec into src/segw/ddic/
 // zstg_<table>.tabl.xml and src/segw/zstg_segw.stg.yaml (ZSTG_SEGW_SRV, one
@@ -30,7 +30,7 @@ import {existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSyn
 import {join} from "node:path";
 import {runsAs} from "./osd-main.mjs";
 
-export const SPEC_FILE = "src/segw/segw-tables.json";
+export const SPEC_FILE = "tools/segw-tables.json";
 export const DDIC_DIR = "src/segw/ddic";
 export const YAML_FILE = "src/segw/zstg_segw.stg.yaml";
 export const SEQ_FIELD = "STG_SEQ";

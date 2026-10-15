@@ -1,3 +1,4 @@
+import {activeSystem, layerDir, logicalSystemPath, matchesSourcePath} from "./osd-system.mjs";
 // The layers of the system: what the transpiler is given, in what order,
 // and who wins when two folders hold the same object.
 //
@@ -24,7 +25,7 @@
 // Neither is an error; both are said out loud, here and in the builder's
 // log.
 import {readFileSync, readdirSync, statSync, existsSync} from "node:fs";
-import {resolve} from "node:path";
+import {basename, resolve} from "node:path";
 import {inputFoldersOf} from "./osd-packs.mjs";
 import {runsAs} from "./osd-main.mjs";
 
@@ -56,7 +57,7 @@ const treeRoot = () => {
 /** the abapGit object a file belongs to: zcl_x.clas.abap and zcl_x.clas.xml are one object */
 export function objectOf(filename) {
   // <name>.<type>[.<member>].<ext>; the type is the four-character abapGit kind
-  if (filename === ".osd-source.json") return undefined;
+  if ([".osd-source.json", ".osd-layer.json", ".osd-system.json"].includes(filename)) return undefined;
   const parts = filename.split(".");
   if (parts.length < 3) {
     return undefined;
@@ -105,10 +106,14 @@ export function filesIn(base, folder) {
 
 // the layers as the config lists them, resolved: which folder owns each
 // object, which files an earlier layer hides, and where nothing decides
-export function layers(base, config = JSON.parse(readFileSync(resolve(base, "abap_transpile.json"), "utf8")), env = process.env) {
+export function layers(base, config = JSON.parse(readFileSync(resolve(base, "abap_transpile.json"), "utf8")), env = process.env, {discoveryOnly = false} = {}) {
   // the config lists the tree's own folders; a pack is a directory found
   // at start and layered after them (tools/osd-packs.mjs, backlog E.2)
-  const folders = inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config, env);
+  // The store already resolved its roots. Validate user settings, then use
+  // exactly those roots without rediscovering packs, overlays or $TMP.
+  if (discoveryOnly) activeSystem(base, env);
+  const folders = discoveryOnly ? [config.input_folder ?? config.input_folders ?? []].flat()
+    : inputFoldersOf(base, config.input_folder === undefined ? {input_folder: config.input_folders} : config, env);
   const byFolder = folders.map((folder) => ({folder, files: filesIn(base, folder)}));
   // the same file name twice inside one folder: no order decides, so nothing does
   const duplicates = [];
@@ -236,20 +241,24 @@ export function libraryFiles(root = process.cwd(), config = undefined) {
     cfg = JSON.parse(readFileSync(file, "utf8"));
   }
   const out = [];
+  const system = activeSystem(root) ?? null;
   for (const lib of cfg.libs ?? []) {
     if (lib.folder === undefined || lib.folder === "") continue;
-    const dir = resolve(root, "." + lib.folder);
+    const layer = system?.layers.find(l => l.kind === "lib" && l.name === lib.folder.replaceAll("\\", "/").split("/").at(-1));
+    if (system && !layer) throw new Error(`system does not provide library ${lib.folder}`);
+    const dir = system ? layerDir(root, layer) : resolve(root, "." + lib.folder);
     if (existsSync(dir) === false) continue;
     const patterns = typeof lib.files === "string" && lib.files !== ""
       ? [lib.files]
       : Array.isArray(lib.files) ? lib.files : ["/src/**"];
     const exclude = (lib.exclude_filter ?? []).map((p) => new RegExp(p, "i"));
-    const base = dir.split("/").join("/");
+    const base = logicalSystemPath(root, dir, system).split("/").join("/");
     const rules = patterns.map((p) => globToRegExp(base + p));
     const files = walkFiles(dir)
-      .filter((f) => rules.some((r) => r.test(f)))
+      .filter(f => !system || ![".osd-layer.json", ".abapgit.xml"].includes(basename(f)))
+      .filter((f) => matchesSourcePath(root, f, rules, system))
       .filter((f) => f.endsWith(".clas.testclasses.abap") === false)
-      .filter((f) => exclude.length === 0 || exclude.some((r) => r.test(f)) === false);
+      .filter((f) => exclude.length === 0 || matchesSourcePath(root, f, exclude, system) === false);
     out.push({folder: lib.folder, dir, files});
   }
   return out;

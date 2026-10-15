@@ -327,6 +327,11 @@ describe("fail closed regressions", () => {
     expect(result.status).to.equal(0);
     expect(Object.values(reports[0].fileTests)).to.deep.equal([{registered: 1, passed: 0, pending: 1, failed: 0}]);
   });
+  it("counts a test that chdirs into a scratch root under its own file", () => {
+    const {result, reports} = fixtureRun('import {mkdtempSync} from "node:fs"; import {tmpdir} from "node:os"; import {join} from "node:path"; let cwd; describe("moves", () => { beforeEach(() => { cwd = process.cwd(); process.chdir(mkdtempSync(join(tmpdir(), "osd-chdir-"))); }); afterEach(() => process.chdir(cwd)); it("passes while elsewhere", () => {}); });');
+    expect(Object.values(reports[0].fileTests)).to.deep.equal([{registered: 1, passed: 1, pending: 0, failed: 0}]);
+    expect(result.status).to.equal(0);
+  });
   it("rejects an empty first run", () => {
     expect(fixtureRun('describe("empty", () => {});').result.status).to.equal(1);
   });

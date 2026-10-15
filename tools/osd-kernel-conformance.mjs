@@ -22,6 +22,9 @@ export function regenerateEvidence(corpus, runs, out, ref) {
   return report;
 }
 
+export const conformanceEnv = work => ({...goEnv(work), OSD_PACKS: undefined,
+  OSD_WEB_PACKS: undefined, OSD_LAYERS: undefined, NODE_OPTIONS: "--max-old-space-size=12288"});
+
 export function main(args = process.argv.slice(2)) {
   const start = performance.now(), errors = [], summary = ["# Kernel conformance", ""], runs = [];
   let work = join(root, ".local/kernelci"), profile = "required", source;
@@ -42,7 +45,7 @@ export function main(args = process.argv.slice(2)) {
     const manifest = readJSON(join(root, ".github/ci/kernel-corpus.json"));
     const known = readJSON(join(root, ".github/ci/kernel-known-failures.json"));
     if (known.abapiti !== pin()) throw new Error("known failures pin differs");
-    const env = {...goEnv(work), NODE_OPTIONS: "--max-old-space-size=12288", OSD_PACKS: "", OSD_WEB_PACKS: ""};
+    const env = conformanceEnv(work);
     for (const runtime of profile === "heavy" ? ["osgjs", "osgo"] : ["osgjs"]) for (const folder of publicFolders) {
       // Public required inputs remain strict; unavailable optional inputs are report lines above.
       try { verifyCorpus(corpus, manifest, [folder]); }

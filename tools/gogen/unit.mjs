@@ -36,7 +36,7 @@ const skipped = new Set((config.options?.skip ?? config.skip ?? []).map((s) =>
   `${s.object}/${s.class}/${s.method}`.toUpperCase()));
 const walk = (dir) => !existsSync(dir) ? [] : readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
-const {sources, folders, libDirs, skip, overrides} = unitInputs({home, config, fixture, extraInputs});
+const {sources, folders, libDirs, skip, overrides} = unitInputs({home, config, fixture, extraInputs, extraPacks: !args.includes("--no-extra-packs")});
 for (const o of overrides) console.error(`Override ${o.object}: ${o.input} hides ${o.hidden}`);
 const owners = [...new Set(sources.map((f) => f.split("/").at(-1).replace(/\.clas\.testclasses\.abap$/, "").replaceAll("#", "/").toUpperCase()))]
   .filter((o) => selected.size === 0 || selected.has(o));
@@ -51,7 +51,7 @@ if (args.includes("--per-owner") && !selected.size && !fixture) {
   // the child's test processes plus a minute for its frontend and Go build
   const perOwnerTimeout = processTimeout() + 60000;
   for (const owner of owners) {
-    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", ...(args.includes("--no-cache") ? ["--no-cache"] : []), "--jobs", String(jobs), "--out", join(out, owner.toLowerCase()), ...extraInputs.flatMap((folder) => ["--input", folder])], {
+    const child = spawnSync("node", [join(here, "unit.mjs"), "--class", owner, "--unlayered", ...(args.includes("--no-extra-packs") ? ["--no-extra-packs"] : []), ...(args.includes("--no-cache") ? ["--no-cache"] : []), "--jobs", String(jobs), "--out", join(out, owner.toLowerCase()), ...extraInputs.flatMap((folder) => ["--input", folder])], {
       cwd: home, encoding: "utf8", timeout: perOwnerTimeout, maxBuffer: 20e6, env: process.env,
     });
     if (!child.stdout) {

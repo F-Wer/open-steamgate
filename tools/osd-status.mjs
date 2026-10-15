@@ -1,3 +1,4 @@
+import {rootWebappOf} from "./osd-system.mjs";
 // What this system is, right now, as one JSON object.
 //
 // The façade is the only process that can answer the question. It knows
@@ -137,11 +138,11 @@ function runtimesOf(runtime) {
 // folder that happens to have a page in it.
 export function appsOf(root, env = process.env) {
   const out = [];
-  const folders = [{name: "", dir: join(root, "webapp"), pack: ""}];
+  const folders = [{name: "", dir: rootWebappOf(root, env), pack: ""}];
   try {
-    for (const entry of readdirSync(join(root, "webapp"), {withFileTypes: true})) {
+    for (const entry of readdirSync(rootWebappOf(root, env), {withFileTypes: true})) {
       if (entry.isDirectory()) {
-        folders.push({name: entry.name, dir: join(root, "webapp", entry.name), pack: ""});
+        folders.push({name: entry.name, dir: join(rootWebappOf(root, env), entry.name), pack: ""});
       }
     }
   } catch {

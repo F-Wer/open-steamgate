@@ -43,7 +43,7 @@ jobs:
           RUN_ID: '${{ github.run_id }}'
         run: |
           registry_repo="ghcr.io/${OWNER,,}/open-steamgate"
-          smoke_ref=$(node tools/osd-layer.mjs push "$registry_repo/osd-layer-smoke:run-$RUN_ID" test/fixtures/oci-smoke --name smoke --kind pack)
+          smoke_ref=$(node tools/osd-layer.mjs push "$registry_repo/osd-layer-smoke:run-$RUN_ID" test/fixtures/oci-smoke --name smoke --kind input)
           upper_ref=$(node tools/osd-layer.mjs push "$registry_repo/osd-layer-smoke:upper-$RUN_ID" test/fixtures/oci-smoke --name upper --kind input)
           system_ref=$(node tools/osd-layer.mjs system push "$registry_repo/osd-system-smoke:run-$RUN_ID" "$smoke_ref" "$upper_ref")
           node tools/osd-layer.mjs inspect "$system_ref"
