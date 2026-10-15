@@ -16,6 +16,7 @@
   },
   "include": [
     "tools/gogen/ir.ts",
+    "tools/gogen/fold-scalars.ts",
     "tools/gogen/symbols.ts",
     "tools/gogen/go-symbols.ts",
     "tools/gogen/emit-constructors.ts",
