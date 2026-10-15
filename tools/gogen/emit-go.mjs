@@ -6,7 +6,7 @@ import {localConstant, localConstantDeclarations} from "./emit-local-constants.m
 import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.ts";
 import {omittedFactoryCall} from "./frontend.mjs";
-import {sinkLocals, generatedBindings} from "./sink-locals.mjs";
+import {sinkLocals, generatedBindings} from "./sink-locals.ts";
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.ts";
 import {emitBuiltinGo} from "./emit-builtins.mjs";
