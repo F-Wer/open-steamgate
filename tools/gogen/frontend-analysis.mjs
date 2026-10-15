@@ -97,3 +97,9 @@ export function cdsSqlViews(sources) {
   }
   return out;
 }
+
+// Typed host methods keep their parsed signature; generic ones use NATIVE_ME.
+export function nativeMethodBody(nativeMe, className, name) {
+  if (className === "CL_ABAP_CLASSDESCR" && name === "GET_SUPER_CLASS_TYPE") return "Native_GET_SUPER_CLASS_TYPE";
+  return nativeMe.get(`${className}=>${name}`)?.fn;
+}
