@@ -1,6 +1,7 @@
 // Resolved snapshots, never registry graphs. A lazy table is installed per compile;
 // definitions and types are projected/hash-consed once within that table.
-import {inputSnapshot} from "./frontend-inventory.mjs";
+import {inputSnapshot, core, artifactIdentity, sameArtifactIdentity} from "./frontend-inventory.mjs";
+import {recordedArtifactBuild, auditedBookkeeping} from "./frontend-provenance.mjs";
 import {createHash} from "node:crypto";
 import {basename} from "node:path";
 const tables = new WeakMap();
@@ -27,6 +28,7 @@ class Digests {
     this.memo = new WeakMap();
     this.building = new WeakSet();
     this.values = new Map();
+    this.identities = new Map();
     this.errors = new Map();
     this.timings = new Map();
     this.stats = {objects: 0, nodes: 0, milliseconds: 0, inventoryMilliseconds: 0};
@@ -128,27 +130,33 @@ class Digests {
       s.getChildren().map((c) => this.scope(c))];
   }
   get(key) {
-    if (this.values.has(key)) return this.values.get(key);
     this.inventory();
     const obj = this.objects.get(key);
     if (!obj) return null;
+    if (this.values.has(key) && sameArtifactIdentity(this.identities.get(key), artifactIdentity(obj))) return this.values.get(key);
     const start = performance.now();
     let digest;
     try {
-      const files = inputSnapshot(this.registry).objects.get(key).sources.map((s) => [portableFilename(s.name), s.artifactHash]);
-      const expanded = (obj.getABAPFiles?.() ?? []).map((f) => [portableFilename(f.getFilename()),
-        this.syntax(f.getStructure()), f.getStatements().map((s) => this.syntax(s))]);
-      const def = obj.def ?? obj.definition;
-      // parseType is core's resolved DDIC contract, including domains that have
-      // no parsedType cache. It may recursively consume already-resolved types.
-      const type = typeof obj.parseType === "function" ? obj.parseType(this.registry) : undefined;
-      const scopes = obj.syntaxResult?.spaghetti?.getTop();
-      digest = hash(["gogen-resolved-artifact-2", key, files, expanded, def ? this.definition(def) : null,
-        scopes ? this.scope(scopes) : null, type ? this.type(type) : null]);
+      // Never project a lazy ABAP artifact as source-only. Construction remains
+      // recorded, including TYPE-pool syntax and recursive DDIC reads.
+      const type = recordedArtifactBuild(() => {
+        if (obj instanceof core.ABAPObject && !obj.syntaxResult) new core.SyntaxLogic(this.registry, obj).run();
+        return typeof obj.parseType === "function" ? obj.parseType(this.registry) : undefined;
+      });
+      digest = auditedBookkeeping("resolved-artifact-projection", () => {
+        const files = inputSnapshot(this.registry).objects.get(key).sources.map((s) => [portableFilename(s.name), s.artifactHash]);
+        const expanded = (obj.getABAPFiles?.() ?? []).map((f) => [portableFilename(f.getFilename()),
+          this.syntax(f.getStructure()), f.getStatements().map((s) => this.syntax(s))]);
+        const def = obj.def ?? obj.definition;
+        const scopes = obj.syntaxResult?.spaghetti?.getTop();
+        return hash(["gogen-resolved-artifact-2", key, files, expanded, def ? this.definition(def) : null,
+          scopes ? this.scope(scopes) : null, type ? this.type(type) : null]);
+      });
     } catch (error) {
       // Unknown shapes are inspectable and cannot yield a semantic fingerprint.
       this.errors.set(key, `${error.name}: ${error.message}`); digest = null;
     }
+    this.identities.set(key, artifactIdentity(obj));
     this.values.set(key, digest); this.stats.objects++; this.timings.set(key, performance.now() - start); this.stats.milliseconds += this.timings.get(key);
     return digest;
   }

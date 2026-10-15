@@ -7,7 +7,7 @@ import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
 import {keyComputer, hashV3, mismatchReason, borrowedOwners} from "./frontend-v3-key.mjs";
 import {recordLowering, replayLowering, copyReplayProgram} from "./frontend-replay.mjs";
-import {auditedBookkeeping} from "./frontend-provenance.mjs";
+import {auditedBookkeeping, auditBuiltArtifacts} from "./frontend-provenance.mjs";
 const checksum = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const validHash = (s) => typeof s === "string" && /^[0-9a-f]{64}$/.test(s);
 const KEEP_CANDIDATES = 4;
@@ -75,6 +75,7 @@ export function shadowCache(reg, root, namespace, portable) {
           if (!saved.complete || saved.key !== key) { refuse(saved.reason ?? "corrupt-key"); continue; }
           row.complete = true;
           const current = compute(graph, candidate.root, value, {current: true});
+          if (auditBuiltArtifacts(reg)) { refuse("audit-built-artifact"); break; }
           if (!current.complete) { refuse(current.reason); continue; }
           if (current.key !== key) { refuse(mismatchReason(saved, current)); continue; }
           const trial = copyReplayProgram(program);
@@ -112,6 +113,13 @@ export function shadowCache(reg, root, namespace, portable) {
     },
     finish(graph, entries, program) {
       begin(program, false);
+      if (auditBuiltArtifacts(reg)) {
+        stats.persistenceRefused = "audit-built-artifact";
+        for (const row of stats.entries) {
+          row.currentComplete = false; row.completenessReason = "audit-built-artifact";
+        }
+        return;
+      }
       const bytes = deflateRawSync(serialize(graph), {level: 4}), graphHash = checksum(bytes);
       try { mkdirSync(dir, {recursive: true}); write(join(dir, `${graphHash}.provenance`), bytes); }
       catch { return; }

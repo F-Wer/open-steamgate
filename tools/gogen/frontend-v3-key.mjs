@@ -20,7 +20,7 @@ export function borrowedOwners(value) {
 }
 
 export function keyComputer(reg, namespace, program) {
-  const inventory = inputSnapshot(reg), answers = new Map(), digests = new Map(), rawHashes = new Map();
+  const inventory = inputSnapshot(reg), answers = new Map(), rawHashes = new Map();
   const sources = new Map([...inventory.objects.values()].flatMap((e) => e.sources).map((s) => [s.name, s]));
   const specifications = new WeakMap(), queryValues = new WeakMap(), guards = new WeakMap();
   const evaluate = queryEvaluator(program);
@@ -32,8 +32,7 @@ export function keyComputer(reg, namespace, program) {
   const digest = (key, current, graph) => {
     if (drop?.test(key)) return "FAULT-OMITTED";
     if (!current) return graph.nodes[key]?.digest ?? null;
-    if (!digests.has(key)) digests.set(key, auditedBookkeeping("v3-current-artifact-digest", () => artifactDigestOf(reg, key)));
-    return digests.get(key);
+    return artifactDigestOf(reg, key);
   };
   const raw = (name) => {
     if (!rawHashes.has(name)) {

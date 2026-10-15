@@ -5,6 +5,9 @@ const require = createRequire(import.meta.url);
 export const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 const enumerate = core.Registry.prototype.getObjects;
 const snapshots = new WeakMap(), parsed = new WeakMap(), replacements = new WeakMap(), origins = new WeakMap(), keys = new WeakMap();
+const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "parsed", "modules", "includes"];
+export const artifactIdentity = (obj) => artifactFields.map((name) => obj[name]);
+export const sameArtifactIdentity = (a, b) => a?.every((value, i) => value === b[i]);
 const hasBuiltArtifacts = (inputs) => [...inputs.objects.values()].some(({obj}) =>
   obj.syntaxResult || obj.def || obj.definition || obj.parsedType || obj.isDirty?.() === false);
 const hash = (s) => createHash("sha256").update(s).digest("hex");
