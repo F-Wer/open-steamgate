@@ -1,10 +1,10 @@
 import {append} from "./append.ts";
 import {objectRttiJs, exceptionClass} from "./emit-exception.mjs";
-import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
+import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
 import {constructorFactories} from "./emit-constructors.ts";
 import {emitCondition} from "./emit-js-condition.mjs";
 import {ipow, boolx} from "./ipow-js.mjs";
-import {emitBuiltinJs} from "./emit-builtins.mjs";
+import {emitBuiltinJs} from "./emit-builtins.ts";
 // IR -> JavaScript, from the same IR as emit-go.mjs.
 //
 // Keep the Go backend's value model with JavaScript execution.
@@ -995,7 +995,7 @@ const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.
 const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
 const I8_OPS = {"+": "abap.AddI8", "-": "abap.SubI8", "*": "abap.MulI8", "/": "abap.DivI8", DIV: "abap.DivIntI8", MOD: "abap.ModI8"};
 const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
-const FN = {SIN: "Math.sin", COS: "Math.cos", TAN: "Math.tan", SQRT: "abap.SqrtF", EXP: "Math.exp", LOG: "abap.LogF", LOG10: "Math.log10"};
+const FN = new Map([["SIN", "Math.sin"], ["COS", "Math.cos"], ["TAN", "Math.tan"], ["SQRT", "abap.SqrtF"], ["EXP", "Math.exp"], ["LOG", "abap.LogF"], ["LOG10", "Math.log10"]]);
 
 function expr(e, ctx) {
   switch (e.e) {
