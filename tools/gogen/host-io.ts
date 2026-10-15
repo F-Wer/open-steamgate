@@ -27,7 +27,11 @@ export function listDir(dir: string): string[] {
 /** Read one directory snapshot as [UTF-8 name, isDirectory] pairs in native
  * order, excluding the dot entries. Uses Dirent.isDirectory: symlinks to directories
  * remain false. Never sort; propagates readdirSync errors (including Node's
- * fallback lstat errors). No Node objects or callbacks cross the boundary. */
+ * fallback lstat errors). No Node objects or callbacks cross the boundary.
+ * isDirectory() is read eagerly here; on a real Dirent it is a pure check of
+ * the type readdirSync already resolved (any lstat fallback throws from
+ * readdirSync itself), so callers observe the same entries, order and errors
+ * as when they read it lazily. */
 export function listEntries(dir: string): [string, boolean][] {
   return readdirSync(dir, {withFileTypes: true}).map((entry) => [entry.name, entry.isDirectory()]);
 }
