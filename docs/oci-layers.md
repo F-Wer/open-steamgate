@@ -67,6 +67,20 @@ reference, and refuses a capture file (`*.pcap`, `*.pcapng`, `*.jsonl`) and any
 file larger than the scanner reads. The repository's `.leak-allow.json` does
 not apply to a published layer: a folder whose content is only allowed in this
 repository (`packs/lsd`, `packs/zvdb`'s vectors) cannot be published as is.
+A layer brings its own exceptions instead: `osd-layer push … --leak-allow
+<file>` and `osd-layer system push … --leak-allow <file>` take a file in the
+format of `.leak-allow.json` whose `file` is the path inside the layer archive.
+Every entry needs a reason, applies to that archive path and value only, and an
+entry naming a path the layer does not have is refused rather than ignored. An
+entry may add `layer` (the layer's name) to apply to that layer of a system
+only, and in a system every entry must name its layer. Unknown keys are
+refused. The flag repeats, and the metadata documents are never covered,
+whatever an archive file is called. An entry excuses any kind of hit, the
+identifier list's names included, but the allow file is itself published in
+the layer's repository: it is for public values (an upstream test's GUID), and
+a name from the identifier list must never be written into one. The file belongs in the layer's own repository,
+where it is reviewed; abapiti's rules layers use it for a GUID and a hex ID
+that are literals of abaplint's own public tests.
 
 `treeDigest` uses `tools/osd-oci.mjs`'s shared helper: SHA-256 of concatenated
 `<content sha256 hex>  <archive relative path>\n` lines, sorted by UTF-8 path

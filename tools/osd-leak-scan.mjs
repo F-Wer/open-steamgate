@@ -76,14 +76,22 @@ function encodedPayloadText(name, text) {
 
 // Only the canonical spellings: an OCI/SRI "sha256:"/"sha256-" digest and
 // abapiti's "shape." identity. A generic label ("hash:", "digest") also sits in
-// front of capture bytes, and two session GUIDs back to back are 64 hex too,
-// so a run either half of which reads as a UUID (version and variant nibbles)
-// is decoded as before whatever precedes it.
+// front of capture bytes, so only these markers count. Two session GUIDs back
+// to back are 64 hex too, and a GUID carries an address in its node field (the
+// last six bytes), so a half that reads as a UUID (version and variant nibbles)
+// keeps that node field decoded; the rest of the run is not. Checking the
+// whole run of a UUID-looking half made one digest in eight a candidate again,
+// and abapiti's thousands of shape identities kept producing hits (2026-10-15).
 const DIGEST_MARKER = /(?:^|[^0-9a-z])(?:sha256[:-]|shape\.)$/i;
 const UUID_HALF = /^[0-9a-f]{12}[1-8][0-9a-f]{3}[89ab]/i;
 function isDigest(text, at, run) {
-  return run.length === 64 && DIGEST_MARKER.test(text.slice(Math.max(0, at - 16), at))
-    && !UUID_HALF.test(run.slice(0, 32)) && !UUID_HALF.test(run.slice(32));
+  return run.length === 64 && DIGEST_MARKER.test(text.slice(Math.max(0, at - 16), at));
+}
+// The bytes of a digest run still decoded as packed addresses: the node field
+// of each half that could be a GUID, kept apart so no window spans the two.
+function guidNodeFields(run) {
+  return [run.slice(0, 32), run.slice(32)].filter((half) => UUID_HALF.test(half))
+    .map((half) => Buffer.from(half.slice(20), "hex"));
 }
 
 function views(name, text) {
@@ -101,8 +109,13 @@ function views(name, text) {
     // thousands. Exactly 64 hex characters right after a digest marker are not
     // decoded as packed addresses; every other view of them still is, and a
     // 32-hex GUID (where a real address hides in the node field) is untouched.
-    out.push({ how: "hex→ascii", text: b.toString("latin1"), packed: isDigest(encodedPayloads, m.index, run) ? undefined : b });
+    const digest = isDigest(encodedPayloads, m.index, run);
+    // An unmarked 64-hex run keeps its run, so the scan can drop its packed
+    // hits if the same value is a marked digest anywhere else it reads.
+    out.push({ how: "hex→ascii", text: b.toString("latin1"), packed: digest ? undefined : b,
+      run64: run.length === 64 ? run.toLowerCase() : undefined, digest });
     out.push({ how: "hex→utf-16le", text: b.toString("utf16le") });
+    if (digest) for (const node of guidNodeFields(run)) out.push({ how: "hex→ascii", text: "", packed: node });
   }
   for (const run of encodedPayloads.match(B64_RUN) ?? []) {
     const b = Buffer.from(run, "base64");
@@ -286,6 +299,13 @@ function blobsInRange(root, rangeArgs) {
 
 function scan(root, sources, names) {
   const hits = [];
+  // A 64-hex value seen once after a canonical digest marker is that digest
+  // wherever else it stands: abapiti's runtime descriptor names a shape by its
+  // bare identity (`name = \`<64 hex>\``) in one file and its class says
+  // `shape.<64 hex>` in another. Packed hits from such a bare run wait for the
+  // end of the scan and are dropped if the value turned out to be a digest.
+  const knownDigests = new Set();
+  const pending = [];
   const isAllowed = allowed(root);
   for (const source of sources) {
     const file = typeof source === "string" ? source : source.file;
@@ -321,7 +341,12 @@ function scan(root, sources, names) {
         note(view.how, "частный адрес", m);
       }
       for (const m of view.text.match(UUID) ?? []) note(view.how, "uuid", m);
+      if (view.digest && view.run64) knownDigests.add(view.run64);
       for (const { text: addr } of packedAddresses(view.packed)) {
+        if (view.run64 && !view.digest) {
+          pending.push({ run: view.run64, note, how: view.how + " (упакован)", addr });
+          continue;
+        }
         note(view.how + " (упакован)", "частный адрес", addr);
       }
       if (names) {
@@ -331,6 +356,9 @@ function scan(root, sources, names) {
         }
       }
     }
+  }
+  for (const p of pending) {
+    if (!knownDigests.has(p.run)) p.note(p.how, "частный адрес", p.addr);
   }
   return hits;
 }

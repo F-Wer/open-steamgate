@@ -84,6 +84,42 @@ describe("leak scanner", () => {
     }
   });
 
+  it("exempts a digest with a UUID-looking half and decodes only that half's node field", () => {
+    // version nibble 4 and variant 8 in the first half, the packed prefix outside its node field
+    const uuidish = "c0a8012a" + "aaaa" + "4aaa" + "8aaa" + "aaaaaaaaaaaa" + "bbbbbbbbbbbb0bbb0bbbbbbbbbbbbbbb";
+    assert.equal(uuidish.length, 64);
+    let result = scan(digestFile("uuidish.abap", `* TS: shape.${uuidish}\n`));
+    assert.ok([0, 2].includes(result.status), result.stderr);
+    // the same prefix in that half's node field is still a GUID-carried address
+    const node = "aaaaaaaa" + "aaaa" + "4aaa" + "8aaa" + "c0a8012aaaaa" + "bbbbbbbbbbbb0bbb0bbbbbbbbbbbbbbb";
+    result = scan(digestFile("uuid-node.abap", `* TS: shape.${node}\n`));
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /192\.168\.1\.42/);
+    // and in the second half's node field
+    const second = "bbbbbbbbbbbb0bbb0bbbbbbbbbbbbbbb" + "aaaaaaaa" + "aaaa" + "1aaa" + "9aaa" + "c0a8012aaaaa";
+    result = scan(digestFile("uuid-node-2.abap", `sha256:${second}\n`));
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /192\.168\.1\.42/);
+  });
+
+  it("treats a bare 64-hex value as a digest only when the same scan saw it after a marker", () => {
+    const marked = digestFile("shape-class.abap", `* TS: shape.${digest}\n`);
+    const bare = digestFile("descriptor.abap", `CREATE OBJECT x EXPORTING name = \`${digest.toUpperCase()}\`.\n`);
+    let result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", marked, bare], {encoding: "utf8"});
+    assert.ok([0, 2].includes(result.status), result.stderr);
+    // the order of the files does not matter: the marked one may come last
+    result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", bare, marked], {encoding: "utf8"});
+    assert.ok([0, 2].includes(result.status), result.stderr);
+    result = scan(bare);
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /192\.168\.1\.42/);
+    // a different bare value beside a marked digest is still decoded
+    const other = digest.replace(/^a/, "b");
+    const otherFile = digestFile("other.abap", `name = \`${other}\`\n`);
+    result = spawnSync(process.execPath, ["tools/osd-leak-scan.mjs", ".", "--paths", marked, otherFile], {encoding: "utf8"});
+    assert.equal(result.status, 1, result.stderr);
+  });
+
   it("still finds a dotted address and decoded text beside an exempt digest", () => {
     let result = scan(digestFile("mixed-digest.txt", `sha256:${digest} host ${privateAddress}\n`));
     assert.equal(result.status, 1);

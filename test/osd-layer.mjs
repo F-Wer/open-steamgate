@@ -5,7 +5,7 @@ import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {load as parseYaml} from "js-yaml";
 import {abapgitXml, zipFiles} from "../tools/osd-abapgit-zip.mjs";
-import {build, inspect, leakGate, main, pushSystem, systemLayers} from "../tools/osd-layer.mjs";
+import {build, inspect, leakGate, main, pushSystem, readLeakAllow, systemLayers} from "../tools/osd-layer.mjs";
 import {manifest, pull, push, pushBlob, pushManifest, sha256, treeDigest} from "../tools/osd-oci.mjs";
 import {archiveFiles} from "../tools/osd-source-zip.mjs";
 import {fetchAll} from "../tools/osd-fetch.mjs";
@@ -264,6 +264,73 @@ describe("osd-layer: reproducible publishing", function () {
     try { leakGate([[{path: "safe.txt", bytes: Buffer.from("x")}, {path: "src/zcl_hit.clas.abap", bytes: Buffer.from("forbidden_publish_identifier")}]], {}); } catch (e) { error = e; }
     expect(error?.message).to.include("src/zcl_hit.clas.abap");
     expect(error?.message).not.to.match(/content\/\d{6}\.txt/);
+  });
+
+  it("lets a layer's allow entry through for that archive path and value only", () => {
+    const hit = Buffer.from("forbidden_publish_identifier");
+    const allow = [{file: "src/zcl_vector.clas.abap", value: "forbidden_publish_identifier", reason: "public upstream test vector"}];
+    expect(() => leakGate([[{path: "src/zcl_vector.clas.abap", bytes: hit}]], {}, [], allow)).not.to.throw();
+    expect(() => leakGate([[{path: "src/zcl_vector.clas.abap", bytes: hit}, {path: "src/zcl_other.clas.abap", bytes: hit}]], {}, [], allow))
+      .to.throw(/zcl_other/);
+    expect(() => leakGate([[{path: "src/zcl_vector.clas.abap", bytes: hit}]], {}, [], [{...allow[0], value: "something_else_entirely"}]))
+      .to.throw(/publish refused/);
+  });
+
+  it("refuses an allow entry for a path the layer does not have, or for metadata", () => {
+    const safe = [[{path: "src/a.clas.abap", bytes: Buffer.from("safe")}]];
+    for (const file of ["src/missing.clas.abap", "OCI metadata", "paths.txt", "meta.json"]) {
+      expect(() => leakGate(safe, {}, [Buffer.from("{}")], [{file, value: "x1234", reason: "r"}])).to.throw(/BAD_ALLOW|no such file/);
+    }
+  });
+
+  it("never lets an archive file's exception reach the metadata documents, whatever it is called", () => {
+    const hit = Buffer.from("forbidden_publish_identifier");
+    for (const name of ["OCI metadata", "paths.txt", "meta.json"]) {
+      const allow = [{file: name, value: "forbidden_publish_identifier", reason: "r"}];
+      expect(() => leakGate([[{path: name, bytes: hit}]], {}, [], allow)).not.to.throw();
+      // the same value in a raw config document (a duplicate key parsing would drop) stays refused
+      expect(() => leakGate([[{path: name, bytes: Buffer.from("safe")}]], {}, [Buffer.from('{"name":"forbidden_publish_identifier","name":"smoke"}')], allow))
+        .to.throw(/publish refused/);
+    }
+  });
+
+  it("scopes an entry with a layer to that layer of a system", () => {
+    const hit = Buffer.from("forbidden_publish_identifier");
+    const trees = [[{path: "src/v.clas.abap", bytes: hit}], [{path: "src/v.clas.abap", bytes: hit}]];
+    const entry = {file: "src/v.clas.abap", value: "forbidden_publish_identifier", reason: "r"};
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "two"])).to.throw(/publish refused/);
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}, {...entry, layer: "two"}], ["one", "two"])).not.to.throw();
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "three"}], ["one", "two"])).to.throw(/BAD_ALLOW|no such file/);
+    expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "one"])).to.throw(/more than one layer/);
+    // an unscoped entry in a system is refused rather than applied to every layer
+    expect(() => leakGate(trees, {}, [], [entry], ["one", "two"])).to.throw(/needs "layer"/);
+    expect(() => leakGate([trees[0]], {}, [], [entry], ["one"])).not.to.throw();
+  });
+
+  it("reads an allow file only with a reason on every entry", async () => {
+    const file = join(root, "allow.json");
+    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", value: "v"}]}));
+    expect(() => readLeakAllow(file)).to.throw(/reason/);
+    writeFileSync(file, JSON.stringify([{file: "a", value: "v", reason: "r"}]));
+    expect(() => readLeakAllow(file)).to.throw(/allow/);
+    writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", value: "v", reason: "upstream vector"}]}));
+    expect(readLeakAllow(file)).to.have.length(1);
+    writeFileSync(file, JSON.stringify({allow: [{file: "a", value: "v", reason: "r", layer: ""}]}));
+    expect(() => readLeakAllow(file)).to.throw(/layer/);
+    for (const bad of [{allow: [{file: "a", value: "v", reason: "r", Layer: "x"}]}, {allow: [], extra: 1}, {allow: ["x"]}, {allow: [[]]}]) {
+      writeFileSync(file, JSON.stringify(bad));
+      expect(() => readLeakAllow(file), JSON.stringify(bad)).to.throw(/BAD_ALLOW|unknown key|not an object/);
+    }
+    let refused;
+    try { await main(["build", folder, "--name", "x", "--kind", "input", "--out", join(root, "o"), "--leak-allow", file]); } catch (e) { refused = e; }
+    expect(refused?.message).to.match(/no leak gate/);
+    writeFileSync(file, " ".repeat(1024 * 1024 + 1));
+    expect(() => readLeakAllow(file)).to.throw(/1 MiB/);
+    // a pipe stats as size 0; the cap is measured on what was read (a shell
+    // pipe, since Node's own child stdin is a socket /dev/stdin cannot open)
+    const reader = `import {readLeakAllow} from ${JSON.stringify(new URL("../tools/osd-layer.mjs", import.meta.url).href)}; try { readLeakAllow("/dev/stdin"); } catch (e) { console.log(e.message); }`;
+    const piped = spawnSync("sh", ["-c", `"$0" -e 'process.stdout.write(" ".repeat(1024 * 1024 + 1))' | "$0" --input-type=module -e "$1"`, process.execPath, reader], {encoding: "utf8"});
+    expect(piped.stdout).to.match(/1 MiB/);
   });
 
   it("refuses oversized content instead of skipping it", () => {
