@@ -84,7 +84,6 @@ export function installHooks(core, requireCore, r) {
       else if (/FindGlobalDefinitions\.run .*\/find_global_definitions\.js:/.test(direct)) kind = "global-definitions";
       else if (/CrossIncludeMacros\.findCandidates .*\/cross_include_macros\.js:|getABAPObjects .*\/include_graph\.js:/.test(direct)) kind = "include-macro-context";
       else if (/\/(_current_scope|_procedural|ddic)\.js:/.test(direct)) kind = context?.kind;
-      else if (direct.includes("frontend-provenance.mjs:") && context?.kind === "function-module-index") kind = context.kind;
       const query = {kind: kind ?? "unknown-scan", scan: method,
         args: args.map(scalar), result: [], complete: false, phase,
         ...((kind === "include-macro-context" && !owner) || ["registry-inventory", "global-definitions", "registry-parse", "registry-findIssues", "registry-isDirty", "registry-getFiles", "registry-getObjectCount", "registry-setConfig"].includes(kind) ? {role: "scheduling"} : {})};

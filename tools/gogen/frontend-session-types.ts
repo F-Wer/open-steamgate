@@ -78,7 +78,7 @@ export interface SessionEntry {
   structure: ReturnType<Core.ABAPFile['getStructure']>;
   ir: ClassIR;
   supplied: string;
-  current: Record<string, unknown>;
+  current: Pick<SessionProgram, 'currentClass' | 'currentOwner' | 'currentTypes'>;
   sigs?: SignatureChanges;
   skipped?: string[];
   partial?: string[];
@@ -193,6 +193,11 @@ export interface ProvenanceGraph {
 }
 // Selection needs only these public core members; tests also pass this seam.
 export interface SelectionCore {
+  VirtualPosition: typeof Core.VirtualPosition;
+  MacroContent: typeof Core.MacroContent;
   Objects: {FunctionGroup: typeof Core.Objects.FunctionGroup};
   Visibility: {Public: Core.Visibility};
+  Statements: {CallFunction: typeof Core.Statements.CallFunction};
+  Expressions: {FunctionName: typeof Core.Expressions.FunctionName};
+  Tokens: {StringToken: typeof Core.Tokens.StringToken; Identifier: typeof Core.Tokens.Identifier};
 }

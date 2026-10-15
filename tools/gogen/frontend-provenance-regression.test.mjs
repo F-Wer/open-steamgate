@@ -300,3 +300,215 @@ for (const [type, name, method] of [["CLAS", "ZCL_CONTROL_0001", "getDefinition"
   });
   assert.ok(provenanceOf(reg).get("CLAS ZCL_CONTROL_0000").misses.some((q) => q.artifact === `${type} ${name}` && q.args.includes("ZLEAF_MISS")));
 });
+
+test("plain class compilation and inactive hooks never load the recorder", () => {
+  const code = `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import {compileProgram} from './tools/gogen/frontend.mjs';
+    import {classSource} from './tools/gogen/cache-oracle-corpus.mjs';
+    import * as facade from './tools/gogen/frontend-provenance.mjs';
+    const require = createRequire(import.meta.url);
+    const recorder = require.resolve('./tools/gogen/frontend-provenance-recorder.mjs');
+    const core = createRequire(require.resolve('@abaplint/transpiler/package.json'))('@abaplint/core');
+    const reg = new core.Registry();
+    reg.addFile(new core.MemoryFile('zcl_a.clas.abap', classSource('zcl_a')));
+    assert.equal(require.cache[recorder], undefined);
+    const session = {};
+    const options = {registry: reg, folders: [], objects: ['ZCL_A'], session};
+    const p = compileProgram(options);
+    const warm = compileProgram(options);
+    assert.ok(warm.frontendCounts.reusedClasses.includes('ZCL_A'));
+    assert.equal(require.cache[recorder], undefined);
+    assert.equal(p.classes[0].name, 'ZCL_A');
+    const inaccessible = new Proxy({}, {get() { throw new Error('unexpected argument read'); }});
+    const value = {};
+    assert.equal(facade.withArtifact(inaccessible, inaccessible, () => value), value);
+    assert.equal(facade.artifactLowering((ctx, obj, arg) => arg)(inaccessible, inaccessible, value), value);
+    for (const run of [f => facade.withRole('scheduling', f),
+      f => facade.auditedBookkeeping('test', f), f => facade.recordedArtifactBuild(f)]) {
+      assert.equal(run(() => value), value);
+      assert.throws(() => run(() => { throw value; }), e => e === value);
+    }
+    assert.equal(facade.semanticQuery(inaccessible, 'unknown-scan', [], [], inaccessible), undefined);
+    assert.equal(facade.beginProvenanceCompile(inaccessible), undefined);
+    assert.equal(facade.storedProvenance(inaccessible, inaccessible), undefined);
+    assert.equal(facade.inheritStoredProvenance(inaccessible, inaccessible, inaccessible), undefined);
+    assert.deepEqual(facade.provenanceOf(p), new Map());
+    assert.equal(facade.provenanceGraph(reg), undefined);
+    assert.deepEqual(facade.compilationProvenanceOf(p), {scheduling: [], finalOutput: []});
+    assert.equal(facade.recordingProvenance(), false);
+    assert.equal(facade.provenanceAuditActive(), false);
+    assert.equal(facade.auditBuiltArtifacts(inaccessible), false);
+    const objects = [...reg.getObjects()];
+    assert.deepEqual(facade.enumerateObjects(reg, 'test', [], 'scheduling', (_, i) => i === 0), objects.slice(0, 1));
+    assert.equal(facade.resolvedFunctionModule({program: {functionModules: new Map([['A', value]])}}, 'A'), value);
+    assert.equal(require.cache[recorder], undefined);
+    facade.recordProvenance(() => assert.equal(facade.recordingProvenance(), true));
+    assert.ok(require.cache[recorder]);
+    assert.equal(facade.recordingProvenance(), false);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", code], {
+    cwd: process.cwd(), env: Object.fromEntries(Object.entries(process.env).filter(([key]) => key !== "GOGEN_PROVENANCE")), encoding: "utf8",
+  });
+});
+
+test("selection uses parsed calls and static identifiers, preserving per-file query order", () => {
+  const c = syntheticCorpus({classes: 4});
+  c.files["zcl_select.clas.abap"] = classSource("zcl_select", `
+    rv = zcl_static=>value.
+    CALL FUNCTION 'zoracle_function'.
+    CALL FUNCTION 'ZNO_SUCH_FUNCTION'.
+    CALL FUNCTION dynamic_name.
+    rv = zcl_static => value.
+    " CALL FUNCTION 'ZCOMMENT'. zcl_comment=>value
+* CALL FUNCTION 'ZFULL_COMMENT'. zcl_comment=>value
+    DATA text TYPE string.
+    text = 'CALL FUNCTION ''ZLITERAL''. zcl_literal=>value'.
+    text = \`CALL FUNCTION 'ZBACKTICK'. zcl_literal=>value\`.
+    text = |CALL FUNCTION 'ZTEMPLATE'. zcl_literal=>value|.
+    text = |{ zcl_static=>value }|.
+  `);
+  for (const name of ["zcl_static", "zcl_comment", "zcl_literal"])
+    c.files[`${name}.clas.abap`] = classSource(name, "rv = 7.", "i", "CLASS-DATA value TYPE i.");
+  const reg = registry(c.files);
+  recordProvenance(() => {
+    reg.parse();
+    const wanted = ["zcl_select"];
+    expandProgramSelection(reg, wanted, core);
+    assert.deepEqual(wanted, ["zcl_select", "zoracle_group", "zcl_static"]);
+    const own = storedProvenance(reg, reg.getObject("CLAS", "ZCL_SELECT"));
+    const relevant = own.rows.filter(q => q.kind === "function-module-owner"
+      || q.kind === "getObject" && ["ZCL_STATIC", "ZCL_COMMENT", "ZCL_LITERAL"].includes(q.args[1]));
+    assert.deepEqual(relevant.map(q => [q.kind, q.args]), [
+      ["function-module-owner", ["ZORACLE_FUNCTION"]],
+      ["function-module-owner", ["ZNO_SUCH_FUNCTION"]],
+      ["getObject", ["CLAS", "ZCL_STATIC"]],
+    ]);
+    assert.ok(relevant.every(q => q.phase === "selection"));
+  });
+});
+
+
+test("idle enumeration uses the current prototype method with the registry receiver", () => {
+  const code = `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import {enumerateObjects} from './tools/gogen/frontend-provenance.mjs';
+    const require = createRequire(import.meta.url);
+    const core = createRequire(require.resolve('@abaplint/transpiler/package.json'))('@abaplint/core');
+    const reg = new core.Registry();
+    reg.addFile(new core.MemoryFile('z.prog.abap', 'REPORT z.'));
+    const expected = [...core.Registry.prototype.getObjects.call(reg)];
+    reg.getObjects = () => { throw Error('instance method must not be called'); };
+    const original = core.Registry.prototype.getObjects;
+    let calls = 0;
+    core.Registry.prototype.getObjects = function() {
+      assert.equal(this, reg); calls++; return original.call(this);
+    };
+    assert.deepEqual(enumerateObjects(reg, 'test'), expected);
+    assert.equal(calls, 1);
+    assert.equal(require.cache[require.resolve('./tools/gogen/frontend-provenance-recorder.mjs')], undefined);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+});
+
+for (const used of [false, true]) test(`macro definition selection preserves source order (used=${used})`, () => {
+  const c = syntheticCorpus({classes: 4});
+  c.files["zcl_select.clas.abap"] = classSource("zcl_select", `
+    DEFINE invoke.
+      CALL FUNCTION 'ZORACLE_FUNCTION'.
+      rv = zcl_first=>value.
+    END-OF-DEFINITION.
+    CALL FUNCTION 'ZLATER'.
+    rv = zcl_later=>value.
+    ${used ? "invoke." : ""}
+  `);
+  for (const name of ["zcl_first", "zcl_later"])
+    c.files[`${name}.clas.abap`] = classSource(name, "rv = 7.", "i", "CLASS-DATA value TYPE i.");
+  c.files["zlater_group.fugr.xml"] = c.files["zoracle_group.fugr.xml"].replaceAll("ZORACLE_FUNCTION", "ZLATER").replaceAll("ZORACLE_GROUP", "ZLATER_GROUP");
+  const reg = registry(c.files);
+  recordProvenance(() => {
+    reg.parse();
+    const wanted = ["zcl_select"];
+    expandProgramSelection(reg, wanted, core);
+    assert.deepEqual(wanted, ["zcl_select", "zoracle_group", "zlater_group", "zcl_first", "zcl_later"]);
+    const rows = storedProvenance(reg, reg.getObject("CLAS", "ZCL_SELECT")).rows;
+    assert.deepEqual(rows.filter(q => q.kind === "function-module-owner").map(q => q.args), [["ZORACLE_FUNCTION"], ["ZLATER"]]);
+    assert.deepEqual(rows.filter(q => q.kind === "getObject" && ["ZCL_FIRST", "ZCL_LATER"].includes(q.args[1])).map(q => q.args[1]), ["ZCL_FIRST", "ZCL_LATER"]);
+  });
+});
+
+
+for (const method of ["storedProvenance", "inheritStoredProvenance", "provenanceOf", "provenanceGraph", "compilationProvenanceOf"])
+  test(`idle ${method} preserves the parent result without loading the recorder`, () => {
+    const code = `
+      import assert from 'node:assert/strict';
+      import {createRequire} from 'node:module';
+      import * as facade from './tools/gogen/frontend-provenance.mjs';
+      const require = createRequire(import.meta.url);
+      const value = facade.${method}({}, {}, undefined);
+      const expected = ${method === "provenanceOf" ? "new Map()" : method === "compilationProvenanceOf" ? "{scheduling: [], finalOutput: []}" : "undefined"};
+      assert.deepEqual(value, expected);
+      assert.equal(require.cache[require.resolve('./tools/gogen/frontend-provenance-recorder.mjs')], undefined);
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+  });
+
+
+for (const method of ["provenanceOf", "compilationProvenanceOf"])
+  test(`idle ${method} preserves argument reads and exceptions before and after recorder loading`, () => {
+    const code = `
+      import assert from 'node:assert/strict';
+      import {createRequire} from 'node:module';
+      import * as facade from './tools/gogen/frontend-provenance.mjs';
+      const require = createRequire(import.meta.url);
+      const recorder = require.resolve('./tools/gogen/frontend-provenance-recorder.mjs');
+      const expected = ${method === "provenanceOf" ? "new Map()" : "{scheduling: [], finalOutput: []}"};
+      const sentinel = new Error('getter sentinel');
+      const check = () => {
+        for (const property of ['reg', 'registry']) {
+          const reads = [];
+          const value = {
+            get reg() { reads.push('reg'); if (property === 'reg') throw sentinel; return null; },
+            get registry() { reads.push('registry'); throw sentinel; },
+          };
+          assert.throws(() => facade.${method}(value), error => error === sentinel);
+          assert.deepEqual(reads, property === 'reg' ? ['reg'] : ['reg', 'registry']);
+        }
+        for (const reg of [undefined, null, {}, false, 0, '']) {
+          const reads = [];
+          const value = {
+            get reg() { reads.push('reg'); return reg; },
+            get registry() { reads.push('registry'); return undefined; },
+          };
+          assert.deepEqual(facade.${method}(value), expected);
+          assert.deepEqual(reads, reg == null ? ['reg', 'registry'] : ['reg']);
+        }
+        for (const value of [null, undefined]) assert.deepEqual(facade.${method}(value), expected);
+      };
+      check();
+      assert.equal(require.cache[recorder], undefined);
+      facade.recordProvenance(() => {});
+      assert.ok(require.cache[recorder]);
+      check();
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+  });
+
+for (const method of ["provenanceGraph", "storedProvenance", "inheritStoredProvenance"])
+  test(`idle ${method} avoids argument reads before and after recorder loading`, () => {
+    const code = `
+      import assert from 'node:assert/strict';
+      import {createRequire} from 'node:module';
+      import * as facade from './tools/gogen/frontend-provenance.mjs';
+      const require = createRequire(import.meta.url);
+      const recorder = require.resolve('./tools/gogen/frontend-provenance-recorder.mjs');
+      const value = new Proxy({}, {get() { throw new Error('unexpected argument read'); }});
+      assert.equal(facade.${method}(value, value, value), undefined);
+      assert.equal(require.cache[recorder], undefined);
+      facade.recordProvenance(() => {});
+      assert.equal(facade.${method}(value, value, value), undefined);
+    `;
+    execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+  });

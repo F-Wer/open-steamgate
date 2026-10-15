@@ -18,7 +18,10 @@ const effects = new Set(["skipped", "partial"]);
   if (session.registry !== registry || session.config !== registry.getConfig()
       || files.length !== session.files?.length || files.some((f, i) => f !== session.files[i])) {
     for (const key of Object.keys(session)) delete session[key];
-    Object.assign(session, {registry, config: registry.getConfig(), files, classes: new Map()});
+    session.registry = registry;
+    session.config = registry.getConfig();
+    session.files = files;
+    session.classes = new Map();
   }
 }
 
@@ -68,7 +71,9 @@ export const compileClass = artifactLowering(/** @param {import('./frontend-sess
   /** @type {import('./frontend-session-types.ts').SessionEntry | undefined} */ const cached = session?.classes.get(key);
   if (cached && cached.file === file && cached.structure === file.getStructure() && cached.supplied === suppliedKey(program, key) && (!cached.replay || replayLowering(program, cached.replay))) {
     inheritStoredProvenance(program.reg, obj, cached.provenance);
-    Object.assign(program, cached.current);
+    program.currentClass = cached.current.currentClass;
+    program.currentOwner = cached.current.currentOwner;
+    program.currentTypes = cached.current.currentTypes;
     for (const [k, sig] of cached.sigs ?? []) program.sigs.set(k, sig);
     if (!cached.replay) {
       append(program.skipped, cached.skipped);
