@@ -1,15 +1,17 @@
 import {irChildren as children, irEntries, isExpr, isStmt, isCondition, isIRArray} from "./ir-children.ts";
 import type {IRValue} from "./ir-children.ts";
-import type {IRegistry} from "@abaplint/core";
-import type {OwnershipSource, OwnershipSafety, OwnershipSafetyMap} from "./frontend-types.ts";
+import type {Registry, ArtifactObject} from "./frontend-session-types.ts";
+import type {ABAPObject} from "@abaplint/core";
+type OwnershipObject = ArtifactObject & Partial<Pick<ABAPObject, "getABAPFiles">>;
+import type {OwnershipSafety, OwnershipSafetyMap} from "./frontend-types.ts";
 import type {ProgramInput, Class, ClassName, Method, Local, Attribute, SupportedAttribute, Expr, Type, Context, Ownership} from "./emit-go-types.ts";
 import type {AttributeProbe} from "./emit-ownership.ts";
 import {enumerateObjects, semanticQuery, withArtifact} from "./frontend-provenance.mjs";
 // Ownership is per declaration, never a change to an ABAP type or ABI.
 // Unknown/reference use positions conservatively retain string storage.
-export function sourceOwnershipSafety(reg: IRegistry): OwnershipSafetyMap {
+export function sourceOwnershipSafety(reg: Registry): OwnershipSafetyMap {
   const out = new Map<string, OwnershipSafety>();
-  const objects: readonly OwnershipSource[] = enumerateObjects(reg, "ownership-dispatch");
+  const objects: readonly OwnershipObject[] = enumerateObjects(reg, "ownership-dispatch");
   for (const obj of objects) {
     withArtifact({reg}, obj, (): void => {
     const names = new Set<string>();
