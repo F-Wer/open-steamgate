@@ -1,5 +1,9 @@
 import {normalizeSource} from "./frontend-source.mjs";
 import {dynamicStaticCall} from "./frontend-dynamic-call.mjs";
+import {require, abaplint, Rearranger, Nodes, Statements, Structures, Expressions, BasicTypes,
+  Unsupported, notInProgram, I, F, INT8, P31, S, C, X, XS, EXC, isExpr, isStmt, isStruct, isTok,
+  tokenStr, upper, goName, refuseSorted, sameSort, sameType, composite, byRef, numeric, charlike} from "./frontend-base.mjs";
+export {Unsupported, I, F, INT8, S, sameType, composite, byRef} from "./frontend-base.mjs";
 import {inputOrigin} from "./frontend-inventory.mjs";
 import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
@@ -34,71 +38,16 @@ import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
 import {samcOf, cdsSqlViews, cdsMappingError, rearrangedClass, inlineTableLocals} from "./frontend-analysis.mjs";
-import {createRequire} from "node:module";
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
+import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
 
-const require = createRequire(import.meta.url);
-// The transpiler's database setup and rearranger use its own @abaplint/core.
-// Keep registry objects from that same copy so instanceof checks find tables.
-const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
-/** @type {typeof import("@abaplint/core")} */ const abaplint = transpilerRequire("@abaplint/core");
-/** @type {typeof import("@abaplint/transpiler/build/src/rearranger.js")} */ const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
-const {Nodes, Statements, Structures, Expressions, BasicTypes} = abaplint;
+import {TRANSPILER_MEANING, P_GENERIC, NATIVE, kernelOf, nativeArgs, AMC_HOST, AMC_CALLER, amcProgramOf, amcMethod, NATIVE_FM, DESTINATION_FM, NATIVE_ME, nativeMeSig, RUNTIME_CX, RUNTIME_CX_SUPER} from "./frontend-classes-native.mjs";
+import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sqlValue, SQL_OPS} from "./frontend-sql.mjs";
 
-export class Unsupported extends Error {}
-// A class outside the program is named, so a closure can add it and retry
-// instead of refusing the caller for good.
-/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {string} cls @param {string} message @returns {Unsupported} */ function notInProgram(ctx, cls, message) {
-  ctx.program.missing.add(cls);
-  return new Unsupported(message);
-}
+import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
+  omittedArgument, omittedFactoryCall} from "./frontend-expressions-calls.mjs";
 
-/** @type {Extract<import("./ir.ts").Type, {k: "i"}>} */ export const I = {k: "i"};
-/** @type {Extract<import("./ir.ts").Type, {k: "f"}>} */ export const F = {k: "f"};
-/** @type {Extract<import("./ir.ts").Type, {k: "int8"}>} */ export const INT8 = {k: "int8"};
-// calculation type p: an exact intermediate value (go/abap packed.go),
-// rounded only when it lands in a field; len 16 is the 31 digits a p
-// literal may have
-/** @type {Extract<import("./ir.ts").Type, {k: "p"}>} */ const P31 = {k: "p", len: 16, dec: 0, calc: true};
-/** @type {Extract<import("./ir.ts").Type, {k: "string"}>} */ export const S = {k: "string"};
-/** @param {number} len @returns {Extract<import("./ir.ts").Type, {k: "c"}>} */ const C = (len) => ({k: "c", len});
-/** @param {number} len @returns {Extract<import("./ir.ts").Type, {k: "x"}>} */ const X = (len) => ({k: "x", len});
-/** @type {Extract<import("./ir.ts").Type, {k: "xstring"}>} */ const XS = {k: "xstring"};
-/** @type {Extract<import("./ir.ts").Type, {k: "exc"}>} */ const EXC = {k: "exc"};
-
-/** @param {unknown} n @param {import("./frontend-types.ts").NodeClass} cls @returns {n is import("@abaplint/core").Nodes.ExpressionNode} */ const isExpr = (n, cls) => n instanceof Nodes.ExpressionNode && n.get() instanceof cls;
-/** @param {unknown} n @param {import("./frontend-types.ts").NodeClass} cls @returns {n is import("@abaplint/core").Nodes.StatementNode} */ const isStmt = (n, cls) => n instanceof Nodes.StatementNode && n.get() instanceof cls;
-/** @param {unknown} n @param {import("./frontend-types.ts").NodeClass} cls @returns {n is import("@abaplint/core").Nodes.StructureNode} */ const isStruct = (n, cls) => n instanceof Nodes.StructureNode && n.get() instanceof cls;
-/** @param {unknown} n @param {string} [s] @returns {n is import("@abaplint/core").Nodes.TokenNode} */ const isTok = (n, s) => n instanceof Nodes.TokenNode && (s === undefined || upper(n.getFirstToken().getStr()) === s);
-/** @param {import("@abaplint/core").INode} n @returns {string} */ const tokenStr = (n) => n.getFirstToken().getStr();
-/** @param {unknown} s @returns {string} */ const upper = (s) => String(s).toUpperCase();
-/** @param {string} s @returns {string} */ const goName = (s) => {
-  const name = upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
-  return name.startsWith("_") ? `N${name}` : name;
-};
-
-// ultra/events: a SORTED table keeps its rows in key order, which only
-// INSERT INTO TABLE knows how to do; every other statement that would place
-// rows (APPEND, INSERT INDEX, MODIFY INDEX, SORT, SELECT / SPLIT INTO TABLE)
-// refuses one, and a move between a SORTED and another table is not the
-// same type (it would have to sort)
-/** @param {{type: import("./ir.ts").Type} | undefined} t @param {string} what @returns {void} */ const refuseSorted = (t, what) => { if (t?.type?.sorted) throw new Unsupported(`${what} a SORTED table`); };
-/** @param {import("./frontend-types.ts").TableType} a @param {import("./frontend-types.ts").TableType} b @returns {boolean} */ const sameSort = (a, b) => (a.sorted ?? null) === null ? (b.sorted ?? null) === null : (b.sorted !== undefined && a.sorted.join() === b.sorted.join() && a.unique === b.unique);
-/** @param {import("./ir.ts").Type} a @param {import("./ir.ts").Type} b @returns {boolean} */ export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || (sameType(a.row, b.row) && sameSort(a, b)))
-  && (a.k !== "struct" || a.go === b.go) && (a.k !== "c" && a.k !== "x" || a.len === b.len)
-  && (a.k !== "ref" || a.name === b.name)
-  && (a.k !== "p" || (!!a.calc === !!b.calc && (a.calc || (a.len === b.len && a.dec === b.dec))));
-/*
- * An IMPORTING table or structure passed by reference is the caller's own
- * data: measured on A4H, it sees what a CHANGING of the same table did,
- * APPEND included. VALUE( ) is a copy. So a composite IMPORTING by
- * reference is a pointer in Go, and a VALUE( ) one is cloned at the call.
- */
-/** @param {import("./ir.ts").Type | null | undefined} t @returns {t is Extract<import("./ir.ts").Type, {k: "table" | "struct"}>} */ export const composite = (t) => t?.k === "table" || t?.k === "struct";
-/** @param {import("./ir.ts").Param} p @returns {boolean} */ export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
-/** @param {import("./ir.ts").Type} t @returns {t is Extract<import("./ir.ts").Type, {k: "i" | "f" | "int8"}>} */ const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
-/** @param {import("./ir.ts").Type} t @returns {t is Extract<import("./ir.ts").Type, {k: "c" | "string"}>} */ const charlike = (t) => t.k === "c" || t.k === "string";
 const byteStatementHelpers = {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS, findResults};
 /** @type {WeakMap<import("@abaplint/core").IRegistry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
 const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
@@ -440,27 +389,6 @@ export function whereColumns(t) {
   return {structs, known};
 }
 
-/** the RTTI type kind (cl_abap_typedescr=>typekind_*) of an abaplint type */
-/** @param {import("@abaplint/core").AbstractType | undefined} t @returns {string} */ function typeKindOf(t) {
-  if (t instanceof BasicTypes.CharacterType) return "C";
-  if (t instanceof BasicTypes.NumericType) return "N";
-  if (t instanceof BasicTypes.DateType) return "D";
-  if (t instanceof BasicTypes.TimeType) return "T";
-  if (t instanceof BasicTypes.IntegerType) return "I";
-  if (t instanceof BasicTypes.Integer8Type) return "8";
-  if (t instanceof BasicTypes.PackedType) return "P";
-  if (t instanceof BasicTypes.FloatType) return "F";
-  if (t instanceof BasicTypes.HexType) return "X";
-  if (t instanceof BasicTypes.StringType) return "g";
-  if (t instanceof BasicTypes.XStringType) return "y";
-  if (t instanceof BasicTypes.DecFloat16Type) return "a";
-  if (t instanceof BasicTypes.DecFloat34Type) return "e";
-  if (t instanceof BasicTypes.StructureType) return "u";
-  if (t instanceof BasicTypes.TableType) return "h";
-  if (t instanceof BasicTypes.DataReference) return "l";
-  if (t instanceof BasicTypes.ObjectReferenceType) return "r";
-  return "?";
-}
 
 /** ALIASES a FOR i~m of a class or interface (or a superclass): i~m */
 /** @param {import("@abaplint/core").IRegistry} reg @param {string} owner @param {string} name @returns {string | undefined} */ function aliasTarget(reg, owner, name) {
@@ -689,19 +617,6 @@ function functionGroupIr(ctx0, g) {
   return cls;
 }
 
-/*
- * Statements A4H does not activate, which abaplint takes and the transpiler
- * gives a meaning; refused everywhere (ANORMALIES), except in the methods
- * named here, which are compiled with the transpiler's meaning until the
- * library is fixed upstream. A decision of the foreman's, not a rule:
- *   /UI2/CL_JSON=>_DESERIALIZE: CREATE DATA ref LIKE LINE OF data (data TYPE
- *   data): the line type of the table data holds at run time, as the
- *   transpiler reads it (ANORMALIES create-data-like-line-generic; the fix
- *   upstream is LIKE LINE OF <at> after ASSIGN data TO <at>)
- */
-const TRANSPILER_MEANING = new Map([
-  ["/UI2/CL_JSON=>_DESERIALIZE", "CREATE DATA LIKE LINE OF generic data"],
-]);
 
 /** kept for the numeric bench sample: one folder, every class in it */
 export function readClass(folder) {
@@ -709,299 +624,7 @@ export function readClass(folder) {
   return compileProgram({folders: [folder], objects}).classes;
 }
 
-// ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
-const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS"]);
-/** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
-/** @type {Map<string, string | {fn: string; args: string[]}>} */ const NATIVE = new Map([
-  // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
-  // the seconds from TSTMP2 to TSTMP1, their fractions cut off, as
-  // open-abap-core's kernel lines compute them (its RETURNING is an i; a
-  // system's is a p with decimals); a random integer 0 .. 2^31-2 as
-  // open-abap-core's INT (a seed given to CREATE is ignored there too)
-  ["CL_ABAP_TSTMP=>SUBTRACT", {fn: "abap.TstmpSubtract", args: ["TSTMP1:p", "TSTMP2:p"]}],
-  // the time stamp SECS seconds earlier, as open-abap-core's ADD computes it (go/tstmp)
-  ["CL_ABAP_TSTMP=>SUBTRACTSECS", {fn: "tstmpsecs.SubtractSecs", args: ["TSTMP:p", "SECS:i"]}],
-  ["CL_ABAP_RANDOM=>INT", {fn: "abap.RandomInt31", args: []}],
-  ["CL_ABAP_MESSAGE_DIGEST=>CALCULATE_HASH_FOR_CHAR", {fn: "hashchar.Calculate", args: ["IF_ALGORITHM:string", "IF_DATA:string", "&EF_HASHXSTRING:xstring", "&EF_HASHSTRING:string", "&EF_HASHB64STRING:string"]}],
-  // crypto.randomUUID() on Node (go/abap/uuid.go); CREATE_UUID_* are ABAP around it
-  ["CL_SYSTEM_UUID=>RANDOM", {fn: "abap.UUIDRandom", args: []}],
-  ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_NAME", "Native_DESCRIBE_BY_NAME"],
-  ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_OBJECT_REF", "Native_DESCRIBE_BY_OBJECT_REF"],
-  // ultra/json: the descriptor of a value (emit-go nativeRttiData), and the
-  // JSON.parse half of open-abap-core's JSON reader (go/abap/jsonparse.go);
-  // both are @KERNEL code on Node, and the JS emitter has neither
-  ["CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA", "Native_DESCRIBE_BY_DATA"],
-  ["CL_SXML_STRING_READER:LCL_JSON_PARSER=>PARSE", "Native_JSON_PARSE"],
-  // AJSON chooses a converter by a dynamic class/method name and falls back
-  // to the older converter on CX_SY_DYN_CALL_ILLEGAL_CLASS. Both paths are
-  // UTF-8 on Node; use the existing host text conversion for this pair.
-  ["ZCL_AJSON:LCL_UTILS=>STRING_TO_XSTRING_UTF8", "Native_AJSON_ENCODE"],
-  ["ZCL_AJSON:LCL_UTILS=>XSTRING_TO_STRING_UTF8", "Native_AJSON_DECODE"],
-  ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~UNESCAPE_URL", "abap.UnescapeURL"],
-  // the zip reader's CRC-32 register over a piece (src/zip): the ABAP loop,
-  // a byte at a time, was a third of a 150 MB zip read (go/abap/crc32.go)
-  ["ZCL_OSD_CRC32=>COMBINE", "abap.Crc32Combine"],
-  // the zip reader's raw DEFLATE: the same state machine in Go, with a table
-  // for short codes (go/abap/inflate.go); FEED decodes in ABAP without it
-  ["ZCL_OSD_INFLATE=>HOST_OPEN", "abap.InflateHostOpen"],
-  ["ZCL_OSD_INFLATE=>HOST_FEED", {fn: "abap.InflateHostFeed", args: ["IV_HANDLE:i", "IV_DATA:xstring", "IV_MAX_OUT:i", "&EV_RAW:xstring", "&EV_STATE:i", "&EV_UNUSED:xstring", "&EV_REASON:string"]}],
-  // the streaming sXML parser's scans over its window (src/sxml): a name to
-  // its delimiter, white space to its end (go/abap/sxmlscan.go)
-  ["ZCL_OSD_SXML_PULL=>NAME_END", "abap.SxmlNameEnd"],
-  ["ZCL_OSD_SXML_PULL=>SPACE_END", "abap.SxmlSpaceEnd"],
-  ["ZCL_OSD_SXML_PULL=>UTF8_TEXT", {fn: "abap.SxmlUtf8Text", args: ["IV_PART:xstring", "&EV_TEXT:string", "&EV_OK:i"]}],
-  // the value text of CL_ABAP_UNIT_ASSERT's messages: Object.keys( ) of a
-  // structure and an object's constructor name are @KERNEL lines in
-  // open-abap-core's LCL_DUMP (go/abap/unitdump.go)
-  ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>TO_STRING", "abap.UnitDumpToString"],
-  ["CL_ABAP_UNIT_ASSERT:LCL_DUMP=>DUMP_STRUCTURE", "abap.UnitDumpStructure"],
-  // bytes as base64, RFC 4648 with padding (A4H 2026-09-24, ZCL_GOGEN_T_B64);
-  // the LSD channel sends the show this way (ultra/packs). Invalid base64
-  // behavior on a system has not been measured.
-  ["CL_HTTP_UTILITY=>ENCODE_X_BASE64", "abap.EncodeXBase64"],
-  ["CL_HTTP_UTILITY=>DECODE_X_BASE64", "abap.DecodeXBase64"],
-  ["ZCL_OAO_RFC_DESTINATION=>REGISTER_LOCAL", "abap.RegisterLocalDestination"],
-  // get_text( ) of an exception without a T100 message or a text id: the
-  // fallback text, which A4H gives too (2026-09-23); anything else dumps
-  ["CL_MESSAGE_HELPER=>GET_TEXT_FOR_MESSAGE", "Native_GET_TEXT_FOR_MESSAGE"],
-  // the ICF entity's text body: UTF-8 both ways, as open-abap-core's
-  // CL_ABAP_CONV_IN_CE / _OUT_CE do it (TextDecoder with fatal, so bytes that
-  // are not UTF-8 raise CX_SY_CONVERSION_CODEPAGE); those two classes take
-  // generic parameters, which the subset has no signature for
-  // what the host is: runtime, platform, memory, one "name<TAB>value" line
-  // each (go/abap/sysinfo.go; on Node the class's own @KERNEL lines)
-  ["ZCL_OSD_SYSINFO=>ENVIRONMENT", {fn: "abap.SysInfoEnv", args: []}],
-  // ultra/events: abapGit's UTF-8 decoding, which its local class LCL_IN does
-  // through a codepage class found by name at run time (the class
-  // constructor of ZCL_ABAPGIT_GUI_EVENT needs it): the first IV_LENGTH bytes
-  // (all when not positive) read as UTF-8; bytes that are not UTF-8 would be
-  // a ZCX_ABAPGIT_EXCEPTION there, which the host does not make, so it dumps
-  ["ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8", {fn: "abap.XStringToStringUTF8", args: ["IV_DATA:xstring", "IV_LENGTH:i"]}],
-  ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~GET_CDATA", {fn: "abap.ICFGetCData", args: ["MV_DATA:xstring"]}],
-  ["CL_HTTP_ENTITY=>IF_HTTP_ENTITY~SET_CDATA", {fn: "abap.ICFSetCData", args: ["&MV_DATA:xstring", "DATA:string"]}],
-  // ultra/httpc: what CL_HTTP_CLIENT needs around its kernel lines. The
-  // answer to accept-encoding: gzip is inflated with zlib.gunzipSync, a
-  // string as base64 is Buffer.from(string) (UTF-8) as base64 (authenticate)
-  ["CL_ABAP_GZIP=>DECOMPRESS_BINARY_WITH_HEADER", {fn: "abap.GunzipWithHeader", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring"]}],
-  // parity-wave2: raw DEFLATE both ways (zlib.deflateRawSync /
-  // inflateRawSync on Node, go/abap/gzip.go): cl_abap_zip's ADD and GET,
-  // the SEGW RepoSet zip. Go's encoder is not zlib's, so the compressed
-  // bytes differ; the stream inflates to the same input on both
-  ["CL_ABAP_GZIP=>COMPRESS_BINARY", {fn: "abap.DeflateRaw", args: ["RAW_IN:xstring", "&GZIP_OUT:xstring", "&GZIP_OUT_LEN:i"]}],
-  ["CL_ABAP_GZIP=>DECOMPRESS_BINARY", {fn: "abap.InflateRaw", args: ["GZIP_IN:xstring", "&RAW_OUT:xstring", "&RAW_OUT_LEN:i"]}],
-  ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~ENCODE_BASE64", {fn: "abap.EncodeBase64", args: ["UNENCODED:string"]}],
-  ["CL_HTTP_UTILITY=>IF_HTTP_UTILITY~DECODE_BASE64", {fn: "abap.DecodeBase64", args: ["ENCODED:string"]}],
-  // Native application host: the browser implementation of these classic
-  // frontend services is intentionally inert. In a compiled command the
-  // frontend is the local machine, so files and directories map to the OS.
-  ["CL_GUI_FRONTEND_SERVICES=>GET_TEMP_DIRECTORY", {fn: "abap.FrontendTempDirectory", args: ["&TEMP_DIR:string"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>DIRECTORY_GET_CURRENT", {fn: "abap.FrontendCurrentDirectory", args: ["&CURRENT_DIRECTORY:string"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>FILE_EXIST", {fn: "abap.FrontendFileExist", args: ["FILE:string"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>DIRECTORY_EXIST", {fn: "abap.FrontendDirectoryExist", args: ["DIRECTORY:string"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>FILE_GET_SIZE", {fn: "abap.FrontendFileSize", args: ["FILE_NAME:string", "&FILE_SIZE:i"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>GUI_UPLOAD", {fn: "abap.FrontendUpload", args: ["FILENAME:string", "FILETYPE:c", "&FILELENGTH:i", "&HEADER:xstring", "&DATA_TAB:data"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>GUI_DOWNLOAD", {fn: "abap.FrontendDownload", args: ["FILENAME:string", "FILETYPE:string", "BIN_FILESIZE:i", "WRITE_LF:c", "APPEND:c", "DATA_TAB:data"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>FILE_OPEN_DIALOG", {fn: "abap.FrontendFileOpenDialog", args: ["WINDOW_TITLE:string", "DEFAULT_FILENAME:string", "FILE_FILTER:string", "DEFAULT_EXTENSION:string", "INITIAL_DIRECTORY:string", "MULTISELECTION:c", "&FILE_TABLE:table", "&RC:i", "&USER_ACTION:i"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>FILE_SAVE_DIALOG", {fn: "abap.FrontendFileSaveDialog", args: ["WINDOW_TITLE:string", "DEFAULT_FILE_NAME:string", "FILE_FILTER:string", "DEFAULT_EXTENSION:string", "INITIAL_DIRECTORY:string", "PROMPT_ON_OVERWRITE:c", "&FILENAME:string", "&PATH:string", "&FULLPATH:string", "&USER_ACTION:i"]}],
-  ["CL_GUI_FRONTEND_SERVICES=>DIRECTORY_BROWSE", {fn: "abap.FrontendDirectoryBrowse", args: ["WINDOW_TITLE:string", "INITIAL_FOLDER:string", "&SELECTED_FOLDER:string"]}],
-  ["ZCL_OSABAP_RUNTIME=>GETENV", {fn: "abap.FrontendGetenv", args: ["NAME:string"]}],
-]);
 
-/*
- * The kernel lines of the ICF shim (express-icf-shim's cl_express_icf_shim,
- * WRITE '@KERNEL ...' JavaScript on Node) as host functions of the Go
- * runtime (go/abap/icf.go); the ABAP around them compiles as it is. Keyed
- * by method and the line's text. INPUT.req and INPUT.res are the method's
- * REQ and RES, which the host binds to its exchange (abap.ICFExchange);
- * INPUT.class travels in that exchange too. An argument is a name, a
- * component (LS_FIELD-NAME), "&" before a place the function writes, and
- * ":kind" the type it must have. A line of the shim not listed here stays
- * a stub that dumps, as every other @KERNEL line does.
- *   {fn, args}            one statement
- *   {loop, args, binds}   a JavaScript for (...) { over what fn returns,
- *                         each pair written to the binds; its body is the
- *                         statements up to the line {end}
- *   {bound}               a line of that loop whose work the binds do
- */
-/** @type {Map<string, import("./frontend-types.ts").KernelSpec>} */ const KERNEL = new Map([
-  // ADT capability answers match Node's parent kernel / non-one-runtime host.
-  ["ZCL_OSD_ADT_HOST=>ONE_RUNTIME|rv_on.set(abap.context.RFCDestinations.STORE?.localSystem ? \"X\" : \"\");", {fn: "abap.ADTOneRuntime", args: ["&RV_ON:c"]}],
-  ["ZCL_OSD_KERNEL_GUARD=>HAS_SERVING_DATABASE|if (globalThis.__osdAdtKernel !== undefined) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
-  ["ZCL_OSD_KERNEL_GUARD=>HAS_GENERATION|if (globalThis.__osdAdtKernel !== undefined || !((typeof process !== \"undefined\" && process.env?.OSD_ADT_ONE_RUNTIME === \"1\") || abap.context.RFCDestinations.STORE?.oneRuntimeEnabled?.() === true)) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
-  // CALL_CLASSRUN's try/catch needs an exception boundary and a caught host
-  // error; fn/loop/bound/end cannot express those, so its lines stay refused.
-  // the class name of an object as the transpiler runtime names it (go/classname)
-  ["CL_ABAP_CLASSDESCR=>GET_CLASS_NAME|lv_name.set(p_object.get().constructor.INTERNAL_NAME);", {fn: "classname.Internal", args: ["P_OBJECT:ref", "&LV_NAME:string"]}],
-  ["CL_EXPRESS_ICF_SHIM=>RUN|lv_classname.set(INPUT.class);", {fn: "abap.ICFClass", args: ["REQ:data", "&LV_CLASSNAME:string"]}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_xstr.set(INPUT.req.body.toString(\"hex\").toUpperCase());", {fn: "abap.ICFRequestBody", args: ["REQ:data", "&LV_XSTR:xstring"]}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_str.set(INPUT.req.method);", {fn: "abap.ICFRequestMethod", args: ["REQ:data", "&LV_STR:string"]}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|for (const h in INPUT.req.headers) {", {loop: "abap.ICFRequestHeaders", args: ["REQ:data"], binds: ["LV_NAME", "LV_VALUE"]}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_name.set(h);", {bound: "LV_NAME"}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_value.set(INPUT.req.headers[h]);", {bound: "LV_VALUE"}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|}", {end: true}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_value.set(INPUT.req.url);", {fn: "abap.ICFRequestURL", args: ["REQ:data", "&LV_VALUE:string"]}],
-  ["CL_EXPRESS_ICF_SHIM=>REQUEST|lv_value.set(INPUT.req.path);", {fn: "abap.ICFRequestPath", args: ["REQ:data", "&LV_VALUE:string"]}],
-  ["CL_EXPRESS_ICF_SHIM=>RESPONSE|INPUT.res.append(ls_field.get().name.get(), ls_field.get().value.get());", {fn: "abap.ICFResponseAppend", args: ["RES:data", "LS_FIELD-NAME:string", "LS_FIELD-VALUE:string"]}],
-  ["CL_EXPRESS_ICF_SHIM=>RESPONSE|INPUT.res.status(lv_code.get()).send(Buffer.from(lv_xstr.get(), \"hex\"));", {fn: "abap.ICFResponseSend", args: ["RES:data", "LV_CODE:i", "LV_XSTR:xstring"]}],
-  // ultra/httpc: open-abap-core's CL_HTTP_CLIENT sends with Node's http /
-  // https modules (go/abap/httpc.go). `headers` and `response` are the
-  // JavaScript locals of SEND; here they live with the client object (ME).
-  // The lines that import the modules, declare postData and pick the agent
-  // are nops: HTTPCSend does all of that
-  ...[
-    ["let headers = {};", {fn: "abap.HTTPCHeadersNew", args: ["ME:ref"]}],
-    ["headers[ls_field.get().name.get()] = ls_field.get().value.get();", {fn: "abap.HTTPCHeader", args: ["ME:ref", "LS_FIELD-NAME:string", "LS_FIELD-VALUE:string"]}],
-    ["headers[\"content-type\"] = lv_content_type.get();", {fn: "abap.HTTPCContentType", args: ["ME:ref", "LV_CONTENT_TYPE:string"]}],
-    ["headers[\"accept-encoding\"] = \"gzip\";", {fn: "abap.HTTPCAcceptGzip", args: ["ME:ref"]}],
-    ["headers[\"content-length\"] = lv_body.get().length;", {fn: "abap.HTTPCContentLength", args: ["ME:ref", "LV_BODY:string"]}],
-    ...[
-      "const https = await import(\"https\");",
-      "const http = await import(\"http\");",
-      "function postData(url, options, requestBody) {",
-      "return new Promise((resolve, reject) => {",
-      "const prot = url.startsWith(\"http://\") ? http : https;",
-      "const req = prot.request(url, options,",
-      "(res) => {",
-      "let chunks = [];",
-      "res.on(\"data\", (chunk) => {chunks.push(chunk);});",
-      "res.on(\"error\", reject);",
-      "res.on(\"end\", () => {",
-      "resolve({statusCode: res.statusCode, headers: res.headers, body: Buffer.concat(chunks)});",
-      "});",
-      "req.on(\"error\", reject);",
-      "req.write(requestBody, \"binary\");",
-      "req.end();",
-      "const prot = lv_url.get().startsWith(\"http://\") ? http : https;",
-      "if (this.agent === undefined) {this.agent = new prot.Agent({keepAlive: true, maxSockets: 1});}",
-    ].map((line) => [line, {nop: true}]),
-    ["let response = await postData(lv_url.get(), {method: lv_method.get(), headers: headers, agent: this.agent}, lv_body.get());",
-      {fn: "abap.HTTPCSend", args: ["ME:ref", "LV_URL:string", "LV_METHOD:string", "LV_BODY:string"]}],
-    // Node gives set-cookie as an array, which the loop skips: HTTPCResponseHeaders leaves it out
-    ["for (const h in response.headers) {", {loop: "abap.HTTPCResponseHeaders", args: ["ME:ref"], binds: ["LV_NAME", "LV_VALUE"]}],
-    ["lv_name.set(h);", {bound: "LV_NAME"}],
-    ["if (Array.isArray(response.headers[h])) continue;", {bound: "LV_NAME"}],
-    ["lv_value.set(response.headers[h]);", {bound: "LV_VALUE"}],
-    // the same text closes postData above the loop, a nop there
-    ["}", {end: true, nop: true}],
-    ["lo_entity.get().mv_content_type.set(response.headers[\"content-type\"] || \"\");", {fn: "abap.HTTPCResponseContentType", args: ["ME:ref", "&LO_ENTITY->MV_CONTENT_TYPE:string"]}],
-    ["lo_entity.get().mv_status.set(response.statusCode);", {fn: "abap.HTTPCResponseStatus", args: ["ME:ref", "&LO_ENTITY->MV_STATUS:i"]}],
-    ["lo_entity.get().mv_data.set(response.body.toString(\"hex\").toUpperCase());", {fn: "abap.HTTPCResponseBody", args: ["ME:ref", "&LO_ENTITY->MV_DATA:xstring"]}],
-  ].map(([line, k]) => [`CL_HTTP_CLIENT=>IF_HTTP_CLIENT~SEND|${line}`, k]),
-]);
-
-/** the line of a WRITE '@KERNEL ...' as the JavaScript it holds, else undefined */
-/** @param {import("./frontend-types.ts").SyntaxNode} node @returns {string | undefined} */ function kernelText(node) {
-  if (!(node instanceof Nodes.StatementNode) || !isStmt(node, Statements.Write)) return undefined;
-  const m = /^WRITE\s+'@KERNEL(.*)'\s*\.?$/is.exec(node.concatTokens());
-  return m === null ? undefined : m[1].replace(/''/g, "'").trim();
-}
-
-/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").KernelSpec | undefined} */ function kernelOf(node, ctx) {
-  const text = kernelText(node);
-  return text === undefined ? undefined : KERNEL.get(`${ctx.className}=>${ctx.method}|${text}`);
-}
-
-/** the arguments of a host function (see KERNEL), resolved in the method */
-/** @param {readonly string[]} specs @param {import("./frontend-types.ts").VariableContext} ctx @returns {import("./frontend-types.ts").NativeArgument[]} */ function nativeArgs(specs, ctx) {
-  return specs.map((spec) => {
-    const m = /^(&?)([\w\/~]+)(?:(->|-)([\w]+))?:(\w+)$/.exec(spec);
-    if (m === null) throw new Error(`host function argument ${spec}`);
-    const [, ref, name, sel, comp, kind] = m;
-    let value = variable(name, ctx);
-    if (sel === "->") {
-      // an attribute of the object a reference points to (LO_ENTITY->MV_DATA)
-      value = refAttribute(value, {concatTokens: () => comp}, ctx, ref === "&");
-    } else if (sel === "-") {
-      const f = fieldOf(ctx, value.type, comp, `${ctx.className}=>${ctx.method}`);
-      value = {e: "field", base: value, name: f.name, type: f.type};
-    }
-    if (value.type.k !== kind) throw new Unsupported(`host function argument ${spec} is a ${value.type.k}`);
-    return {ref: m[1] === "&", value};
-  });
-}
-
-/*
- * AMC on the Go host (go/amc, docs/abap-daemons.md): the methods
- * open-abap-apc leaves to a host -- CL_AMC_CHANNEL_MANAGER's statics, the
- * producer's SENDs, the consumer's START/STOP -- are bodies that call the
- * broker, as tools/osd-amc.mjs patches them on Node. A refusal comes back as
- * text and is raised as CX_AMC_ERROR with that reason, the way the Node host
- * raises it. Who is calling is decided when the program is compiled: every
- * method of a class whose source names the AMC API enters its class pool on
- * the session while it runs (amcProgram below), where Node reads the class
- * off the call stack.
- */
-const AMC_HOST = new Map([
-  ["CL_AMC_CHANNEL_MANAGER=>CREATE_MESSAGE_PRODUCER", {op: "create_producer", cls: "ZCL_AMC_PRODUCER",
-    args: {APP: "I_APPLICATION_ID", PATH: "I_CHANNEL_ID", EXT: "I_CHANNEL_EXTENSION_ID", COMM: "I_COMMUNICATION_TYPE", ECHO: "I_SUPPRESS_ECHO"}}],
-  ["CL_AMC_CHANNEL_MANAGER=>CREATE_MESSAGE_CONSUMER", {op: "create_consumer", cls: "ZCL_AMC_CONSUMER",
-    args: {APP: "I_APPLICATION_ID", PATH: "I_CHANNEL_ID", EXT: "I_CHANNEL_EXTENSION_ID"}}],
-  ["CL_AMC_CHANNEL_MANAGER=>GET_CONSUMER_SESSION_ID", {op: "session_id", args: {}}],
-  ["ZCL_AMC_PRODUCER=>IF_AMC_MESSAGE_PRODUCER_TEXT~SEND", {op: "send", type: "TEXT", args: {MESSAGE: "I_MESSAGE"}}],
-  ["ZCL_AMC_PRODUCER=>IF_AMC_MESSAGE_PRODUCER_BINARY~SEND", {op: "send", type: "BINARY", args: {MESSAGE: "I_MESSAGE"}}],
-  ["ZCL_AMC_PRODUCER=>IF_AMC_MESSAGE_PRODUCER_PCP~SEND", {op: "send", type: "PCP", args: {MESSAGE: "I_MESSAGE"}}],
-  ["ZCL_AMC_CONSUMER=>IF_AMC_MESSAGE_CONSUMER~START_MESSAGE_DELIVERY", {op: "start", args: {RECEIVER: "I_RECEIVER"}}],
-  ["ZCL_AMC_CONSUMER=>IF_AMC_MESSAGE_CONSUMER~STOP_MESSAGE_DELIVERY", {op: "stop", args: {RECEIVER: "I_RECEIVER"}}],
-]);
-// a class whose source names one of these calls the AMC API
-const AMC_CALLER = /\b(CL_AMC_CHANNEL_MANAGER|IF_AMC_MESSAGE_PRODUCER\w*|IF_AMC_MESSAGE_CONSUMER)\b/i;
-// the program the SAMC authorities name: a class's class pool
-const amcProgramOf = (cls) => upper(cls).padEnd(30, "=") + "CP";
-
-/** the body of an AMC host method, and CX_AMC_ERROR for its refusals */
-function amcMethod(spec, ctx) {
-  const args = Object.fromEntries(Object.entries(spec.args).map(([k, n]) => [k, variable(n, ctx)]));
-  const err = {e: "var", name: "LV_AMC_ERROR", type: S};
-  const sig = constructorSignature(ctx, "CX_AMC_ERROR");
-  const ctorArgs = sig.map((p) => {
-    if (p.suppliedOf) return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: p.suppliedOf === "IV_REASON" ? "X" : "", type: p.type}};
-    if (p.name === "IV_REASON") return {name: p.name, dir: "importing", byValue: p.byValue, type: p.type, value: convert(err, p.type)};
-    if (p.default !== undefined) return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: defaultValue(p, ctx)};
-    return {name: p.name, supplied: false, dir: "importing", byValue: p.byValue, type: p.type, value: {e: "zero", type: p.type}};
-  });
-  const raise = {s: "raise", value: {e: "new", cls: "CX_AMC_ERROR", args: ctorArgs, type: {k: "ref", name: "CX_AMC_ERROR"}}, cls: "CX_AMC_ERROR"};
-  return {s: "amc", op: spec.op, cls: spec.cls, type: spec.type, args, err, raise};
-}
-
-/**
- * Function modules whose work is the host's: the kernel services of a
- * system that open-abap-core writes as '@KERNEL' JavaScript, called with
- * CALL FUNCTION '<literal>'. Each maps its formal parameters to the side
- * they are passed from (exporting: the caller's EXPORTING, importing: the
- * caller's IMPORTING, tables) and names the host function, which takes
- * every actual parameter as generic data and raises the module's classic
- * exceptions by name. A parameter the map does not name, a DESTINATION, an
- * IN UPDATE TASK or a name that is not a literal is refused.
- *
- * WWWDATA_IMPORT and SCMS_BINARY_TO_XSTRING are SMW0's (go/abap/w3mi.go),
- * their rules measured on A4H 2026-09-23 (ZCL_GOGEN_T_W3MI in semantics.mjs).
- */
-const NATIVE_FM = new Map([
-  ["F4_FILENAME", {fn: "abap.F4_FILENAME", params: {PROGRAM_NAME: "exporting", DYNPRO_NUMBER: "exporting", FIELD_NAME: "exporting", FILE_NAME: "importing"}}],
-  ["KD_GET_FILENAME_ON_F4", {fn: "abap.KD_GET_FILENAME_ON_F4", params: {PROGRAM_NAME: "exporting", DYNPRO_NUMBER: "exporting", FIELD_NAME: "exporting", MASK: "exporting", STATIC: "exporting", FILE_NAME: "changing"}}],
-  ["WWWDATA_IMPORT", {fn: "abap.WWWDATA_IMPORT", params: {KEY: "exporting", MIME: "tables"}}],
-  ["SCMS_BINARY_TO_XSTRING", {fn: "abap.SCMS_BINARY_TO_XSTRING",
-    params: {INPUT_LENGTH: "exporting", FIRST_LINE: "exporting", LAST_LINE: "exporting", BUFFER: "importing", BINARY_TAB: "tables"}}],
-]);
-
-/**
- * Function modules a DESTINATION of the host answers, by destination and
- * name: the Node host installs the same destinations in test/setup.mjs.
- * 'STORE' is the object store over the files of the tree
- * (tools/osd-store-destination.mjs on Node, go/abap/store.go here): the
- * editor screen's LIST READ WRITE, and CHECK ACTIVATE TOKENS answered as
- * work this binary has no compiler for. The signature is ZOSD_STORE's
- * (src/webgui/zosd_store.fugr.xml).
- */
-const DESTINATION_FM = new Map([
-  ["STORE ZOSD_STORE", {fn: "abap.ZOSD_STORE", params: {
-    IV_COMMAND: "exporting", IV_TYPE: "exporting", IV_NAME: "exporting", IV_INCLUDE: "exporting",
-    IV_SOURCE: "exporting", IV_FILTER: "exporting", IV_LIMIT: "exporting", IV_REVISION: "exporting", IV_JSON: "exporting",
-    EV_SOURCE: "importing", EV_FILE: "importing", EV_PACKAGE: "importing", EV_VERSION: "importing",
-    EV_WRITABLE: "importing", EV_ACTIVE: "importing", EV_LIVE: "importing", EV_NOTE: "importing",
-    EV_COUNT: "importing", EV_MS: "importing", EV_ERROR: "importing", EV_JSON: "importing", EV_STATE: "importing", EV_CHANGED: "importing",
-    ET_OBJECT: "tables", ET_ISSUE: "tables", ET_TYPE: "tables", ET_TOKEN: "tables", ET_REVISION: "tables"}}],
-]);
 
 /** CALL FUNCTION of a module the host implements (NATIVE_FM) */
 function callFunction(node, ctx, text) {
@@ -1234,166 +857,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   return {s: "seq", body: [...before, call, ...tail]};
 }
 
-/**
- * instance methods of the kernel whose ABAP signature is generic (TYPE
- * simple, xsequence), so the subset cannot type them: the host function
- * does the work and receives the object (me) first, and the signature it
- * is called with is written here. A caller whose argument does not fit the
- * written type is refused by the ordinary conversion rules.
- * UTF-8 / UTF-16LE text <-> bytes: cl_abap_conv_out_ce / cl_abap_conv_in_ce.
- */
-/** @type {Map<string, import("./frontend-types.ts").NativeMe>} */ const NATIVE_ME = new Map([
-  ["CL_ABAP_CONV_OUT_CE=>CONVERT", {fn: "Native_CONV_OUT_CONVERT", params: [["DATA", "importing", "string"], ["N", "importing", "i", true], ["BUFFER", "exporting", "xstring"]]}],
-  ["CL_ABAP_CONV_IN_CE=>CONVERT", {fn: "Native_CONV_IN_CONVERT", params: [["INPUT", "importing", "xstring"], ["N", "importing", "i", true], ["DATA", "exporting", "string"]]}],
-]);
-/** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {string} name @returns {import("./frontend-types.ts").Signature} */ const nativeMeSig = (program, key, name) => {
-  const n = NATIVE_ME.get(key);
-  const T = {string: S, xstring: XS, i: I};
-  const own = n.params.map(([pn, dir, t, optional]) => ({name: pn, dir, byValue: false, type: T[t], optional: optional === true}));
-  return {name, static: false, private: false, abstract: false, params: withSupplied(program, key, own), returning: null};
-};
 
-/* --------------------------------------------------------------------- types */
-
-/** @param {import("@abaplint/core").AbstractType} t @param {string} where @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./ir.ts").Type} */ function typeOf(t, where, program) {
-  // generic data: TYPE any / data / ANY TABLE, and data references. A
-  // generic value is a binding to a typed slot (abap.Data in Go)
-  if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType || t instanceof BasicTypes.SimpleType) return {k: "data"};
-  if (t instanceof BasicTypes.TableType && (t.getRowType() instanceof BasicTypes.AnyType || t.getRowType() instanceof BasicTypes.DataType)) return {k: "data", table: true};
-  if (t instanceof BasicTypes.DataReference) {
-    const inner = t.getType();
-    if (inner && !(inner instanceof BasicTypes.AnyType) && !(inner instanceof BasicTypes.DataType)) {
-      try { return {k: "dref", to: typeOf(inner, where, program)}; } catch (e) { if (!(e instanceof Unsupported)) throw e; }
-    }
-    return {k: "dref"};
-  }
-  // REF TO object: the root of every class, any object fits
-  if (t instanceof BasicTypes.GenericObjectReferenceType) return {k: "ref", name: "OBJECT", intf: true};
-  // d and t: their characters, initial all zeros
-  if (t instanceof BasicTypes.DateType) return {k: "d", len: 8};
-  // ultra/events: a generic TYPE p takes the caller's decimals, which a typed
-  // signature cannot say; only the host functions listed in P_GENERIC take
-  // one, as p(16,7), which holds a TIMESTAMP and a TIMESTAMPL exactly
-  if (t instanceof BasicTypes.PGenericType && P_GENERIC.has(String(where).split(" ")[0])) return {k: "p", len: 16, dec: 7};
-  // ASSERT_NUMBER_BETWEEN takes TYPE numeric. Bind the caller's actual type:
-  // converting a packed or float boundary to i rounds before the comparison.
-  if (t instanceof BasicTypes.NumericGenericType && String(where).split(" ")[0] === "CL_ABAP_UNIT_ASSERT=>ASSERT_NUMBER_BETWEEN") return {k: "data", numeric: true};
-  if (t instanceof BasicTypes.NumericGenericType && P_GENERIC.has(String(where).split(" ")[0])) return {k: "i"};
-  // p: declared, initial, copied and compared with initial only, as its
-  // decimal text; any arithmetic or conversion is refused until packed
-  // numbers are measured on A4H
-  if (t instanceof BasicTypes.PackedType) return {k: "p", len: t.getLength(), dec: t.getDecimals()};
-  if (t instanceof BasicTypes.TimeType) return {k: "t", len: 6};
-  // n: its digits, initial all zeros; declared, copied and compared with
-  // initial only until its conversions are measured
-  if (t instanceof BasicTypes.NumericType) return {k: "n", len: t.getLength()};
-  if (t instanceof BasicTypes.IntegerType) return I;
-  if (t instanceof BasicTypes.FloatType) return F;
-  if (t instanceof BasicTypes.Integer8Type) return INT8;
-  if (t instanceof BasicTypes.StringType) return S;
-  if (t instanceof BasicTypes.CharacterType) return C(t.getLength());
-  if (t instanceof BasicTypes.HexType) return X(t.getLength());
-  if (t instanceof BasicTypes.XStringType) return XS;
-  // a parameter TYPE c takes the length of what is passed: stored without
-  // trailing blanks like any c, so a length no value reaches
-  if (t instanceof BasicTypes.CGenericType) return C(262143);
-  // csequence and clike take a c or a string: carried as a string, so a c
-  // passed in arrives without its trailing blanks, which every character
-  // operation of a c ignores anyway (a structure passed as clike is refused
-  // at the call, where the conversion to string fails)
-  if (t instanceof BasicTypes.CSequenceType || t instanceof BasicTypes.CLikeType) return S;
-  // ultra/events: xsequence takes an x or an xstring: carried as an xstring,
-  // as csequence is carried as a string (ZCL_ABAPGIT_CONVERT=>XSTRING_TO_STRING_UTF8)
-  if (t instanceof BasicTypes.XSequenceType) return XS;
-  if (t instanceof BasicTypes.TableType) {
-    const access = t.getAccessType();
-    const row = typeOf(t.getRowType(), where, program);
-    // secondary keys (ultra/json): carried with the type, used by LOOP ...
-    // USING KEY and READ ... WITH KEY k COMPONENTS (secondaryKey below);
-    // a hashed one is refused where it is used
-    const secondary = (t.getOptions().secondary ?? []).map((k) => ({name: upper(k.name), sorted: String(k.type).toUpperCase() === "SORTED",
-      hashed: String(k.type).toUpperCase() === "HASHED", unique: k.isUnique === true, comps: k.keyFields.map(upper)}));
-    if (secondary.length && access === "HASHED") throw new Unsupported(`${where}: secondary keys on a ${access} table`);
-    // ultra/itab: the primary key, for SORT without BY: "default", the
-    // component names of a user key, or [] for an empty one
-    if (access === "STANDARD") {
-      const o = t.getOptions();
-      const skey = o.keyType === "DEFAULT" ? "default" : o.keyType === "EMPTY" ? [] : (o.primaryKey?.keyFields ?? []).map(upper);
-      return secondary.length ? {k: "table", row, skey, secondary} : {k: "table", row, skey};
-    }
-    // a HASHED table loops in insertion order, so it is a slice whose
-    // INSERT keeps the key unique; SORTED is not here yet
-    if (access === "HASHED") {
-      const key = (t.getOptions().primaryKey?.keyFields ?? []).map(upper);
-      if (key.length === 0) throw new Unsupported(`${where}: HASHED table without a key`);
-      return {k: "table", row, hashed: key};
-    }
-    // ultra/events: SORTED ... WITH UNIQUE / NON-UNIQUE KEY (ZCL_ABAPGIT_STRING_MAP):
-    // a slice in key order, see refuseSorted and insert_table
-    if (access === "SORTED") {
-      const o = t.getOptions();
-      const key = (o.primaryKey?.keyFields ?? []).map(upper);
-      if (key.length === 0) throw new Unsupported(`${where}: SORTED table without a key`);
-      return secondary.length ? {k: "table", row, sorted: key, unique: !!o.primaryKey?.isUnique, secondary}
-        : {k: "table", row, sorted: key, unique: !!o.primaryKey?.isUnique};
-    }
-    throw new Unsupported(`${where}: ${access} tables`);
-  }
-  if (t instanceof BasicTypes.StructureType) {
-    const comps = t.getComponents();
-    const q = t.getQualifiedName();
-    // a type declared in a class or a method has no owner in its name: two
-    // classes may both have a ty_face, with other fields, so the class names it
-    // a DDIC structure (a TABL of the dictionary, e.g. IHTTPNVP) is global:
-    // one Go type for every class that uses it, or two classes cannot pass it
-    // a structure is the class's own only when the class declares a type of
-    // that name; a DDIC table or a type-pool type is global, one Go type
-    // for every class that uses it, or two classes cannot pass it
-    const local = !q || (!q.includes("=>") && (program.currentTypes?.has(upper(q)) ?? true));
-    let go = q ? goName(q) : `S_${comps.map((c) => c.name).join("_").slice(0, 40).toUpperCase()}`;
-    if (local && program.currentClass) go = `${program.currentClass}__${go}`;
-    // an anonymous structure (the row of a RANGE OF, of a TYPE TABLE OF an
-    // inline BEGIN OF) is one abaplint type wherever it is reached -- an
-    // interface's signature, the caller, the implementing class, LIKE LINE
-    // OF a parameter: it keeps the name it was first given, or the places
-    // that share it name two Go types
-    if (!q) {
-      const seen = program.anonStructs.get(t);
-      if (seen !== undefined) go = seen;
-      else program.anonStructs.set(t, go);
-    }
-    const shape = comps.map((c) => upper(c.name)).join(",");
-    for (let n = 2; program.structs.has(go) && program.structs.get(go).shape !== undefined && program.structs.get(go).shape !== shape; n += 1) {
-      go = `${go.replace(/_V\d+$/, "")}_V${n}`;
-    }
-    if (program.badStructs?.has(go)) throw new Unsupported(program.badStructs.get(go));
-    if (!program.structs.has(go)) {
-      /** @type {import("./frontend-types.ts").StructType} */ const st = {k: "struct", go, fields: [], shape, ...(q ? {qname: upper(q)} : {})};
-      program.structs.set(go, st); // before the fields: a struct may nest itself through a table
-      try {
-        st.fields = comps.map((c) => ({name: upper(c.name), type: rttiNamed(typeOf(c.type, `${where}-${c.name}`, program), c.type)}));
-      } catch (e) {
-        // a field outside the subset: the structure is not in the program,
-        // and every later use of it is refused with the same reason
-        program.structs.delete(go);
-        program.badStructs.set(go, e.message);
-        throw e;
-      }
-    }
-    return {k: "struct", go};
-  }
-  if (t instanceof BasicTypes.ObjectReferenceType) {
-    const name = upper(t.getIdentifierName());
-    // a local class of the class being compiled, by its compiled name (ultra/json)
-    const local = program.locals?.get(`${program.currentOwner}|${name}`);
-    if (local !== undefined) return {k: "ref", name: local, intf: false};
-    const intf = program.reg?.getObject("INTF", name) !== undefined;
-    if (!intf && program.reg?.getObject("CLAS", name) === undefined) throw new Unsupported(`${where}: REF TO ${name}, which is not in the program`);
-    if (intf) program.interfaces.add(name);
-    return {k: "ref", name, intf};
-  }
-  throw new Unsupported(`${where}: type ${t.constructor.name} is outside the subset`);
-}
 
 /*
  * The output length of a data element (parity-wave1, A4H ZCL_GOGEN_T_RTTIOL:
@@ -1416,32 +880,6 @@ function compiledFunctionCall(node, ctx, text, name) {
   if (out !== undefined && /^\d+$/.test(out)) map.set(name, Number(out));
 }
 
-/*
- * An elementary component's type with the names RTTI reads (ultra/json):
- * abaplint's qualified name, upper case, as the transpiler hands it to its
- * runtime, and the dictionary type it comes from. Only components carry
- * them: a component is what describe_by_data sees through ASSIGN
- * COMPONENT, and naming every local would give every generic binding a
- * descriptor of its own.
- */
-/** @param {import("./ir.ts").Type} ir @param {import("@abaplint/core").AbstractType} t @returns {import("./ir.ts").Type} */ function rttiNamed(ir, t) {
-  if (["struct", "table", "dref", "ref", "exc", "data"].includes(ir.k)) return ir;
-  const q = t.getQualifiedName?.();
-  // abaplint gives a NUMC data element its name as the qualified name only
-  // (no DDIC name): read it as the dictionary type it is (parity-wave1)
-  const d = t.getDDICName?.() ?? (ir.k === "n" && q && !/[=>-]/.test(q) && REG?.getObject("DTEL", upper(q)) ? q : undefined);
-  if (!q && !d) return ir;
-  if (d) ddicOutputLength(upper(d));
-  return {...ir, ...(q ? {qname: upper(q)} : {}), ...(d ? {ddic: upper(d)} : {})};
-}
-
-/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {Extract<import("./ir.ts").Type, {k: "struct"}>} t @returns {import("./frontend-types.ts").StructType | undefined} */ const structOf = (ctx, t) => ctx.program.structs.get(t.go);
-/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {import("./ir.ts").Type} t @param {string} name @param {string} where @returns {import("./ir.ts").Field} */ const fieldOf = (ctx, t, name, where) => {
-  if (t.k !== "struct") throw new Unsupported(`${where}: component ${name} of a non-structure`);
-  const f = structOf(ctx, t).fields.find((x) => x.name === upper(name));
-  if (f === undefined) throw new Unsupported(`${where}: no component ${name}`);
-  return f;
-};
 
 /* --------------------------------------------------------------------- class */
 
@@ -1919,40 +1357,6 @@ function compiledFunctionCall(node, ctx, text, name) {
   return out;
 }
 
-/*
- * TRY / CATCH, the part a runtime can honour today: the exceptions the
- * runtime itself raises (arithmetic, conversion, table line, offset). Which
- * of them a CATCH covers is decided here, by the class hierarchy abaplint
- * knows. Exception objects of compiled classes (RAISE EXCEPTION) are taken
- * by the class hierarchy at run time; see tryBlock.
- */
-const RUNTIME_CX = ["CX_SY_ZERODIVIDE", "CX_SY_ARITHMETIC_OVERFLOW", "CX_SY_CONVERSION_NO_NUMBER", "CX_SY_CONVERSION_OVERFLOW",
-  "CX_SY_ITAB_LINE_NOT_FOUND", "CX_SY_RANGE_OUT_OF_BOUNDS", "CX_SY_ARG_OUT_OF_DOMAIN",
-  "CX_SY_CREATE_OBJECT_ERROR", "CX_SY_CREATE_DATA_ERROR", "CX_SY_MOVE_CAST_ERROR", "CX_SY_DYN_CALL_ILLEGAL_CLASS", "CX_SY_DYN_CALL_ILLEGAL_METHOD",
-  "CX_SY_DYN_CALL_PARAM_MISSING", "CX_SY_DYN_CALL_PARAM_NOT_FOUND",
-  // the string functions (repeat( ) replace( ): a parameter out of range)
-  "CX_SY_STRG_PAR_VAL",
-  // REPLACE ALL OCCURRENCES OF an empty pattern; open-abap-core has no such
-  // class, so its superclass is written down below as A4H defines it
-  "CX_SY_REPLACE_INFINITE_LOOP",
-  // the ICF entity's get_cdata over bytes that are not UTF-8 (abap.ICFGetCData)
-  "CX_SY_CONVERSION_CODEPAGE",
-  // Open SQL (go/abap/select.go, dbwrite.go, ranges.go): a database error
-  // and INSERT FROM TABLE with a duplicate key; a range value longer than
-  // its column; a CP pattern past twice the column (tools/ir-ranges.mjs)
-  "CX_SY_OPEN_SQL_DB", "CX_SY_OPEN_SQL_DATA_ERROR", "CX_SY_DYNAMIC_OSQL_SEMANTICS",
-  // a dynamic WHERE A4H refused (go/abap osqlwhere.go, tools/ir-osql-where.mjs)
-  "CX_SY_DYNAMIC_OSQL_SYNTAX",
-  // CALL FUNCTION ... DESTINATION 'AMDP' on a host without HANA (callFunction)
-  "CX_SY_DYN_CALL_ILLEGAL_FUNC",
-  // the DATASET statements (go/abap/dataset.go): READ or TRANSFER on a file
-  // not open, TRANSFER on one opened FOR INPUT; OPEN of an open file
-  "CX_SY_FILE_OPEN_MODE", "CX_SY_FILE_OPEN"];
-// the superclass of a runtime exception the registry does not hold, read
-// off A4H (CX_SY_REPLACE_INFINITE_LOOP inheriting from CX_DYNAMIC_CHECK), and
-// CX_SY_OPEN_SQL_DATA_ERROR from CX_SY_OPEN_SQL_ERROR (its definition on
-// A4H, 2026-09-23)
-const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK", CX_SY_OPEN_SQL_DATA_ERROR: "CX_SY_OPEN_SQL_ERROR"};
 
 // IS INSTANCE OF on an initial reference answers by its static type: true
 // when an up cast from it to the target is legal (A4H 7.58, 2026-10-08:
@@ -3892,11 +3296,6 @@ const BIT_OPS = new Set(["BIT-AND", "BIT-OR", "BIT-XOR"]);
 /** @param {import("./frontend-types.ts").SyntaxNode} node @returns {boolean} */ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.ArithOperator)
   || (isExpr(c, Expressions.Source) && hasArith(c)));
 
-/**
- * One Source as IR. When it is arithmetic, every operator runs in the
- * calculation type of all its leaves plus `outer` (the target, or the other
- * side of a comparison), as ABAP computes it.
- */
 /*
  * cl_abap_typedescr=>describe_by_data( x )->type_kind / ->length (ultra/events:
  * ZCL_ABAPGIT_HTML~ADD, ZCL_ABAPGIT_CONVERT=>STRING_TO_TAB): the type kind
@@ -3915,75 +3314,6 @@ const BIT_OPS = new Set(["BIT-AND", "BIT-OR", "BIT-XOR"]);
   if (!arg) throw new Unsupported(`describe_by_data form: ${methodCall.concatTokens()}`);
   const x = convert(source(arg, ctx), {k: "data"});
   return a === "LENGTH" ? {e: "type_length", x, type: I} : {e: "type_kind", x, type: C(1)};
-}
-
-/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [outer] @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function source(node, ctx, outer, hint = outer) {
-  const sk = node?.getChildren?.() ?? [];
-  if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)) return descrAttr(sk[0], sk[2], ctx);
-  if (!hasArith(node)) return arith(node, ctx, undefined, hint);
-  if (outer?.k === "d") {
-    const parts = items(node);
-    if (parts.length === 3 && ["+", "-"].includes(parts[1].op) && parts[0].node && parts[2].node) {
-      const date = sourceOperand(parts[0].node, ctx);
-      const days = sourceOperand(parts[2].node, ctx);
-      if (date.type.k === "d" && days.type.k === "i") return {e: "date_add", date, days, subtract: parts[1].op === "-", type: outer};
-    }
-  }
-  const bits = hasBitOp(node);
-  if (bits) {
-    // Bit expressions calculate to the longest operand, padding on the right.
-    const leaves = leafTypes(node, ctx);
-    if (!leaves.every((t) => t.k === "x" || t.k === "xstring")) {
-      throw new Unsupported(`bit operation on other than x fields of one length: ${node.concatTokens()}`);
-    }
-    if (leaves.every((t) => t.k === "x")) {
-      return arith(node, ctx, X(leaves.reduce((max, t) => Math.max(max, t.len), -Infinity)));
-    }
-    // Retain the existing dynamic AND/OR refusal; CRC needs only XOR.
-    const ops = node.getChildren().filter((c) => isExpr(c, Expressions.ArithOperator)).map((c) => upper(c.concatTokens()));
-    if (ops.every((o) => o === "BIT-XOR")) return arith(node, ctx, XS);
-    throw new Unsupported(`${ops.find((o) => o !== "BIT-XOR")} of xstrings: not measured: ${node.concatTokens()}`);
-  }
-
-  // ultra/itab: a generic operand or a generic target decides the
-  // calculation type at run time (genericArith)
-  const genericLeaves = leafTypes(node, ctx).some((t) => t.k === "data");
-  if (outer?.k === "data" && !genericLeaves && !ctx.genTarget) return convert(source(node, ctx), outer);
-  if (outer?.k === "data" || genericLeaves) return genericArith(node, ctx, outer);
-  // an x target computes as i and the i result is converted into it
-  // (measured on A4H 2026-09-23 for i MOD 256 into x LENGTH 1: 255 and -1
-  // both give FF, 300 gives 2C)
-  const target = outer?.k === "x" ? I : outer;
-  // an x or xstring operand is its move into an i (the last four bytes,
-  // ZCL_GOGEN_T_XMOVI) and counts as an i for the calculation type (A4H
-  // 2026-09-24, ZCL_GOGEN_T_XARITH: 'EDB88320' DIV 2 is -153337456, x1 FF
-  // + 1 is 256, x8 ...000000FF is 255, x1 0A + p 1.5 is 11.50 in p, 07 / 2
-  // into i is 4); arith converts such a leaf to i first
-  const leaves = leafTypes(node, ctx).map((t) => (["x", "xstring", "d", "t"].includes(t.k) ? I : t));
-  // A character or numeric-text target does not take part: compute from the
-  // operands, then MOVE the result (JS oracle: adt-cases calculation probe).
-  const charTarget = target !== undefined && (charlike(target) || target.k === "n");
-  const types = [...leaves, ...(target === undefined || charTarget ? [] : [target])];
-  // ** computes in f when the operands are integers (measured on A4H:
-  // 2 ** 31 into i overflows "converting from '2.14748e+09'")
-  if (types.some((t) => t.k === "f") || hasPow(node)) return arith(node, ctx, F);
-  if (types.some((t) => t.k === "x")) throw new Unsupported(`calculation type of an x operand: ${node.concatTokens()}`);
-  // calculation type p (A4H 2026-09-24, ZCL_GOGEN_T_PDCALC): a p operand or
-  // a p target, and a c or string operand too (`lv_s / 2 * 2` into i is 7
-  // for lv_s = '7', not 8), ahead of int8 (int8 / 3 into p is
-  // 1666666666.67). + - * are exact, / keeps 31 significant digits
-  if (types.some((t) => t.k === "p" || charlike(t))) {
-    const odd = types.find((t) => !["p", "i", "int8", "c", "string"].includes(t.k));
-    if (odd) throw new Unsupported(`calculation type p with a ${odd.k} operand: ${node.concatTokens()}`);
-    return arith(node, ctx, P31);
-  }
-  if (types.some((t) => t.k === "int8")) return arith(node, ctx, INT8);
-  // a d operand counts its days as an i (measured on A4H: ( d / 7 ) * 7
-  // into i rounds in between, so the calculation type is i, not p); a d
-  // target (days back into a date) is not measured
-  if (types.some((t) => t.k === "d") && outer?.k !== "d" && types.every((t) => t.k === "i" || t.k === "d")) return arith(node, ctx, I);
-  if (types.every((t) => t.k === "i")) return arith(node, ctx, I);
-  throw new Unsupported(`calculation type of ${node.concatTokens()}`);
 }
 
 /*
@@ -4052,91 +3382,6 @@ const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N
   const PLACE = new Set(["var", "attr", "static", "field", "fs", "row", "refattr"]);
   for (const l of leaves) if (!PLACE.has(l.e)) throw new Unsupported(`a generic operand that is not a field in ${text}`);
   return {e: "gen_arith", statics: statics.join(""), charTarget, target, leaves, branches, text, type: outer.k === "data" ? {k: "data"} : outer};
-}
-
-/** a ComponentChain (a-b-c) read off a structured value */
-/** @param {import("./frontend-types.ts").ValueExpr} v @param {import("./frontend-types.ts").SyntaxNode} chain @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function componentsOf(v, chain, ctx) {
-  for (const c of chain.getChildren()) {
-    if (c.concatTokens() === "-") continue;
-    if (isExpr(c, Expressions.ComponentChain) || isExpr(c, Expressions.ComponentChainSimple)) {
-      v = componentsOf(v, c, ctx);
-      continue;
-    }
-    if (!isExpr(c, Expressions.ComponentName)) throw new Unsupported(`component chain ${chain.concatTokens()}`);
-    const f = fieldOf(ctx, v.type, c.concatTokens(), chain.concatTokens());
-    v = {e: "field", base: v, name: f.name, type: f.type};
-  }
-  return v;
-}
-
-/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [calc] @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function arith(node, ctx, calc, hint) {
-  const its = items(node);
-  let negate = false;
-  while (its.length > 0 && its[0].sign !== undefined) {
-    if (its.shift().sign === "-") negate = !negate;
-  }
-  /** @param {import("./frontend-types.ts").ExpressionItem} item @param {import("./ir.ts").Type} [t] @returns {import("./frontend-types.ts").ValueExpr} */ const value = (item, t) => {
-    if (item.ctor) { const v = constructor(item.ctor, ctx, item.hint); return t === undefined ? v : convert(v, t); }
-    if (item.bool) {
-      // xsdbool: a c(1) 'X' or blank; boolc: a string 'X' or ' '
-      const v = {e: "bool", cond: cond(item.cond, ctx), blank: item.bool === "BOOLC" ? " " : "", type: item.bool === "BOOLC" ? S : C(1)};
-      return t === undefined ? v : convert(v, t);
-    }
-    if (item.descr) { const v = descrAttr(item.descr.call, item.descr.attr, ctx); return t === undefined ? v : convert(v, t); }
-    if (item.group !== undefined) return arith(item.group, ctx, t);
-    if (isExpr(item.node, Expressions.Source)) return arith(item.node, ctx, t);
-    let v = sourceOperand(item.node, ctx, t === undefined ? item.hint : t);
-    if (item.comps) v = componentsOf(v, item.comps, ctx);
-    // Byte, date and time operands enter arithmetic through their integer
-    // value (dates in days, times in seconds), before the calculation type.
-    if (t !== undefined && ["x", "xstring", "d", "t"].includes(v.type.k) && !["x", "xstring", "i"].includes(t.k)) v = convert(v, I);
-    return t === undefined ? v : convert(v, t);
-  };
-  /** @type {import("./frontend-types.ts").ValueExpr} */ let expr;
-  if (its.length === 3 && its[1].concat) {
-    expr = {e: "concat", l: convert(value(its[0]), S), r: convert(value(its[2]), S), type: S};
-  } else if (its.length === 3 && its[1].op !== undefined) {
-    const op = its[1].op;
-    if (calc === undefined) throw new Unsupported(`arithmetic without a calculation type: ${node.concatTokens()}`);
-    if (op === "**" && calc.k !== "f") throw new Unsupported(`** with calculation type ${calc.k}`);
-    if (BIT_OPS.has(op) !== (calc.k === "x" || calc.k === "xstring")) throw new Unsupported(`${op} with calculation type ${calc.k}`);
-    expr = {e: "bin", op, l: value(its[0], calc), r: value(its[2], calc), type: calc};
-  } else if (its.length === 1) {
-    // a lone constructor takes its # from where the value goes
-    expr = value({...its[0], hint}, calc);
-  } else {
-    throw new Unsupported(`expression shape: ${node.concatTokens()}`);
-  }
-  if (!negate) return expr;
-  if (!numeric(expr.type) && expr.type.k !== "p") throw new Unsupported("unary minus on a non-number");
-  return {e: "neg", x: expr, type: expr.type};
-}
-
-/** one operand: a field chain, a literal, a call, a template, a constructor */
-/** @param {import("./frontend-types.ts").SyntaxNode} n @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function sourceOperand(n, ctx, hint) {
-  if (isExpr(n, Expressions.Source)) return source(n, ctx);
-  if (isExpr(n, Expressions.FieldChain) || isExpr(n, Expressions.SourceField)) return fieldChain(n, ctx);
-  if (isExpr(n, Expressions.Constant)) {
-    const int = n.findDirectExpression(Expressions.Integer);
-    if (int !== undefined) {
-      const value = Number(int.concatTokens());
-      // a number literal past the range of i is a p literal in ABAP (31
-      // digits at most), held as its digits like every p value
-      if (Math.abs(value) > 2147483647) {
-        const digits = int.concatTokens().replace(/^\+/, "").replace(/^(-?)0+(?=\d)/, "$1");
-        if (!/^-?\d{1,31}$/.test(digits)) throw new Unsupported(`integer literal ${int.concatTokens()}`);
-        return {e: "str", value: digits, type: P31};
-      }
-      if (!Number.isSafeInteger(value)) throw new Unsupported(`integer literal ${value}`);
-      return {e: "int", value, type: I};
-    }
-    const lit = textLiteral(n, Expressions);
-    if (lit.refusal !== undefined) throw new Unsupported(`literal ${n.concatTokens()}${lit.refusal}`);
-    return lit.quote === "`" ? {e: "str", value: lit.value, type: S} : {e: "chars", value: lit.value.replace(/ +$/, ""), type: C(Math.max(1, lit.value.length))};
-  }
-  if (isExpr(n, Expressions.MethodCallChain)) return call(n, ctx, false, hint);
-  if (isExpr(n, Expressions.StringTemplate)) return template(n, ctx);
-  throw new Unsupported(`operand ${n.get().constructor.name}: ${n.concatTokens()}`);
 }
 
 /** @param {import("./frontend-types.ts").FieldChain} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChain(n, ctx) {
@@ -4274,35 +3519,6 @@ function localInterfaceConstant(id, attr, local, reg) {
 
 /* ------------------------------------------------------------- constructors */
 
-/** @param {import("./frontend-types.ts").SyntaxNode | undefined} typeNode @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [inferred] @returns {import("./ir.ts").Type} */ function namedType(typeNode, ctx, inferred) {
-  if (typeNode === undefined) throw new Unsupported("a constructor without a type");
-  const text = typeNode.concatTokens();
-  if (text === "#") {
-    if (inferred === undefined) throw new Unsupported("# without a type to infer from here");
-    return inferred;
-  }
-  const t = upper(text);
-  const builtin = {
-    I, F, STRING: S, XSTRING: XS, INT8, D: {k: "d", len: 8}, T: {k: "t", len: 6},
-    OBJECT: {k: "ref", name: "OBJECT", intf: true},
-    P: {k: "p", len: 8, dec: 0}, C: C(1), N: {k: "n", len: 1}, X: X(1), ABAP_BOOL: C(1),
-  }[t];
-  if (builtin) return builtin;
-  const pool = t.includes("_") ? ctx.reg.getObject("TYPE", t.split("_")[0]) : undefined;
-  const poolType = pool ? new abaplint.SyntaxLogic(ctx.reg, pool).run().spaghetti.getFirstChild()?.getFirstChild()?.findType(t) : undefined;
-  const local = ctx.scope.findType?.(t) ?? ctx.scope.findTypePoolType?.(t) ?? poolType
-    ?? clasDef(ctx.reg, ctx.className)?.getTypeDefinitions().getByName(t);
-  if (local !== undefined) return typeOf(local.getType(), text, ctx.program);
-  if (ctx.reg.getObject("CLAS", t) || ctx.reg.getObject("INTF", t)) return {k: "ref", name: t, intf: ctx.reg.getObject("INTF", t) !== undefined};
-  const m = /^(\w+)=>(\w+)$/.exec(t);
-  if (m) {
-    const owner = ctx.reg.getObject("INTF", m[1])?.getDefinition() ?? clasDef(ctx.reg, m[1]);
-    const td = owner?.getTypeDefinitions().getByName(m[2]);
-    if (td === undefined) throw new Unsupported(`type ${text}`);
-    return typeOf(td.getType(), text, ctx.program);
-  }
-  throw new Unsupported(`type ${text}`);
-}
 
 /** @param {import("./frontend-types.ts").ConstructorItem} c @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [inferred] @returns {import("./frontend-types.ts").ValueExpr} */ function constructor(c, ctx, inferred) {
   if (c.kw === "CONV") {
@@ -4564,139 +3780,6 @@ function dbTable(ctx, tableName, verb) {
   return {name: tableName, columns, colType, key, client: columns.has("MANDT")};
 }
 
-/** the IR type of a column in a predicate or a projection */
-// a DEC column: its digits (2n-1 for p LENGTH n) and decimals, as the IR
-// counts them (ANORMALIES NOTE packed-length-is-bytes)
-// a RAW(n) column is T.bytes(n), a RAWSTRING T.bytes() (ultra/zvdb)
-const sqlIrType = (t) => (t.k === "i" ? RIR.T.int : t.k === "int8" ? RIR.T.int8 : t.k === "string" ? RIR.T.str : t.k === "d" ? RIR.T.date
-  : t.k === "p" ? RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0) : t.k === "x" ? RIR.T.bytes(t.len ?? 1) : t.k === "xstring" ? RIR.T.bytes()
-    : RIR.T.char(t.len ?? 1));
-/** the IR type a written value binds as (tools/ir-writes.mjs bindValue): a
- * d, t or n is its characters, as the column stores them */
-function writeIrType(t, where) {
-  if (t.k === "i") return RIR.T.int;
-  if (t.k === "int8") return RIR.T.int8;
-  if (t.k === "string") return RIR.T.str;
-  if (t.k === "c" || t.k === "n") return RIR.T.char(t.len ?? 1);
-  if (t.k === "d") return RIR.T.char(8);
-  if (t.k === "t") return RIR.T.char(6);
-  // a RAW(n) column (ultra/zvdb, A4H ZCL_GOGEN_T_RAWRD / _RAWSEL): its n
-  // bytes, an x or xstring cut or padded with 00, bound by the Go runtime as
-  // the column holds them (go/abap dbraw.go DBXHex, bindValue).
-  // tools/ir-writes.mjs has no byte type in bindValue / initialValue yet, so
-  // the build-time check of a write stands a STRING in for it (irCheck). A
-  // RAWSTRING column is not written yet: not measured
-  if (t.k === "x") return RIR.T.bytes(t.len ?? 1);
-  if (t.k === "xstring") return RIR.T.bytes();
-  // a DEC column: its digits and decimals, as sqlIrType counts them; bound
-  // as the decimal text of the work area's p (tools/ir-writes.mjs
-  // packedText, taken from main, where the P initial value was added;
-  // go/abap/dbwrite.go bindValue). ultra/demodata: ZOSD_TAXIFACT's FARE
-  if (t.k === "p") return RIR.T.dec(2 * (t.len ?? 8) - 1, t.dec ?? 0);
-  throw new Unsupported(`${where}: a column of kind ${t.k} is not written yet`);
-}
-/** the type a write is checked with at build time: ir-writes.mjs binds no
- * bytes yet (bindValue, initialValue), and the shape it renders does not
- * depend on the type, so a STRING stands in for a RAW column there. What
- * runs is the Go runtime's bindValue with the real type (dbwrite.go) */
-const irCheck = (t) => (t.abap === "X" || t.abap === "XSTRING" ? RIR.T.str : t);
-const lowName = (n) => n.toLowerCase();
-const mandtPred = () => RIR.bin("=", RIR.col("mandt", RIR.T.char(3)), RIR.param("SY-MANDT", RIR.T.char(3)), RIR.T.bool);
-const andIr = (a, b) => (a === null ? b : b === null ? a : RIR.bin("AND", a, b, RIR.T.bool));
-
-/** a host value of Open SQL: [@]name[-comp...], the parser leaving a
- * component after @ as siblings (Dash, SQLFieldName) */
-function sqlHost(src, trailing, ctx, text) {
-  // FOR ALL ENTRIES IN itab: itab-comp is the component of the driving row
-  // the statement is run for (selectStatement, parity-wave1)
-  if (ctx.fae) {
-    const whole = [src, ...trailing].map((x) => x.concatTokens()).join("").replace(/^@/, "");
-    const m = /^([\w\/]+)-([\w\/]+)$/.exec(whole);
-    if (m && upper(m[1]) === ctx.fae.name) {
-      if (upper(m[2]) === "TABLE_LINE") throw new Unsupported(`FOR ALL ENTRIES: ${whole}: an elementary driving table is not in the subset`);
-      const f = fieldOf(ctx, ctx.fae.row, m[2], text);
-      return {e: "field", base: {e: "fae_row", n: ctx.fae.n, type: ctx.fae.row}, name: f.name, type: f.type};
-    }
-  }
-  const sk = [...src.getChildren().filter((c) => !isTok(c, "@")), ...trailing];
-  const simple = sk[0];
-  if (isExpr(simple, Expressions.Source)) {
-    if (sk.length !== 1) throw new Unsupported(`SQL value: ${text}`);
-    return source(simple, ctx);
-  }
-  if (!isExpr(simple, Expressions.SimpleSource3) || simple.getChildren().length !== 1) throw new Unsupported(`SQL value: ${text}`);
-  // sy-mandt (sy-subrc, ...) without @ in an old-style condition: the parser
-  // leaves the component as a sibling of `sy` (ultra/zvdb: DELETE FROM
-  // zvdb_100_vec WHERE mandt = sy-mandt ...); read as the same field of sy
-  if (sk.length === 3 && upper(simple.concatTokens()) === "SY" && !isVariableName("SY", ctx) && isTok(sk[1], "-") && isExpr(sk[2], Expressions.SQLFieldName)) {
-    const syText = `SY-${upper(sk[2].concatTokens())}`;
-    let v;
-    try { v = fieldChain({getChildren: () => [], concatTokens: () => syText}, ctx); } catch { v = undefined; }
-    if (v === undefined || v.e === undefined) throw new Unsupported(`SQL value: ${text}`);
-    return v;
-  }
-  let v = sourceOperand(simple.getFirstChild(), ctx);
-  for (let i = 1; i < sk.length; i += 2) {
-    if (!isTok(sk[i], "-") || !isExpr(sk[i + 1], Expressions.SQLFieldName)) throw new Unsupported(`SQL value: ${text}`);
-    const f = fieldOf(ctx, v.type, sk[i + 1].concatTokens(), text);
-    v = {e: "field", base: v, name: f.name, type: f.type};
-  }
-  return v;
-}
-
-/** a value compared with or written into a column: a literal of the
- * column's own kind is an IR literal, anything else a host value converted
- * to the column's type and bound at run time */
-function sqlValue(v, ct, ir, acc, set = false) {
-  if (ct.k === "x") return rawValue(v, ct, ir, acc, set);
-  if (ct.k === "xstring" && set) {
-    if (v.type.k !== "xstring" && v.type.k !== "x") throw new Unsupported(`UPDATE of an xstring column from a ${v.type.k}`);
-    acc.hosts.push({xstring: true, v});
-    return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
-  }
-  if (v.e === "chars" && ct.k === "c" && v.value.length <= (ct.len ?? 1)) return RIR.lit(v.value, ir);
-  if (v.e === "int" && ct.k === "i") return RIR.lit(v.value, ir);
-  // a character value that may not fit the column: convert( ) would cut it,
-  // and a cut value can compare equal to (or be written as) a different
-  // key. A4H raises CX_SY_OPEN_SQL_DATA_ERROR for a range LOW longer than
-  // the column; a plain comparison and a SET are not measured, so a value
-  // that does not fit is refused when it arrives (abap.DBCFit) and one that
-  // fits is bound right-trimmed as before.
-  if (ct.k === "c" && (v.type.k === "string" || (v.type.k === "c" && (v.type.len ?? 1) > (ct.len ?? 1)))) {
-    if (v.e === "chars" || v.e === "str") throw new Unsupported(`a literal longer than the ${ct.len ?? 1} characters of its column`);
-    acc.hosts.push({fit: ct.len ?? 1, v});
-    return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
-  }
-  const x = convert(v, ct);
-  acc.hosts.push(x);
-  return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir);
-}
-
-/**
- * A value against a RAW(n) column (ultra/zvdb, A4H 2026-09-24,
- * ZCL_GOGEN_T_RAWRD / _RAWSEL / _RAWSTR / _RAWDYN; go/abap dbraw.go). In a
- * WHERE: an x of the same length compares as its bytes (another length does
- * not activate), an xstring must hold exactly n bytes at run time
- * (CX_SY_OPEN_SQL_DATA_ERROR), a literal is exactly 2n upper-case hex
- * digits. In a SET: an x or xstring of any length cut or padded with 00, a
- * character value by the move rule (CToX). Bound as the column holds it,
- * upper-case hex of 2n digits.
- */
-function rawValue(v, ct, ir, acc, set) {
-  const n = ct.len ?? 1;
-  const where = set ? "SET" : "WHERE";
-  if (v.e === "chars" || v.e === "str") {
-    if (v.e === "chars" && new RegExp(`^[0-9A-F]{${2 * n}}$`).test(v.value)) return RIR.lit(v.value, ir);
-    throw new Unsupported(`${where}: the literal '${v.value}' against a RAW(${n}) column is not ${2 * n} upper-case hex digits (not measured statically; CX_SY_OPEN_SQL_DATA_ERROR in a dynamic WHERE)`);
-  }
-  if (v.type.k === "x" && (set || (v.type.len ?? 1) === n)) { acc.hosts.push({xhex: n, v}); return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir); }
-  if (v.type.k === "x") throw new Unsupported(`WHERE: an x of ${v.type.len ?? 1} bytes against a RAW(${n}) column (a syntax error on A4H: not compatible)`);
-  if (v.type.k === "xstring") { acc.hosts.push(set ? {xhex: n, v} : {xexact: n, v}); return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir); }
-  if (set && charlike(v.type)) { acc.hosts.push({xhex: n, v: convert(v, ct)}); return RIR.param(`@@host:${acc.hosts.length - 1}@@`, ir); }
-  throw new Unsupported(`${where}: a ${v.type.k} against a RAW(${n}) column is not measured`);
-}
-
-const SQL_OPS = {"=": "=", EQ: "=", "<>": "<>", NE: "<>", "<": "<", LT: "<", ">": ">", GT: ">", "<=": "<=", LE: "<=", ">=": ">=", GE: ">="};
 
 /** one comparison of a WHERE: col op value, or col IN range (a hostPred) */
 function sqlCompare(p, ctx, tb, acc) {
@@ -6010,47 +5093,6 @@ const FUNCTIONS = {
   NMAX: "max", NMIN: "max", IPOW: "power", BOOLX: "boolx",
 };
 
-/*
- * ultra/events: the old CALL METHOD m / obj->m / cls=>m [EXPORTING ...]
- * [IMPORTING ...] [CHANGING ...] [RECEIVING ...] [EXCEPTIONS ...] (ZCL_OSD_NOTE
- * calls the HTML viewer so) as the method call chain the functional form
- * parses into, so call() reads it the same way; undefined for any other shape
- */
-/** @param {import("@abaplint/core").Nodes.StatementNode} node @returns {import("@abaplint/core").Nodes.ExpressionNode | undefined} */ function callMethodChain(node) {
-  const ms = node.findDirectExpression(Expressions.MethodSource);
-  const body = node.findDirectExpression(Expressions.MethodCallBody);
-  if (!ms || ms.findDirectExpression(Expressions.Dynamic)) return undefined;
-  const mk = ms.getChildren();
-  const nameFrom = mk.length === 1 ? mk[0] : mk.length === 3 && isExpr(mk[2], Expressions.AttributeName) ? mk[2] : null;
-  if (!nameFrom || (mk.length === 1 && !isExpr(mk[0], Expressions.SourceField))) return undefined;
-  /** @param {import("./frontend-types.ts").SyntaxNode} n @returns {import("@abaplint/core").Nodes.TokenNode[]} */ const tokens = (n) => (n instanceof Nodes.TokenNode ? [n] : n.getChildren().flatMap(tokens));
-  const name = new Nodes.ExpressionNode(new Expressions.MethodName());
-  name.setChildren(tokens(nameFrom));
-  const kids = [name];
-  if (body) {
-    const mp = body.findDirectExpression(Expressions.MethodParameters);
-    if (!mp || body.getChildren().length !== 1) return undefined;
-    const param = new Nodes.ExpressionNode(new Expressions.MethodCallParam());
-    param.setChildren([mp]);
-    kids.push(param);
-  }
-  const mc = new Nodes.ExpressionNode(new Expressions.MethodCall());
-  mc.setChildren(kids);
-  const chain = new Nodes.ExpressionNode(new Expressions.MethodCallChain());
-  chain.setChildren(mk.length === 1 ? [mc] : [mk[0], mk[1], mc]);
-  return chain;
-}
-
-/** x when it holds an exception value: a local caught INTO, or an attribute
- * (a report's global) a CATCH of runtime exceptions takes INTO */
-/** @param {string} v @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr | undefined} */ function excHolder(v, ctx) {
-  const n = upper(v);
-  if (ctx.locals?.get(n)?.k === "exc") return {e: "var", name: n, type: EXC};
-  if (ctx.locals?.has(n) || ctx.sig?.params.some((x) => x.name === n) || ctx.sig?.returning?.name === n) return undefined;
-  if (!/^[A-Z_][A-Z0-9_]*$/.test(n) || !ctx.program.excAttrs?.has(`${ctx.className}|${n}`)) return undefined;
-  return findAttribute(ctx, n);
-}
-
 /** @param {import("./frontend-types.ts").CallChain} chain @param {import("./frontend-types.ts").MethodContext} ctx @param {boolean} statement @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
   // x->get_text( ) of an exception caught INTO x
@@ -6354,23 +5396,6 @@ const FUNCTIONS = {
     exceptions, receiving, callee: qualified};
 }
 
-// Shared with an ordinary method call whose importing argument is omitted.
-/** @param {import("./frontend-types.ts").FrontendParam} p @param {import("./frontend-types.ts").NamedContext} ctx @returns {import("./ir.ts").Argument} */ function omittedArgument(p, ctx) {
-  return {dir: "importing", byValue: p.byValue, type: p.type,
-    value: p.default !== undefined ? defaultValue(p, ctx) : {e: "zero", type: p.type}};
-}
-
-// Host exceptions use the ordinary call IR, including defaults, references,
-// output temporaries and IS SUPPLIED flags. No constructor shortcut is used.
-/** @param {import("./ir.ts").Program | import("./frontend-types.ts").FrontendProgram} program @param {{name: string}} cls @param {import("./frontend-types.ts").FactoryMethod} method @returns {Extract<import("./frontend-types.ts").ValueExpr, {e: "call"}>} */ export function omittedFactoryCall(program, cls, method) {
-  const ctx = {program, reg: program.reg, className: cls.name};
-  const args = method.params.map((p) => p.suppliedOf
-    ? {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: "", type: p.type}}
-    : p.dir === "importing" ? omittedArgument(p, ctx) : {dir: p.dir, place: null, type: p.type});
-  return {e: "call", owner: cls.name, method: method.name, static: true, args,
-    type: method.returning.type, callee: method.name};
-}
-
 /** @param {import("./frontend-types.ts").FrontendParam & {default: string}} p @param {import("./frontend-types.ts").NamedContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function defaultValue(p, ctx) {
   let t = p.default;
   // A system field in a signature default is read when the call is made.
@@ -6520,7 +5545,7 @@ const FUNCTIONS = {
   return {s: "dataset_set_position", name: source(operands[0].node, S), position: position ? number(position, INT8, "SET DATASET ... POSITION") : null};
 }
 
-/** @param {import("./frontend-types.ts").ValueExpr} expr @param {import("./ir.ts").Type} to @returns {import("./frontend-types.ts").ValueExpr} */ export function convert(expr, to) {
+/** @param {import("./frontend-types.ts").ValueExpr} expr @param {import("./ir.ts").Type} to @returns {import("./frontend-types.ts").ValueExpr} */ function convert(expr, to) {
   // a typed value where a generic one is expected is bound, not copied; a
   // generic one where a type is expected is read through its descriptor
   if (to.k === "data" && expr.type.k === "data") return expr;
@@ -7036,3 +6061,5 @@ const FUNCTIONS = {
   }
   throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}`);
 }
+
+export {variable, refAttribute, constructorSignature, convert, defaultValue, withSupplied, ddicOutputLength, REG, clasDef, fieldChain, isVariableName, BIT_OPS, call, cond, constructor, descrAttr, findAttribute, genericArith, hasArith, hasBitOp, hasPow, items, leafTypes, omittedFactoryCall, template};

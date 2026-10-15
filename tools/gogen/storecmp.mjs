@@ -20,6 +20,10 @@ import {compilerCases, compilerAnswers, compilerGapCases, prepareCompilerFixture
 import {home} from "./home.mjs";
 import {storeConfig} from "./store.mjs";
 import {ADT_SCALARS, adtStoreSignature} from "./storecmp-signature.mjs";
+// frontend.mjs first, as the compiler loads it; the table itself lives in
+// the native-classes module since the frontend split
+import "./frontend.mjs";
+import {DESTINATION_FM} from "./frontend-classes-native.mjs";
 
 const here = import.meta.dirname;
 const arg = (name) => { const i = process.argv.indexOf(name); return i < 0 ? undefined : process.argv[i + 1]; };
@@ -99,11 +103,7 @@ function compare(label, node, go, touched) {
 // CALL FUNCTION 'ZOSD_STORE' sites, not the wider function-module signature
 const ADT_TABLES = adtStoreSignature(tools);
 
-const frontend = readFileSync(join(here, "frontend.mjs"), "utf8");
-const frontendStart = frontend.indexOf('["STORE ZOSD_STORE"');
-const frontendSignature = frontend.slice(frontendStart, frontend.indexOf("}],", frontendStart) + 3);
-const goHostParams = new Map([...frontendSignature.matchAll(/\b([A-Z][A-Z0-9_]+):\s*"(exporting|importing|tables)"/g)]
-  .map((match) => [match[1], match[2]]));
+const goHostParams = new Map(Object.entries(DESTINATION_FM.get("STORE ZOSD_STORE")?.params ?? {}));
 // batch 1 (#672) closed IV_JSON, EV_JSON, EV_STATE and EV_CHANGED: no
 // scalar of the ADT front is an expected gap any more
 const KNOWN_GAPS = new Map();
@@ -113,7 +113,7 @@ const KNOWN_GAPS = new Map();
 for (const field of ["IV_JSON", "EV_JSON", "EV_STATE", "EV_CHANGED"]) {
   if (!goHostParams.has(field)) {
     bad += 1;
-    console.log(`FAIL ${field}: the gogen host signature (frontend.mjs STORE ZOSD_STORE) no longer carries it`);
+    console.log(`FAIL ${field}: the gogen host signature (DESTINATION_FM STORE ZOSD_STORE) no longer carries it`);
   }
 }
 for (const field of KNOWN_GAPS.keys()) {
