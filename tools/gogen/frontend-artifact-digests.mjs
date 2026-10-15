@@ -1,7 +1,7 @@
 // Resolved snapshots, never registry graphs. A lazy table is installed per compile;
 // definitions and types are projected/hash-consed once within that table.
 import {inputSnapshot, core, artifactIdentity, sameArtifactIdentity} from "./frontend-inventory.mjs";
-import {recordedArtifactBuild, auditedBookkeeping} from "./frontend-provenance.mjs";
+import {recordedArtifactBuild, auditedBookkeeping, provenanceAuditActive} from "./frontend-provenance.mjs";
 import {createHash} from "node:crypto";
 import {basename} from "node:path";
 const tables = new WeakMap();
@@ -134,6 +134,9 @@ class Digests {
     const obj = this.objects.get(key);
     if (!obj) return null;
     if (this.values.has(key) && sameArtifactIdentity(this.identities.get(key), artifactIdentity(obj))) return this.values.get(key);
+    // A miss requires recorded construction. Leave audit misses uncached so a
+    // later recorded read can resolve the same identity normally.
+    if (provenanceAuditActive()) return null;
     const start = performance.now();
     let digest;
     try {

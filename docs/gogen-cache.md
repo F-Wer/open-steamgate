@@ -9,6 +9,8 @@ Reverting exactly to an earlier version can reuse that version's entries.
 
 ## Step 4a.2: schema-v3 keys in shadow mode
 
+Audit-build refusal resets per compile while provider gaps remain fail-closed; digest misses under audit stay uncached for a later recorded read.
+
 Disk builds now record internal provenance whenever `cacheDir` is set. This is
 the explicitly accepted provisional recorder cost, not a claim that the prior
 recording-time budget passed. `provenance: false` keeps the global-only path;

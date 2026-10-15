@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import {mkdtempSync, rmSync, readdirSync, readFileSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
-import {core} from "./frontend-inventory.mjs";
+import {core, freshRegistry} from "./frontend-inventory.mjs";
 import {classSource} from "./cache-oracle-corpus.mjs";
-import {recordProvenance, auditedBookkeeping, provenanceOf, semanticQuery} from "./frontend-provenance.mjs";
-import {prepareArtifactDigests, artifactDigestOf} from "./frontend-artifact-digests.mjs";
+import {recordProvenance, auditedBookkeeping, provenanceOf, semanticQuery, beginProvenanceCompile} from "./frontend-provenance.mjs";
+import {prepareArtifactDigests, artifactDigestOf, artifactDigestStats} from "./frontend-artifact-digests.mjs";
 import {dependencyGraph} from "./frontend-provenance-metadata.mjs";
 import {objectCache, compileDiskClass} from "./frontend-object-cache.mjs";
 const intf = (n) => `INTERFACE zif_types PUBLIC. TYPES ty_x TYPE c LENGTH ${n}. ENDINTERFACE.`;
@@ -26,9 +26,11 @@ const lower = ({reg}) => {
   const pool = reg.getObject("TYPE", "ZZ");
   return new core.SyntaxLogic(reg, pool).run().spaghetti.getFirstChild()?.getFirstChild()?.findType("ZZ_T").getType().getLength();
 };
-function seam(cacheDir, files, lowering = lower) {
+function seam(cacheDir, files, lowering = lower, retained) {
   return recordProvenance(() => {
-    const reg = registry(files), p = {reg, supplied: new Map(), wanted: new Set(["ZREADER"]), effects: new Map(),
+    const reg = retained ? freshRegistry(retained) : registry(files);
+    beginProvenanceCompile(reg); prepareArtifactDigests(reg);
+    const p = {reg, supplied: new Map(), wanted: new Set(["ZREADER"]), effects: new Map(),
       frontendCounts: {reused: 0, lowered: 0, reusedClasses: [], loweredClasses: []}};
     const disk = auditedBookkeeping("test-cache-inventory", () => objectCache(reg, cacheDir));
     const session = {disk, classes: new Map()}; disk.begin();
@@ -36,7 +38,7 @@ function seam(cacheDir, files, lowering = lower) {
       const value = lowering(ctx); ctx.program.effects.set("result", value); return {name: "ZREADER", value};
     }, session);
     disk.finish(p);
-    return {ir, row: p.frontendCounts.shadowV3.entries[0], report: p.frontendCounts.shadowV3, manifest: provenanceOf(p)};
+    return {reg, ir, row: p.frontendCounts.shadowV3.entries[0], report: p.frontendCounts.shadowV3, manifest: provenanceOf(p)};
   });
 }
 function scratch(validate, run) {
@@ -87,6 +89,46 @@ test("audit build after parse produces untraced-artifact and writes no v3 candid
 
 const v3Files = (dir) => readdirSync(join(dir, "v3"), {recursive: true}).filter((f) => /\.(json|bin|provenance)$/.test(f))
   .sort().map((f) => [f, readFileSync(join(dir, "v3", f)).toString("hex")]);
+
+test("retained unchanged registry resets compile refusal but retains poisoned provider gaps", () => scratch(false, (dir) => {
+  const firstDir = join(dir, "first");
+  const first = seam(firstDir, corpus(), (ctx) => {
+    auditedBookkeeping("test-audit-lazy-build", () => lower(ctx));
+    return 5; // This lowering does not consume the poisoned provider.
+  });
+  assert.equal(first.report.persistenceRefused, "audit-built-artifact");
+  assert.ok(!readdirSync(firstDir, {recursive: true}).some((f) => f.startsWith("v3/") && f.endsWith("index.json")));
+  // Separate disk roots force normal lowering rather than production replay.
+  const secondDir = join(dir, "second");
+  const second = seam(secondDir, corpus(), () => 5, first.reg);
+  assert.equal(second.reg, first.reg);
+  assert.equal(second.report.persistenceRefused, undefined);
+  assert.equal(second.row.currentComplete, true, JSON.stringify(second.row));
+  assert.ok(v3Files(secondDir).some(([f]) => f.endsWith("index.json")));
+  assert.ok(second.manifest.get("TYPE ZZ").unknownScans.some((q) => q.args.includes("untraced-artifact")));
+  const probe = seam(secondDir, corpus(), () => 5, second.reg);
+  assert.equal(probe.reg, first.reg);
+  assert.equal(probe.row.wouldReuseV3, true);
+  const third = seam(join(dir, "third"), corpus(), lower, second.reg);
+  assert.equal(third.reg, first.reg);
+  assert.equal(third.row.currentComplete, false, "reading the old poisoned identity still fails closed");
+  assert.ok(third.manifest.get("TYPE ZZ").unknownScans.some((q) => q.args.includes("untraced-artifact")));
+}));
+
+test("digest miss under audit is recomputed outside audit in the same compile", () => scratch(true, (dir) => {
+  const result = seam(dir, corpus(), (ctx) => {
+    assert.equal(auditedBookkeeping("test-audit-digest-miss", () => artifactDigestOf(ctx.reg, "TYPE ZZ")), null);
+    assert.deepEqual(artifactDigestStats(ctx.reg).errors, {});
+    assert.match(artifactDigestOf(ctx.reg, "TYPE ZZ"), /^[a-f0-9]{64}$/);
+    return lower(ctx);
+  });
+  assert.equal(result.ir.value, 5);
+  assert.equal(result.row.currentComplete, true);
+  assert.equal(result.report.persistenceRefused, undefined);
+  assert.equal(result.report.disagreements, 0);
+  assert.ok(v3Files(dir).some(([f]) => f.endsWith("index.json")));
+}));
+
 test("a cold validator build poisons the compile and leaves existing v3 files untouched", () => scratch(true, (dir) => {
   const files = corpus();
   seam(dir, files, () => 5);

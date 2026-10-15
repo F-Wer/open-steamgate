@@ -253,6 +253,8 @@ export function withProvenance(compile) {
 export function beginProvenanceCompile(reg) {
   if (!active) return;
   const state = active.state(reg);
+  // Compile-wide refusal expires; provider unknown-scan markers remain in entries.
+  state.auditBuilt = false;
   // Retain provider-building observations, never a previous entry's transcript.
   state.lowerings.clear();
   state.finalOutput = empty();
@@ -416,6 +418,7 @@ export function recordedArtifactBuild(run) {
   try { return run(); } finally { active.stack = stack; }
 }
 export const auditBuiltArtifacts = (reg) => !!registries.get(reg)?.auditBuilt;
+export const provenanceAuditActive = () => !!active?.auditDepth;
 export function compilationProvenanceOf(value) {
   const reg = value?.reg ?? value?.registry ?? value;
   const state = (active ? registries : published).get(reg);
