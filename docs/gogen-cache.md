@@ -90,6 +90,49 @@ fallback handling. This flag is enabled in the serial gogen workflow cache step.
 The normal oracle also requires nonzero validated predictions, preventing a
 vacuous zero-disagreement result.
 
+### Fix round: lazy builds during audit and digest probe order
+
+The second critic reproduced a false v3 prediction with a lazy TYPE pool:
+`ZZ_T` resolves through `ZIF_TYPES=>TY_X`. After priming and two unrelated
+edits, validation built the pool under audit in the production registry. Its
+suppressed reads left no pool-to-interface edge. A subsequent interface length
+change (5 to 7) predicted reuse and raised `SHADOW V3 DISAGREEMENT`. An early
+source-only pool digest also survived the later build, making the saved graph
+depend on probe order. The original global production guard was still active.
+
+This fix chooses **identity snapshots and fail-closed markers**, retaining the
+production registry rather than introducing a second registry and remapping
+program-held definitions/types. The recorder snapshots cached artifact fields
+at each check and advances the trusted snapshot only after recorded work.
+`SyntaxLogic.run`, candidate iteration and provider linking respect `auditDepth`.
+Audit hooks compare identities before/after the call without recording semantic
+rows or edges; a changed identity emits `untraced-artifact` on the provider,
+even inside another object's lowering. Later cached reads also compare against
+the checked snapshot, including objects already checked by `reg.parse()`.
+
+Digest construction now resolves lazy ABAP syntax and DDIC types **under
+recording**, in a provider context independent of the probing consumer. The
+projection then only reads those built artifacts under audit. The shared digest
+table checks cached identities before reusing a digest; the separate first-probe
+memo in the key computer is removed. An unbuilt source-only projection can no
+longer become a saved resolved digest. The regression compares the entire saved
+graph for the same corpus with reversed probe order around a lazy build.
+
+As a conservative guard, a compile in which any audit call builds an artifact
+writes **no v3 graph, payload or index**, including entries unrelated to that
+artifact. Query re-evaluation that builds anything also refuses the prediction.
+The report gives `persistenceRefused: audit-built-artifact`. The validator still
+shares the registry, and this guard remains in place for future 4b work.
+
+`frontend-v3-audit.test.mjs` adds six serial workflow regressions. All six fail
+on the pre-fix `5639eead`; the supplied critic harness independently reproduces
+the C4 disagreement there. After the fix, both validation modes run C1–C4 and
+refuse C4 with exactly `dependency:INTF ZIF_TYPES`, without disagreement.
+Additional controls require the marker after an audit build and prove that cold
+validation and query re-evaluation builds leave all existing v3 files untouched.
+The suite is registered in gogen.yml's “Frontend cache validation and replay”
+step with `--test-concurrency=1`.
+
 The dedicated controls live in `frontend-v3-shadow.test.mjs` and
 `frontend-v3-sensitivity.test.mjs`. The latter uses narrow portable replay seams
 so redundant source/definition/program guards cannot conceal the deliberately
@@ -110,21 +153,22 @@ GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
 GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
   OSD_HEAVY_RANGE=50-59 GOGEN_CACHE_SHADOW_VALIDATE=1 tools/osd-heavy.sh \
   node tools/gogen/cache-oracle.mjs --classes 300 --seed 719 --real \
-  --report .local/step4a2-oracle.json
+  --report .local/step4a2-fix-oracle.json
 GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
   OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh \
   node tools/gogen/frontend-v3-bench.mjs --rounds 3 \
-  --report .local/step4a2-real-predictions.json
+  --report .local/step4a2-fix-real-predictions.json
 ```
 
 ### Step 4a.2 gate results
 
-- The final sequential frontend/cache run passes **261 tests**, zero failures or
-  skips, with shadow validation enabled. Types and suite registration pass.
+- The final sequential frontend/cache run passes **267 tests**, zero failures or
+  skips, with shadow validation enabled, in **346.0 s**. Types and suite
+  registration pass.
 - The full oracle uses **300 controls + fixtures + complete pinned
   open-abap-core/ajson**, both line modes: **66 observations / 64 validated
   mutations**, zero byte mismatches, **38,182 cold-validated shadow predictions
-  and zero shadow disagreements**, in **931.9 s**. The two pool-constant attempts
+  and zero shadow disagreements**, in **995.6 s**. The two pool-constant attempts
   retain their existing documented unsupported/unchanged-refusal classification.
   Each unchanged/revert control actually reuses 579 global entries and lowers
   22; edited observations still use the global production guard.
@@ -155,9 +199,9 @@ in the commands above. Medians:
 
 | Scenario | Would reuse v3 | Would lower/fall back | Actually lowered | Key checking |
 | --- | ---: | ---: | ---: | ---: |
-| Unchanged | 251 | 21 | 21 | 1,412.6 ms |
-| Leaf-class edit | 234 | 38 | 272 | 1,388.1 ms |
-| Widely-used interface edit | 231 | 41 | 272 | 1,392.8 ms |
+| Unchanged | 251 | 21 | 21 | 1,950.8 ms |
+| Leaf-class edit | 234 | 38 | 272 | 1,855.9 ms |
+| Widely-used interface edit | 231 | 41 | 272 | 1,915.1 ms |
 
 The leaf edit inserts a method comment in `CL_ABAP_HMAC`, which has no incoming
 references in compiled source (its Unit tests are excluded). Recorded semantic
@@ -167,20 +211,31 @@ one-entry real-corpus prediction. The interface edit changes
 The 21 unchanged fallbacks have nonportable or unrecordable lowerings; they are
 reported individually in the JSON. All nine warm outputs equal their fresh cold
 outputs, with zero disagreements. The frontend medians including cold shadow
-validation are 3,765.6 / 4,491.3 / 4,437.4 ms; these are shadow-run costs, not a
+validation are 4,788.3 / 5,602.0 / 5,572.0 ms; these are shadow-run costs, not a
 selective-production speedup.
 
 Shared query specifications/answers and their hashes, raw-file hashes and
-current artifact digests are memoized per compile. An exploratory pre-memoization
-run spent about 4.8 s checking unchanged candidates; that exploratory timing is
-not mixed into the final three-process medians. The original recorder-time
+built current artifact digests are memoized per compile with identity checks.
+An earlier pre-fix, pre-memoization run spent about 4.8 s checking unchanged
+candidates; those historical timings are not mixed into these fix-round
+three-process medians. The original recorder-time
 acceptance budget remains unmet; the user explicitly accepted its cacheDir-only
 cost provisionally for this step.
 
-Local evidence: `.local/step4a2-frontend-final.log`,
-`.local/step4a2-oracle.json`, `.local/step4a2-real-predictions.json`,
-`.local/step4a2-typing-final.log`, `.local/step4a2-size.log` and
-`.local/step4a2-leak.log`. Drivers remove corpus copies and cache scratch in
+The critic separately measured a warm key check of approximately **1.43 s**
+against only **0.228 s saved by global warm reuse**, across 272 entries. This is
+recorded as a cost finding, without optimization in this fix. Step 4b must not
+claim a speed improvement until key checking is made cheap and its total cost
+is measured against the saving. The existing recorder-time budget also remains
+unmet.
+
+Local fix-round evidence: `.local/step4a2-fix-before-final.log` (six failures on
+`5639eead`), `.local/step4a2-harness-before.log`,
+`.local/step4a2-harness-after.log` (both validation modes),
+`.local/step4a2-fix-frontend-final.log`, `.local/step4a2-fix-v3.log`,
+`.local/step4a2-fix-oracle.json`, `.local/step4a2-fix-real-predictions.json`,
+`.local/step4a2-fix-typing-final.log`, `.local/step4a2-fix-size.log` and
+`.local/step4a2-fix-leak.log`. Drivers remove corpus copies and cache scratch in
 `finally`; no shared library checkout is edited.
 
 Step 4b (flagged selective production lookup) and Step 4c (default selective
