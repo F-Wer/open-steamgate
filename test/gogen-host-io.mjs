@@ -18,7 +18,7 @@ const exceptions = {
   "node_modules/@abaplint/core/build/src/rules/downport.js": {crypto: ["*"]},
   // Parser module loading still requires callable Node require adapters.
   // This is not a filesystem API with a primitive-valued contract.
-  "tools/gogen/frontend.mjs": {"node:module": ["createRequire"]},
+  "tools/gogen/frontend-base.mjs": {"node:module": ["createRequire"]},
   // Pure deep comparison of IR, with no host I/O. Keep its exact semantics.
   "tools/gogen/emit-table-move.mjs": {"node:util": ["isDeepStrictEqual"]},
   // Not a host-io gap: the object cache (and its provenance/digest files) is an

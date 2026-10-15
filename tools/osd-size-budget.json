@@ -218,9 +218,17 @@
       "lines": 1231,
       "reason": "baseline 2026-10-01 abapiti 042: READ and DELETE TABLE by a hashed secondary key. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor."
     },
+    "tools/gogen/frontend-base.mjs": {
+      "lines": 66,
+      "reason": "Frontend split step 1 B: shared abaplint binding, error class and primitive helpers moved from frontend.mjs."
+    },
+    "tools/gogen/frontend-classes-native.mjs": {
+      "lines": 367,
+      "reason": "Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. Frontend split K4a: move native/kernel tables and helpers byte for byte from frontend.mjs; exact initial ceiling."
+    },
     "tools/gogen/frontend.mjs": {
-      "lines": 7081,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds. abapiti 042: READ and DELETE TABLE by a hashed secondary key. abapiti 043: WHERE compares in int8. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor. Inbox 046: carry PCRE through the existing FIND statement and count IR with the REGEX form restrictions."
+      "lines": 6073,
+      "reason": "Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count. Chain Q1 on T1/K4a: SQL type and value helpers moved byte-identically; exact 6287-line ceiling. Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. Frontend split K4a: native/kernel tables and helpers moved to frontend-classes-native.mjs (6,988 -> 6635). Frontend split (docs/frontend-split-plan.md): step 1 moved the base bindings to frontend-base.mjs (7,046 -> 6,988); the ceiling only shrinks with each move. Before: #34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds. abapiti 042: READ and DELETE TABLE by a hashed secondary key. abapiti 043: WHERE compares in int8. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor. Inbox 046: carry PCRE through the existing FIND statement and count IR with the REGEX form restrictions."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 285,
@@ -597,6 +605,18 @@
     "go:pcregeneric": {
       "lines": 364,
       "reason": "gx3 critic fix: PCRE2 non-UCP generic sets and character-class union/complement normalization before RE2 compilation; isolated from abap binding glue and tested through both public FIND/REPLACE adapters. gx3 round 2: model ordered class tokens and range endpoints, preserving escaped backslash parity, initial brackets and literal caret/hyphen; refuse unmodeled class syntax by name. gx3 round 3: shared named-syntax and class scans for every walker; PCRE2 octal/NUL class escapes. This is the initial budget of the new leaf package in this commit; abap binding glue shrinks."
+    },
+    "tools/gogen/frontend-types-signatures.mjs": {
+      "lines": 226,
+      "reason": "Chain T1 on K4a: types core moved byte-identically; imports target their current homes; exact physical line count. T1: byte-identical typeKindOf, typeOf, rttiNamed, structOf, fieldOf and namedType moved from frontend.mjs; exact initial physical-line ceiling."
+    },
+    "tools/gogen/frontend-sql.mjs": {
+      "lines": 142,
+      "reason": "Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count. Frontend split Q1 on T1/K4a: byte-identical SQL helpers with fieldOf imported from its T1 home; exact physical line count."
+    },
+    "tools/gogen/frontend-expressions-calls.mjs": {
+      "lines": 226,
+      "reason": "Chain E6a on Q1/T1/K4a: source/call helpers moved byte-identically; fieldOf comes from T1, SQL source helpers come from E6a; exact physical line count."
     }
   },
   "readmeMissing": [
