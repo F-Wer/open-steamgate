@@ -1,0 +1,27 @@
+<core:FragmentDefinition xmlns="sap.m" xmlns:core="sap.ui.core">
+  <VBox id="runCockpit" class="sapUiSmallMargin" width="100%">
+    <MessageStrip id="cockpitAnswer" visible="false" showIcon="true" class="sapUiSmallMarginBottom"/>
+    <Table id="cockpitProgress" width="30rem" items="{prog>/rows}">
+      <columns><Column><Text text="{cockpitI18n>what}"/></Column><Column hAlign="End"><Text text="{cockpitI18n>count}"/></Column></columns>
+      <items><ColumnListItem><cells><Text text="{prog>what}"/><Text text="{prog>value}"/></cells></ColumnListItem></items>
+    </Table>
+    <Panel headerText="{cockpitI18n>duration}" expandable="true" expanded="false">
+      <Table id="cockpitDurations" growing="true" growingThreshold="20" items="{dur>/rows}">
+        <columns>
+          <Column><Text text="{cockpitI18n>pile}"/></Column>
+          <Column><Text text="{cockpitI18n>status}"/></Column>
+          <Column hAlign="End"><Text text="{cockpitI18n>attempt}"/></Column>
+          <Column hAlign="End"><Text text="{cockpitI18n>seconds}"/></Column>
+        </columns>
+        <items>
+          <ColumnListItem>
+            <cells>
+              <Text text="{dur>pile}"/><ObjectStatus text="{dur>status}" state="{dur>state}"/>
+              <Text text="{dur>attempt}"/><Text text="{dur>seconds}"/>
+            </cells>
+          </ColumnListItem>
+        </items>
+      </Table>
+    </Panel>
+  </VBox>
+</core:FragmentDefinition>
