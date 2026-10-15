@@ -32,8 +32,9 @@ const exceptions = {
     "node:path": ["join", "resolve"], "node:v8": ["serialize", "deserialize"],
     "node:zlib": ["deflateRawSync", "inflateRawSync"],
   },
-  "tools/gogen/frontend-provenance.mjs": {
-    "node:crypto": ["createHash"], "node:module": ["createRequire"], "node:url": ["pathToFileURL"],
+  "tools/gogen/frontend-provenance.mjs": {"node:module": ["createRequire"]},
+  "tools/gogen/frontend-provenance-recorder.mjs": {
+    "node:module": ["createRequire"], "node:url": ["pathToFileURL"],
   },
   "tools/gogen/frontend-provenance-hooks.mjs": {"node:path": ["relative", "isAbsolute"], "node:url": ["fileURLToPath"]},
   "tools/gogen/frontend-source-key.mjs": {"node:crypto": ["createHash"]},

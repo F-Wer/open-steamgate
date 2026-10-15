@@ -300,3 +300,45 @@ for (const [type, name, method] of [["CLAS", "ZCL_CONTROL_0001", "getDefinition"
   });
   assert.ok(provenanceOf(reg).get("CLAS ZCL_CONTROL_0000").misses.some((q) => q.artifact === `${type} ${name}` && q.args.includes("ZLEAF_MISS")));
 });
+
+test("plain class compilation and inactive hooks never load the recorder", () => {
+  const code = `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import {compileProgram} from './tools/gogen/frontend.mjs';
+    import {classSource} from './tools/gogen/cache-oracle-corpus.mjs';
+    import * as facade from './tools/gogen/frontend-provenance.mjs';
+    const require = createRequire(import.meta.url);
+    const recorder = require.resolve('./tools/gogen/frontend-provenance-recorder.mjs');
+    const core = createRequire(require.resolve('@abaplint/transpiler/package.json'))('@abaplint/core');
+    const reg = new core.Registry();
+    reg.addFile(new core.MemoryFile('zcl_a.clas.abap', classSource('zcl_a')));
+    assert.equal(require.cache[recorder], undefined);
+    const p = compileProgram({registry: reg, folders: [], objects: ['ZCL_A']});
+    assert.equal(p.classes[0].name, 'ZCL_A');
+    const inaccessible = new Proxy({}, {get() { throw new Error('unexpected argument read'); }});
+    const value = {};
+    assert.equal(facade.withArtifact(inaccessible, inaccessible, () => value), value);
+    assert.equal(facade.artifactLowering((ctx, obj, arg) => arg)(inaccessible, inaccessible, value), value);
+    for (const run of [f => facade.withRole('scheduling', f),
+      f => facade.auditedBookkeeping('test', f), f => facade.recordedArtifactBuild(f)]) {
+      assert.equal(run(() => value), value);
+      assert.throws(() => run(() => { throw value; }), e => e === value);
+    }
+    assert.equal(facade.semanticQuery(inaccessible, 'unknown-scan', [], [], inaccessible), undefined);
+    assert.equal(facade.beginProvenanceCompile(inaccessible), undefined);
+    assert.equal(facade.recordingProvenance(), false);
+    assert.equal(facade.provenanceAuditActive(), false);
+    assert.equal(facade.auditBuiltArtifacts(inaccessible), false);
+    const objects = [...reg.getObjects()];
+    assert.deepEqual(facade.enumerateObjects(reg, 'test', [], 'scheduling', (_, i) => i === 0), objects.slice(0, 1));
+    assert.equal(facade.resolvedFunctionModule({program: {functionModules: new Map([['A', value]])}}, 'A'), value);
+    assert.equal(require.cache[recorder], undefined);
+    facade.recordProvenance(() => assert.equal(facade.recordingProvenance(), true));
+    assert.ok(require.cache[recorder]);
+    assert.equal(facade.recordingProvenance(), false);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", code], {
+    cwd: process.cwd(), env: {...process.env, GOGEN_PROVENANCE: "0"}, encoding: "utf8",
+  });
+});

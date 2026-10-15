@@ -4,13 +4,13 @@ import {tmpdir} from "node:os";
 import {join, resolve} from "node:path";
 import {spawnSync} from "node:child_process";
 const root = resolve(import.meta.dirname, "../..");
-const recorder = "tools/gogen/frontend-provenance.mjs", hooks = "tools/gogen/frontend-provenance-hooks.mjs";
+const facade = "tools/gogen/frontend-provenance.mjs", recorder = "tools/gogen/frontend-provenance-recorder.mjs", hooks = "tools/gogen/frontend-provenance-hooks.mjs";
 const mutants = [];
 const add = (name, file, from, to, equivalent) => mutants.push({name, file, from, to, equivalent});
 add("rec-query-edge", recorder, 'if (role === "artifact" && owner && !row.scan)', 'if (false)');
 add("rec-link-edge", recorder, 'if (from && from !== key)', 'if (false)');
 add("query-and-link-edges", recorder, 'if (role === "artifact" && owner && !row.scan)', 'if (false)');
-add("sel-artifact", recorder, 'if (active && obj) active.artifact', 'if (false) active.artifact');
+add("sel-artifact", recorder, 'return active && obj ? active.artifact', 'return false ? active.artifact');
 add("methods-all-artifact-read", hooks, 'for (const method of methods)', 'for (const method of [])');
 add("owner-from-owners-map", hooks, 'owners.get(this) ??', 'undefined ??');
 add("fg-include-query", hooks, 'if (method === "getInclude" || method === "getModule")', 'if (false)');
@@ -47,7 +47,7 @@ for (const name of ["retained-registry-edit", "retained-registry-config-edit", "
 add("stack-fallback", hooks, 'const direct = site[0] ?? "";', 'const direct = site[0];');
 add("portable-sites", hooks, '.map(portableSite)', '.map((s) => s.trim())');
 add("unknown-scan", hooks, 'kind: kind ?? "unknown-scan"', 'kind: kind ?? "classified"');
-add("default-opt-in", recorder, '(process.env.GOGEN_PROVENANCE === "1")', '!!options.cacheDir');
+add("default-opt-in", facade, '(process.env.GOGEN_PROVENANCE === "1")', '!!options.cacheDir');
 add("fm-lowering-query", recorder, 'if (active) {\n    const state = active.state(ctx.reg);', 'if (false) {\n    const state = active.state(ctx.reg);');
 add("own-row-storage", recorder, 'rows: entries.flatMap((e) => [...e.queries.values()])', 'rows: []');
 const scratch = mkdtempSync(join(tmpdir(), "provenance-mutations-"));
@@ -55,7 +55,7 @@ try {
   cpSync(join(root, "tools"), join(scratch, "tools"), {recursive: true});
   for (const file of ["package.json", "package-lock.json", "libs.lock.json"]) cpSync(join(root, file), join(scratch, file));
   symlinkSync(join(root, "node_modules"), join(scratch, "node_modules"), "dir");
-  const originals = new Map([recorder, hooks].map((file) => [file, readFileSync(join(scratch, file), "utf8")]));
+  const originals = new Map([facade, recorder, hooks].map((file) => [file, readFileSync(join(scratch, file), "utf8")]));
   const run = () => spawnSync(process.execPath, ["--test", "--test-concurrency=1",
     "tools/gogen/frontend-provenance.test.mjs", "tools/gogen/frontend-provenance-regression.test.mjs", "tools/gogen/frontend-queries.test.mjs"],
   {cwd: scratch, encoding: "utf8", timeout: 60000, maxBuffer: 8 * 1024 * 1024});
