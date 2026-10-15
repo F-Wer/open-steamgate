@@ -66,6 +66,7 @@
   "groups": {
     "gogen": [
       "test/gogen-typing-proof.mjs",
+      "test/gogen-host-io.mjs",
       "test/gogen-fold-scalars.mjs",
       "test/osgo-unit.mjs",
       "test/osgo-exc-previous.mjs",
