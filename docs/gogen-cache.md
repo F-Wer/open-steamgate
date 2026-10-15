@@ -11,9 +11,11 @@ Reverting exactly to an earlier version can reuse that version's entries.
 
 The version hashes the cache schema, effective abaplint config, actual tool
 contents, lockfiles, installed transpiler/core builds, and the registry's ordered
-object inventory and source hashes. Tool identity includes `tools/gogen` sources
-and the top-level tools' `.mjs`/`.ts` files. It excludes Git HEAD and Git tree
-hashes: a docs-only commit preserves identity; changing tool contents changes it.
+object inventory and source hashes. Tool identity hashes every
+`tools/**/*.{mjs,ts,cjs,json}` file, including nested directories a future
+frontend import might use. A fresh-process measurement took 65 ms on this
+workstation; the result is memoized within the process. It excludes Git HEAD
+and Git tree hashes: a docs-only commit preserves identity; changing tool contents changes it.
 Lockfile changes still invalidate globally in this step.
 
 Each object's hash includes its filenames and raw contents **in registry input
@@ -39,22 +41,46 @@ disconnected classes and a seeded DAG. Additional fixtures cover inheritance,
 interfaces/aliases, exception hierarchies and CATCH, events, constants/defaults,
 explicit and implicit type-pool consumers, class/INCLUDE macros, TABL/DTEL/DOMA
 typing and SELECT, and a function module whose name differs from its FUGR.
-Some supported syntax is still a gogen refusal (including pool constants and
-macro-call markers); those refusals are part of the comparison.
+Macro-call markers are retained refusals alongside their lowered expansion.
+Pool constants cannot currently lower: `variable()` in `frontend.mjs` resolves
+locals, parameters and class attributes, but not pool constants. Both explicit
+and implicit constant consumers are present; their unchanged refusal makes
+`pool-constant` unsupported, excluded from the validated mutation count.
 
 For every scenario the harness copies the corpus to scratch, primes the cache in
 a fresh child, edits the copy, compiles warm in another fresh child, and compiles
 without cache in a third. Each child has a fresh registry. It compares UTF-8 bytes
 of Go, JS (or its emitter refusal), broken/skipped/partial/diagnostics/missing, and
 final RTTI/table/lock/exception/CDS/AMC/interface metadata. It repeats with
-`GOGEN_NOLINE` unset and set. A no-edit control proves disk reuse. Reorder cases
+`GOGEN_NOLINE` unset and set. A no-edit control asserts that **every feature
+fixture** reuses, except
+`ZCL_FUNCTION` (CALL FUNCTION reads a `functionModules` descriptor containing
+circular registry/syntax graphs, so recording cannot fingerprint that input) and `ZORACLE_GROUP` (function-group IR is rebuilt
+outside the class cache). The unchanged real corpus may have additional
+uncacheable library classes; these are reported in counts, not claimed as
+feature coverage. Reorder cases
 use the supplied-registry API to change only the order of files within an object.
 
 All mutation kinds run individually, followed by a body/pool/INCLUDE multi-edit
 sequence and a return to the original corpus. Reports contain the seed, full edit
 descriptors, selected real classes and pins, first differing artifact and byte
 offset, and `loweredClasses`/`reusedClasses` counts. Each result is saved as it
-finishes. The CLI exits 1 on a mismatch and throws on capture/infrastructure errors.
+finishes. `mutationAttempts` includes unsupported attempts; `mutationsRun`
+excludes `pool-constant`. Every row compares its cold artifacts with the previous
+cold capture (a separate cache-disabled baseline for the first step), and throws
+on a dead mutation unless it is in the explicit expected-no-change list below.
+Signature/remove/rename additionally require the stable `ZCL_CONTROL_READER`
+reverse dependent's cold lowering to change; add-object requires the same for
+`ZCL_ABSENT_READER`. The control target is always `ZCL_CONTROL_0001`, with a
+reverse dependent at every allowed corpus size. The superclass parents declare
+`shared` as `i` versus `int8`, read by the grandchild; defaults have a caller
+that omits the argument.
+
+The missing-provider fixture starts with `ZCL_ADDED` absent, then adds it. The
+oracle supplies a registry whose error namespace excludes only that name,
+modeling an external provider: abaplint leaves it unresolved so gogen records a
+lookup miss and a cached refusal instead of excluding the consumer at syntax
+checking. Every other name remains syntax-checked. The CLI exits 1 on a mismatch and throws on capture/infrastructure errors.
 Scratch copies and caches are removed in `finally`; reports remain at the chosen
 destination.
 
@@ -77,6 +103,14 @@ GOGEN_CACHE_ORACLE_FAULT=no-version \
 
 # CI-sized run: 8 controls, every mutation, both line modes, fault assertion.
 node --test tools/gogen/cache-oracle.test.mjs
+
+# Slower local matrix: a dedicated narrowed fault for each kind, both line modes.
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh \
+  node tools/gogen/cache-oracle.mjs --sensitivity --classes 4 --seed 719 \
+  --report .local/cache-oracle-sensitivity.json
+# Equivalent assertion suite; kept out of the fast CI step.
+node --test tools/gogen/cache-oracle-sensitivity.test.mjs
 ```
 
 `--real` copies both complete pinned `open-abap-core/src` and `ajson/src` trees
@@ -89,11 +123,100 @@ correctness. `typing-proof.mjs` was unavailable on the Step 1 base; the capture
 module uses the same fresh-process, byte-comparison pattern described in its
 review, without importing an absent file.
 
-`GOGEN_CACHE_ORACLE_FAULT=no-version` is **test-only** and is read solely in the
-cache implementation. It removes registry sources from the version digest while
-retaining ordinary object keys and replay checks. The implicit pool type mutation
-then produces stale reuse and a Go mismatch; the harness's test requires this in
-both line modes. Never enable the fault for normal builds.
+The cache alone reads `GOGEN_CACHE_ORACLE_FAULT`. Its exact accepted values are
+**test-only**:
+
+- `no-version`: omit registry sources from the version digest.
+- `drop:<regex>`: do the same, and remove object keys matching that JavaScript
+  regular expression from word-graph dependency edges and recorded `getObject`
+  reads, including misses. Keys use uppercase `TYPE NAME`; the regex has no
+  flags. The owner's own source hash and replay checks remain intact.
+- `sorted-files`: retain the global guard but restore the old sorted-by-filename
+  object hash, hiding within-object file-order edits.
+
+Unknown values or invalid regular expressions throw. No other environment
+variable enables these faults. Normal builds must leave this variable unset.
+The CI negative control still requires the implicit pool mutation to mismatch
+under `no-version` in both line modes.
+
+### Cold observability exceptions
+
+The explicit expected-no-change list is `pool-constant` (unsupported operand,
+unchanged refusal), plus `comment-only` and `whitespace` **only with
+GOGEN_NOLINE enabled** (only emitted source lines change). With lines enabled,
+those text edits must change cold output. All other kinds, including FUGR,
+revert and real-corpus edits, must change a cold artifact. Cold observability
+alone does not establish stale-reuse sensitivity.
+
+### Sensitivity matrix (seed 719, four controls, both line modes)
+
+Every generated kind runs under its dedicated fault, even the uncovered ones.
+A covered row must produce at least one warm/cold **MISMATCH** for that kind;
+a zero-mismatch row without a documented reason fails the matrix. The CLI and
+local test enforce this rule. Each report saves the fault, both observations,
+cold changes, reuse lists, first differing artifact and runtime. The full matrix
+is a slower local mode; ordinary CI runs the normal oracle and the focused
+`no-version` negative control under the three-minute oracle budget.
+
+| Kind | Fault | MISMATCH | Coverage / reason if not covered |
+| --- | --- | --- | --- |
+| comment-only | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: only owner's lines change; call consumers do not inline provider text. Owner hash stays guarded. |
+| whitespace | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: same source-line-only behavior. |
+| method-body | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: calls do not inline bodies; owner's source hash forces lowering. |
+| signature | `drop:^CLAS ZCL_CONTROL_0001$` | yes | Covered; dependent cold lowering changes. |
+| class-constant | `drop:^CLAS ZCL_DEFAULTS$` | yes | Covered; external constant consumer reuses stale value. |
+| parameter-default | `drop:^CLAS ZCL_DEFAULTS$` | yes | Covered; caller omits argument. |
+| superclass | `drop:^CLAS ZCL_(PARENT\|CHILD)` | yes | Covered; grandchild reads inherited storage with a different type. |
+| exception-superclass | `drop:^CLAS ZCX_` | no | Not covered: replay observes rebuilt hierarchy/program state and rejects stale entry. |
+| interface | `drop:^INTF` | yes | Covered. |
+| alias | `drop:^CLAS ZCL_INTERFACE$` | no | Not covered: used alias disappears, making edited class syntax-broken before replay. |
+| event | `drop:^CLAS ZCL_EVENTS$` | no | Not covered: declaration and consumers share an owner, whose hash invalidates. |
+| add-object | `drop:^CLAS ZCL_ADDED$` | yes | Covered: dropped recorded miss leaves cached absent-provider refusal. |
+| remove-object | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: dependent becomes syntax-broken before replay; dependent cold output does change. |
+| rename | `drop:^CLAS ZCL_CONTROL_0001$` | no | Not covered: same syntax exclusion as removal. |
+| ddic-field | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
+| ddic-type | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
+| ddic-key | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
+| ddic-data-element | `drop:^(TABL\|DTEL\|DOMA)` | yes | Covered. |
+| class-macro | `drop:^CLAS ZCL_LOCAL_MACRO$` | no | Not covered: reader owns macro, so owner hash invalidates. |
+| include-macro | `drop:^PROG` | yes | Covered: provider lives in another object. |
+| pool-type | `drop:^TYPE` | yes | Covered: explicit and implicit consumers lower. |
+| pool-constant | `drop:^TYPE` | no | Not covered / unsupported: neither explicit nor implicit constant operand lowers. |
+| fugr-signature | `drop:^FUGR` | no | Not covered: caller never caches because its functionModules input contains circular registry/syntax graphs that cannot be fingerprinted; group lowering is outside class replay. |
+| same-object-local-definition | `no-version` | no | Not covered: reader owns definition, so its object hash invalidates even without global guard. |
+| file-order | `sorted-files` | yes | Covered; first-wins macro expansion changes. |
+
+The former `same-position-definition` case is now truthfully titled
+`same-object-local-definition`, including its regression test. It changes local
+constant contents at identical filename/name/start coordinates, and verifies
+invalidation both with the global guard and under `no-version`. This establishes
+owner-source invalidation only. A cross-object borrowed local-definition
+fixture has not been established: frontend local definitions are qualified as
+`OWNER:LOCAL` and ABAP local names resolve in their owning class pool. Global
+named definitions get ordinary source-word/getObject dependencies. The
+location-only fingerprint gap therefore remains **not covered**, rather than
+being presented as a global-guard regression.
+
+### Fix-round measurements
+
+Local Node runs, seed 719, both line modes. The full oracle and matrix shared
+machine capacity; timings include fresh process startup and disk identity work.
+
+| Run | Attempts / validated | Result | Runtime |
+| --- | --- | --- | --- |
+| CI: eight controls, multi-edit/revert, all kinds | 58 / 56 | Zero mismatches; edits reuse zero classes; unchanged/revert reuse 33 classes per line mode. | 122 s |
+| Full: 300 controls + pinned open-abap-core/ajson | 62 / 60 | Zero mismatches; edits reuse zero; unchanged/revert reuse 575 classes and lower 22 per line mode. | 635 s |
+| CLI sensitivity: four controls, all 25 kinds | 50 / 48 | 13 covered kinds, 26 mismatches; 12 explicitly not covered. | 201 s |
+| Focused no-version negative control | Two pool-type observations | Two mismatches, including cached implicit consumer. | 5.8 s |
+
+The final combined check passed all 47 tests in 164 s, including the separate
+local matrix suite (164 s). The size budget, leak scan and suite registration
+checks also passed.
+
+The full run lowered 35,854 classes across mutation observations and reused
+1,150 (the two reverts). Unsupported pool-constant attempts are the difference
+between attempted and validated counts. The complete kind/fault/results matrix
+and reasons are above; JSON reports remain local under `.local/`.
 
 ## Why the global guard remains
 
@@ -108,7 +231,7 @@ material and is not distributed in a clean checkout.
 | FUGR scans | Function-module names differ from group names; ownership resolution scans groups without `getObject`. |
 | CDS aliases | SQL-view aliases are resolved by scanning DDLS providers. |
 | BAdI definitions | ENHS/BAdI lookup is a type-wide scan and can affect syntax acceptance before gogen refuses a statement. |
-| Definition fingerprints | Replay fingerprints include name/file/start position, not semantic contents. A same-position edit needs the global version today. |
+| Definition fingerprints | Replay fingerprints include name/file/start position, not semantic contents. Borrowed definitions need a semantic guard; cross-object oracle coverage is not established. |
 
 Cached DDIC types/scopes can also hide earlier reads, and global OO resolution
 passes make stopping/order behavior a semantic input. Passing mutation tests
@@ -117,7 +240,7 @@ does not prove that an incomplete dependency manifest is safe.
 ## Six-step plan
 
 1. **Regressions and oracle, with global invalidation.** This change: implicit
-   pools, same-position definitions, file order, compiler identity, every mutation
+   pools, same-object local definitions, file order, compiler identity, every mutation
    category, and the existing cache/replay/portability gates. Retained-registry
    parser invalidation is outside this step; all edited captures rebuild registries.
 2. **Semantic provenance and resolution queries before parsing.** Attribute

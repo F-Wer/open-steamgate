@@ -12,9 +12,12 @@ const abaplint = createRequire(require.resolve("@abaplint/transpiler/package.jso
 export const jsonArtifact = (value) => JSON.stringify(value, (_, v) =>
   v instanceof Map ? {map: [...v]} : v instanceof Set ? {set: [...v]} : v);
 
-export function orderedRegistry(folders, order) {
+export function orderedRegistry(folders, order = []) {
   const config = abaplint.Config.getDefault().get();
-  config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
+  // Model a missing external provider: abaplint leaves its type unresolved,
+  // so gogen can record the failed lookup instead of skipping a syntax-broken
+  // consumer before the cache is reached. Every other name is checked.
+  config.syntax = {...config.syntax, version: "v758", errorNamespace: "^(?!ZCL_ADDED$)."};
   config.rules = {check_syntax: true, parser_error: true};
   const registry = new abaplint.Registry(new abaplint.Config(JSON.stringify(config))), files = [];
   const walk = (dir) => {
@@ -44,7 +47,7 @@ export function orderedRegistry(folders, order) {
 export function captureArtifacts({folders, objects, cacheDir, order}) {
   const program = compileProgram({folders, objects, cacheDir, tolerant: true,
     includeTests: new Set(["ZCL_CONTROL_0000"]),
-    registry: order ? orderedRegistry(folders, order) : undefined});
+    registry: orderedRegistry(folders, order)});
   const artifacts = {emitGo: emitGo(program)};
   try { artifacts.emitJs = emitJs(program); }
   catch (error) { artifacts.jsRefusal = `${error.name}: ${error.message}`; }
@@ -53,7 +56,8 @@ export function captureArtifacts({folders, objects, cacheDir, order}) {
   // Final passes live outside class replay; compare their results as well.
   for (const key of ["rtti", "tables", "lockObjects", "exceptionSupers", "cdsViews", "amcChannels", "interfaceMethods"])
     artifacts[key] = jsonArtifact(program[key]);
-  return {artifacts, counts: program.frontendCounts};
+  return {artifacts, counts: program.frontendCounts,
+    classArtifacts: Object.fromEntries(program.classes.map((cls) => [cls.name, jsonArtifact(cls)]))};
 }
 
 export function compareArtifacts(warm, cold) {

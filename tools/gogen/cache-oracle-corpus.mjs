@@ -28,8 +28,11 @@ export function syntheticCorpus({classes = 300, seed = 719} = {}) {
   const name = (i) => `zcl_control_${String(i).padStart(4, "0")}`;
   for (let i = 0; i < classes; i++) addClass(name(i), classSource(name(i),
     i >= classes / 2 ? `rv = ${name(random() % i)}=>run( ) + ${random() % 10}.` : `rv = ${random() % 100}.`));
+  // A stable reverse dependent exists even at the minimum corpus size.
+  addClass("zcl_control_reader", classSource("zcl_control_reader", "rv = zcl_control_0001=>run( )."));
   addClass("zcl_pool_implicit", classSource("zcl_pool_implicit", "rv = 7.", "zorc_value"));
-  addClass("zcl_pool_explicit", classSource("zcl_pool_explicit", "rv = zorc_default.", "zorc_value", "TYPE-POOLS zorc."));
+  addClass("zcl_pool_explicit", classSource("zcl_pool_explicit", "rv = 7.", "zorc_value", "TYPE-POOLS zorc."));
+  addClass("zcl_pool_constant_explicit", classSource("zcl_pool_constant_explicit", "rv = zorc_default.", "i", "TYPE-POOLS zorc."));
   addClass("zcl_pool_constant_implicit", classSource("zcl_pool_constant_implicit", "rv = zorc_default."));
   files["zorc.type.abap"] = "TYPE-POOL zorc.\nTYPES zorc_value TYPE i.\nCONSTANTS zorc_default TYPE i VALUE 7.\n";
   addClass("zcl_local_macro", classSource("zcl_local_macro", "oracle_local."));
@@ -42,8 +45,10 @@ export function syntheticCorpus({classes = 300, seed = 719} = {}) {
   files["zcl_order_macro.clas.macros.abap"] = "DEFINE oracle_order. rv = 2. END-OF-DEFINITION.\n";
   addClass("zcl_defaults", classSource("zcl_defaults", "rv = value.", "i", "CONSTANTS value TYPE i VALUE 7.")
     .replace("run RETURNING", "run IMPORTING iv TYPE i DEFAULT 7 RETURNING"));
+  addClass("zcl_default_reader", classSource("zcl_default_reader", "rv = zcl_defaults=>run( )."));
+  addClass("zcl_constant_reader", classSource("zcl_constant_reader", "rv = zcl_defaults=>value."));
   for (const [n, sup] of [["zcl_parent", null], ["zcl_parent_other", null], ["zcl_child", "zcl_parent"], ["zcl_grandchild", "zcl_child"]]) {
-    addClass(n, sup ? `CLASS ${n} DEFINITION PUBLIC INHERITING FROM ${sup}.\nENDCLASS.\nCLASS ${n} IMPLEMENTATION.\nENDCLASS.\n` : classSource(n));
+    addClass(n, sup ? `CLASS ${n} DEFINITION PUBLIC INHERITING FROM ${sup}.\n${n === "zcl_grandchild" ? "PUBLIC SECTION. CLASS-METHODS read RETURNING VALUE(rv) TYPE i." : ""}\nENDCLASS.\nCLASS ${n} IMPLEMENTATION.\n${n === "zcl_grandchild" ? "METHOD read. rv = shared. ENDMETHOD." : ""}\nENDCLASS.\n` : classSource(n, "rv = 7.", "i", `CLASS-DATA shared TYPE ${n === "zcl_parent" ? "i" : "int8"}.`));
   }
   files["zif_oracle.intf.abap"] = "INTERFACE zif_oracle PUBLIC. METHODS value RETURNING VALUE(rv) TYPE i. ENDINTERFACE.\n";
   addClass("zcl_interface", `CLASS zcl_interface DEFINITION PUBLIC.
@@ -86,8 +91,9 @@ ENDCLASS.
   files["zoracle_group.fugr.zoracle_function.abap"] = "FUNCTION zoracle_function. ev_value = iv_value. ENDFUNCTION.\n";
   objects.push("ZORACLE_GROUP");
   addClass("zcl_function", classSource("zcl_function", "CALL FUNCTION 'ZORACLE_FUNCTION' EXPORTING iv_value = 7 IMPORTING ev_value = rv."));
-  // Local test classes expose the location-only definition fingerprint. A
-  // fresh registry plus the global version is required after editing them.
+  addClass("zcl_absent_reader", classSource("zcl_absent_reader", "rv = zcl_added=>run( )."));
+  // This is a same-object source-hash regression, not evidence that a
+  // cross-object location-only definition fingerprint is guarded.
   files["zcl_control_0000.clas.testclasses.abap"] = `CLASS lcl_same DEFINITION. PUBLIC SECTION. CONSTANTS value TYPE i VALUE 1.
 CLASS-METHODS run RETURNING VALUE(rv) TYPE i. ENDCLASS.
 CLASS lcl_same IMPLEMENTATION. METHOD run. rv = value. ENDMETHOD. ENDCLASS.
@@ -117,7 +123,8 @@ CLASS lcl_same IMPLEMENTATION. METHOD run. rv = value. ENDMETHOD. ENDCLASS.
   edit("pool-type", "zorc.type.abap", "TYPES zorc_value TYPE i", "TYPES zorc_value TYPE int8");
   edit("pool-constant", "zorc.type.abap", "VALUE 7", "VALUE 9");
   edit("fugr-signature", "zoracle_group.fugr.xml", "<TYP>I</TYP>", "<TYP>INT8</TYP>");
-  edit("same-position-definition", "zcl_control_0000.clas.testclasses.abap", "VALUE 1", "VALUE 9");
+  edit("same-object-local-definition", "zcl_control_0000.clas.testclasses.abap", "VALUE 1", "VALUE 9");
   mutations.push({kind: "file-order", order: ["zcl_order_macro.clas.macros.abap", "zcl_order_macro.clas.locals_def.abap"]});
-  return {files, objects, mutations, seed, classes};
+  return {files, objects, mutations, seed, classes,
+    featureClasses: [...objects.filter((o) => !o.startsWith("ZCL_CONTROL_") || o === "ZCL_CONTROL_READER"), "ZCL_CONTROL_0000:LCL_SAME"]};
 }

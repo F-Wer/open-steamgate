@@ -7,6 +7,7 @@ import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 import {home} from "./home.mjs";
 import {compareArtifacts, runOracle, syntheticCorpus} from "./cache-oracle.mjs";
+import {sensitivityFault, notCovered, uncacheableFeatures} from "./cache-oracle-coverage.mjs";
 
 test("artifact comparison reports the first byte offset, including UTF-8 and missing artifacts", () => {
   assert.deepEqual(compareArtifacts({artifacts: {go: "éx"}}, {artifacts: {go: "éy"}}),
@@ -21,6 +22,9 @@ test("seeded corpus and serialized edits reproduce exactly", () => {
   assert.deepEqual(a, syntheticCorpus({classes: 8, seed: 719}));
   assert.notDeepEqual(a.files, syntheticCorpus({classes: 8, seed: 720}).files);
   assert.deepEqual(JSON.parse(JSON.stringify(a.mutations)), a.mutations);
+  const kinds = new Set(a.mutations.map((m) => m.kind));
+  for (const kind of kinds) assert.ok(sensitivityFault(kind), `${kind} needs a dedicated fault`);
+  for (const kind of Object.keys(notCovered)) assert.ok(kinds.has(kind), `${kind} is a stale coverage exception`);
 });
 
 test("CI oracle: every mutation, multi-edit and revert; lines enabled and disabled", {timeout: 180_000}, () => {
@@ -33,7 +37,12 @@ test("CI oracle: every mutation, multi-edit and revert; lines enabled and disabl
     else assert.ok(row.reused > 0, "a return to the original source version reuses its entries");
     assert.ok(row.lowered + row.reused > 8, "fixtures and controls must actually be compiled");
   }
-  for (const row of result.summaries) assert.ok(row.reused >= 8, "unchanged disk entries must reuse");
+  for (const row of result.summaries) {
+    assert.ok(row.reused >= 8, "unchanged disk entries must reuse");
+    assert.deepEqual(row.featureCoverage.filter((f) => !f.reused).map((f) => f.name).sort(), Object.keys(uncacheableFeatures).sort());
+  }
+  console.log(JSON.stringify({mode: "CI", mutationAttempts: result.mutationAttempts,
+    mutationsRun: result.mutationsRun, mismatches: result.mismatches, runtimeMs: result.runtimeMs}));
 });
 
 test("test-only no-version fault produces a real warm/cold pool mismatch", {timeout: 30_000}, () => {
@@ -79,5 +88,11 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
     const tool = join(dir, "tools/gogen/frontend-source-key.mjs");
     writeFileSync(tool, readFileSync(tool, "utf8") + "\n// tool identity test edit\n");
     assert.notEqual(identity(), before, "working-tree tool contents must enter compiler identity");
+    const nested = join(dir, "tools", "future-frontend-dependency"); mkdirSync(nested);
+    for (const extension of ["mjs", "ts", "cjs", "json"]) {
+      const previous = identity();
+      writeFileSync(join(nested, `module.${extension}`), extension === "json" ? "{}\n" : "// future module\n");
+      assert.notEqual(identity(), previous, `nested tools/**/*.${extension} must enter compiler identity`);
+    }
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });

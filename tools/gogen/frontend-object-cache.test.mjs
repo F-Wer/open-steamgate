@@ -39,7 +39,7 @@ test("implicit pool types invalidate: prefix resolution precedes lowering-time r
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
-test("changed same-position local definitions cannot replay across the global version", () => {
+test("same-object local definition contents invalidate the owner source hash", () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-definition-regression-"));
   try {
     const corpus = syntheticCorpus({classes: 4}), input = join(dir, "input"), cacheDir = join(dir, "cache");
@@ -51,12 +51,19 @@ test("changed same-position local definitions cannot replay across the global ve
     assert.ok(unchanged.counts.reusedClasses.includes("ZCL_CONTROL_0000:LCL_SAME"));
     const file = join(input, "zcl_control_0000.clas.testclasses.abap");
     // Same filename, definition name, start row and column. Replay fingerprints
-    // alone accept this definition; the source version is the semantic guard.
+    // alone accept this definition; its owner's source hash is a guard too.
     writeFileSync(file, readFileSync(file, "utf8").replace("VALUE 1", "VALUE 9"));
     const warm = captureInChild({...args, cacheDir}, dir), cold = captureInChild(args, dir);
     assert.equal(warm.artifacts.emitGo, cold.artifacts.emitGo);
     assert.notEqual(warm.artifacts.emitGo, before.artifacts.emitGo);
     assert.deepEqual(warm.counts.reusedClasses, []);
+    const fault = {env: {...process.env, GOGEN_CACHE_ORACLE_FAULT: "no-version"}};
+    const faultCache = join(dir, "fault-cache");
+    captureInChild({...args, cacheDir: faultCache}, dir, fault);
+    writeFileSync(file, readFileSync(file, "utf8").replace("VALUE 9", "VALUE 1"));
+    const faultWarm = captureInChild({...args, cacheDir: faultCache}, dir, fault);
+    assert.equal(faultWarm.artifacts.emitGo, before.artifacts.emitGo,
+      "this same-object case is protected even without the global version");
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 

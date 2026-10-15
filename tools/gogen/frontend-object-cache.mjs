@@ -15,13 +15,12 @@ const digest = (value) => createHash("sha256").update(value).digest("hex");
 const walk = (dir) => readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
 let identity;
-function toolIdentity() {
+export function toolIdentity() {
   if (identity) return identity;
   const hash = createHash("sha256").update("gogen-object-cache-2");
   // Actual tool sources, locks and installed builds define the compiler.
   // Repository commits (including docs-only ones) do not change its identity.
-  for (const file of [...walk(here), ...readdirSync(join(home, "tools")).filter((f) => /\.(mjs|ts)$/.test(f)).map((f) => join(home, "tools", f))]
-    .filter((f) => /\.(mjs|ts)$/.test(f)).sort()) {
+  for (const file of walk(join(home, "tools")).filter((f) => /\.(mjs|ts|cjs|json)$/.test(f))) {
     hash.update(file.slice(home.length)); hash.update(readFileSync(file));
   }
   for (const name of ["package-lock.json", "libs.lock.json"]) if (existsSync(join(home, name))) hash.update(readFileSync(join(home, name)));
@@ -135,12 +134,18 @@ function pruneVersions(root, current) {
 
 export function objectCache(registry, root) {
   if (!root) return;
+  // Test-only. No other environment variable may enable weakened cache keys.
+  const fault = process.env.GOGEN_CACHE_ORACLE_FAULT;
+  const drop = fault?.startsWith("drop:") ? new RegExp(fault.slice(5)) : undefined;
+  if (fault && !["no-version", "sorted-files"].includes(fault) && !drop)
+    throw new Error(`unknown GOGEN_CACHE_ORACLE_FAULT: ${fault}`);
   const objects = new Map(), byName = new Map();
   for (const obj of registry.getObjects()) {
     const key = `${obj.getType()} ${obj.getName().toUpperCase()}`;
     // Macro collection keeps the first definition in registry input order.
     // Sorting these files would hide an order edit even from the global guard.
     const sources = obj.getFiles().map((f) => [f.getFilename(), f.getRaw()]);
+    if (fault === "sorted-files") sources.sort(([a], [b]) => a.localeCompare(b));
     const words = new Set(sources.flatMap(([, raw]) => raw.toUpperCase().match(/(?:\/[A-Z0-9_]+\/)?[A-Z_][A-Z0-9_]*/g) ?? []));
     objects.set(key, {hash: digest(JSON.stringify(sources)), words});
     if (!byName.has(obj.getName().toUpperCase())) byName.set(obj.getName().toUpperCase(), []);
@@ -156,8 +161,8 @@ export function objectCache(registry, root) {
   // dependencies missing from source words / lowering-time getObject reads.
   // Never enable this outside cache-oracle tests.
   const version = digest(JSON.stringify([toolIdentity(), registry.getConfig().get(),
-    process.env.GOGEN_CACHE_ORACLE_FAULT === "no-version" ? [] : semanticInputs]));
-  const sourceKey = sourceKeys(objects, byName, version);
+    fault === "no-version" || drop ? [] : semanticInputs]));
+  const sourceKey = sourceKeys(objects, byName, version, drop);
   // Opening marks the version used, and so does a hit every few minutes, so
   // a long warm run that writes nothing is not taken for an abandoned one.
   let touched = Date.now();
@@ -186,7 +191,8 @@ export function objectCache(registry, root) {
       const reads = new Set(), original = registry.getObject;
       registry.getObject = function(type, name) {
         const value = original.call(this, type, name);
-        if (type && name) reads.add(`${type.toUpperCase()} ${name.toUpperCase()}`);
+        const key = type && name && `${type.toUpperCase()} ${name.toUpperCase()}`;
+        if (key && !drop?.test(key)) reads.add(key);
         return value;
       };
       try { return {value: lower(), reads: [...reads]}; }
