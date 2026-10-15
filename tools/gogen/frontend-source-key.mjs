@@ -3,9 +3,9 @@
 import {createHash} from "node:crypto";
 const digest = (value) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
-export function sourceKeys(objects, byName, version) {
+export function sourceKeys(objects, byName, version, drop) {
   const edges = new Map([...objects].map(([key, obj]) => [key,
-    new Set([...obj.words].flatMap((word) => byName.get(word) ?? []))]));
+    new Set([...obj.words].flatMap((word) => byName.get(word) ?? []).filter((dep) => !drop?.test(dep)))]));
   const index = new Map(), low = new Map(), stack = [], active = new Set(), component = new Map(), groups = [];
   function visit(key) {
     index.set(key, index.size); low.set(key, index.get(key));
