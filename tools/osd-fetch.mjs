@@ -29,8 +29,12 @@ import {runsAs} from "./osd-main.mjs";
 import {pull, treeDigest} from "./osd-oci.mjs";
 import {archiveFiles} from "./osd-source-zip.mjs";
 export {MARKER, markerOf};
-import {fetchSystem} from "./osd-system-fetch.mjs";
-export {fetchSystem};
+// loaded on demand: a system install pulls in the layer zip encoder, which
+// costs ~0.3 s to import, and every build imports this module for unfetched()
+// (the warm compiler worker's startup deadline is 500 ms in its tests)
+export async function fetchSystem(...args) {
+  return (await import("./osd-system-fetch.mjs")).fetchSystem(...args);
+}
 
 
 function git(args, cwd) {
