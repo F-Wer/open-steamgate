@@ -48,7 +48,7 @@ import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sql
 import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
   omittedArgument, omittedFactoryCall} from "./frontend-expressions-calls.mjs";
 
-const byteStatementHelpers = {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS, findResults};
+const byteStatementHelpers = {source, lvalue, convert, findResults};
 /** @type {WeakMap<import("@abaplint/core").IRegistry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
 const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
 
@@ -988,9 +988,9 @@ function compiledFunctionCall(node, ctx, text, name) {
     const nm = upper(m.getName());
     if (nm.includes("~")) {
       const [intf, meth] = nm.split("~");
-      const idef = reg.getObject("INTF", intf)?.getDefinition();
-      const all = idef?.getMethodDefinitions();
-      const found = all && Array.from(Array.isArray(all) ? all : all.getAll()).find((x) => upper(x.getName()) === meth);
+      /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = reg.getObject("INTF", intf)?.getDefinition();
+      const all = idef && methodDefinitions(idef);
+      const found = all && all.find((x) => upper(x.getName()) === meth);
       if (!found) throw new Unsupported(`${className}: the interface method of REDEFINITION ${nm} is not in the program`);
       return found;
     }
@@ -1026,14 +1026,14 @@ function compiledFunctionCall(node, ctx, text, name) {
     .flatMap((i) => [upper(i.name), ...componentInterfaces(reg, upper(i.name))])));
   append(attributes, implementedAttributes(program, implemented.filter((i) => !inherited.has(i))));
   for (const intf of implemented.map((name) => ({name}))) {
-    const idef = reg.getObject("INTF", intf.name)?.getDefinition();
+    /** @type {import("@abaplint/core").IInterfaceDefinition | undefined} */ const idef = reg.getObject("INTF", intf.name)?.getDefinition();
     if (idef === undefined) throw new Unsupported(`${className}: interface ${intf.name} not in the program`);
-    const all = idef.getMethodDefinitions();
+    const all = methodDefinitions(idef);
     // typed as the interface's, as methodSignature types them for a caller
-    const owner = program.currentClass;
+    /** @type {string | undefined} */ const owner = program.currentClass;
     program.currentClass = goName(intf.name);
     try {
-      for (const m of Array.from(Array.isArray(all) ? all : all.getAll())) addSig(m, `${upper(intf.name)}~`, m.isStatic?.() ?? false);
+      for (const m of all) addSig(m, `${upper(intf.name)}~`, m.isStatic?.() ?? false);
     } finally {
       program.currentClass = owner;
     }
@@ -2070,7 +2070,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const cc = node.findDirectExpression(Expressions.ComponentCompareSimple);
     if (!cc) throw new Unsupported(`READ TABLE key form: ${text}`);
     const kids = cc.getChildren();
-    const keys = [];
+    /** @type {{name?: string; line?: true; value: import("./frontend-types.ts").ValueExpr}[]} */ const keys = [];
     for (let i = 0; i + 2 < kids.length + 1; i += 3) {
       const comp = kids[i];
       if (!comp || !isTok(kids[i + 1], "=")) throw new Unsupported(`READ TABLE key form: ${cc.concatTokens()}`);
@@ -2501,7 +2501,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   // CALL METHOD (class)=>m EXPORTING ...: a static method by class name,
   // through the program's registry of static methods
   if (isStmt(node, Statements.Call) && node.findDirectExpression(Expressions.MethodSource)?.findDirectExpression(Expressions.Dynamic)) {
-    return dynamicStaticCall(node, ctx, {Expressions, isTok, isExpr, sourceOperand, source, convert, S, Unsupported});
+    return dynamicStaticCall(node, ctx, {sourceOperand, source, convert});
   }
   if (isStmt(node, Statements.CallFunction)) return callFunction(node, ctx, text);
   if (isStmt(node, Statements.Call)) {
@@ -3635,7 +3635,7 @@ function localInterfaceConstant(id, attr, local, reg) {
   }
   throw new Unsupported(`${c.kw} constructor expression`);
 }
-
+/** @param {import("@abaplint/core").IInterfaceDefinition | import("@abaplint/core").IClassDefinition} def @returns {readonly import("./frontend-types.ts").MethodDefinition[]} */ function methodDefinitions(def) { const all = def.getMethodDefinitions(); /** @type {Iterable<import("./frontend-types.ts").MethodDefinition>} */ const methods = Array.isArray(all) ? all : all.getAll(); return Array.from(methods); }
 /**
  * The signature of a method of any class or interface of the registry, by
  * owner and name ("M", or "I~M" for an interface method). Cached; an
@@ -3649,9 +3649,9 @@ function localInterfaceConstant(id, attr, local, reg) {
   try {
     const [intf, meth] = name.includes("~") ? name.split("~") : [null, name];
     const defOwner = intf ?? owner;
-    const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? clasDef(ctx.reg, defOwner);
+    /** @type {import("@abaplint/core").IInterfaceDefinition | import("@abaplint/core").IClassDefinition | undefined} */ const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? clasDef(ctx.reg, defOwner);
     if (def === undefined) throw new Unsupported(`${defOwner} is not in the program`);
-    /** @type {import("./frontend-types.ts").MethodDefinition | undefined} */ const m = intf ? Array.from((() => { const all = def.getMethodDefinitions(); return Array.isArray(all) ? all : all.getAll(); })()).find((x) => upper(x.getName()) === meth)
+    /** @type {import("./frontend-types.ts").MethodDefinition | undefined} */ const m = intf ? methodDefinitions(def).find((x) => upper(x.getName()) === meth)
       : declaredMethod(ctx.reg, defOwner, meth);
     if (m === undefined) throw new Unsupported(`${defOwner} has no method ${meth}`);
     const p = m.getParameters();
@@ -5187,7 +5187,7 @@ const FUNCTIONS = {
   // generator, whose sequence would be the contract, is refused
   if (owner === "CL_ABAP_RANDOM" && name === "CREATE" && (direct || named || full)) throw new Unsupported(`CL_ABAP_RANDOM=>CREATE with a SEED: the host generator ignores it`);
 
-  if (receiver === null && owner === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, Expressions, source, convert, Unsupported, upper, I, F, P31, S, XS, numeric}, name === "IPOW" && ["i", "int8", "p", "f"].includes(hint?.k) ? hint : undefined);
+  if (receiver === null && owner === null && FUNCTIONS[name] !== undefined && !ctx.signatures.has(name)) return builtin(name, direct, named, ctx, {FUNCTIONS, source, convert}, name === "IPOW" && ["i", "int8", "p", "f"].includes(hint?.k) ? hint : undefined);
   if (receiver === null && name === "LINES" && !ctx.signatures.has(name)) {
     const t = source(direct, ctx);
     if (t.type.k === "data") return {e: "lines_data", x: t, type: I};

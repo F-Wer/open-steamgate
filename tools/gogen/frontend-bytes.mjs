@@ -1,5 +1,6 @@
+import {Nodes, Expressions, upper, isExpr, charlike, Unsupported, I, S, XS} from "./frontend-base.mjs";
 export function replaceStatement(node, ctx, text, h) {
-  const {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS} = h;
+  const {source, lvalue, convert} = h;
   const kids = node.getChildren();
   const words = kids.map((k) => (k instanceof Nodes.TokenNode ? upper(k.concatTokens()) : ""));
   const tw = words.filter((w) => w !== "" && w !== ".").join(" ");
@@ -52,7 +53,7 @@ export function replaceStatement(node, ctx, text, h) {
 
 // ABAPiti f1-f5: LENGTH bounds the section; MATCH OFFSET counts from xs.
 export function lowerByteFind(node, ctx, text, kids, words, tw, h) {
-  const {Expressions, isExpr, source, lvalue, convert, Unsupported, I, XS} = h;
+  const {source, lvalue, convert} = h;
   // A4H oracle P2 ALL C3: non-overlapping byte results, with optional count.
   if (keywordForm(tw, "FIND ALL OCCURRENCES OF IN IN BYTE MODE", ["", "MATCH COUNT"], ["", "RESULTS"])
     && !node.findDirectExpression(Expressions.FindType)) {
@@ -68,7 +69,7 @@ export function lowerByteFind(node, ctx, text, kids, words, tw, h) {
     return {s: "find_bytes_all", pattern: convert(p, XS), subject: convert(s, XS), count};
   }
   if (!keywordForm(tw, "FIND", ["", "FIRST OCCURRENCE OF"], "IN", ["", "SECTION OF", "SECTION OFFSET OF", "SECTION LENGTH OF", "SECTION OFFSET LENGTH OF"], "IN BYTE MODE", ["", "MATCH OFFSET"], ["", "MATCH LENGTH"])
-    || ["REGEX", "PCRE"].includes(h.upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? ""))) return null;
+    || ["REGEX", "PCRE"].includes(upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? ""))) return null;
   const srcs = node.findDirectExpressions(Expressions.Source);
   const pat = source(srcs[0], ctx), subject = source(srcs.at(-1), ctx);
   for (const x of [pat, subject]) if (x.type.k !== "x" && x.type.k !== "xstring") throw new Unsupported(`FIND IN BYTE MODE of a ${x.type.k}`);

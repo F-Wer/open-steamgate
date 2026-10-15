@@ -3,7 +3,6 @@ import type * as abaplint from "@abaplint/core";
 type LiteralQuote = "'" | "`";
 export interface LiteralValue { readonly quote: LiteralQuote; readonly value: string; readonly refusal?: never }
 export interface LiteralRefusal { readonly refusal: ""; readonly quote?: never; readonly value?: never }
-export interface LiteralExpressions { readonly ConcatenatedConstant: typeof abaplint.Expressions.ConcatenatedConstant }
 
 // A text literal's kind and value: 'chars' or `string`, one literal or several
 // joined by the literal operator & at compile time (`a` & `b`). The joined
@@ -12,8 +11,8 @@ export interface LiteralExpressions { readonly ConcatenatedConstant: typeof abap
 // kept: A4H 2026-10-14, 'ab ' & 'c' is strlen 4, "ab c". A refusal is
 // returned, not thrown.
 const LITERAL = /'(?:[^']|'')*'|`(?:[^`]|``)*`/y;
-export function textLiteral(n: abaplint.Nodes.ExpressionNode, Expressions: LiteralExpressions): LiteralValue | LiteralRefusal {
-  const joined = n.findDirectExpression(Expressions.ConcatenatedConstant);
+export function textLiteral(n: abaplint.Nodes.ExpressionNode, ConcatenatedConstant: typeof abaplint.Expressions.ConcatenatedConstant): LiteralValue | LiteralRefusal {
+  const joined = n.findDirectExpression(ConcatenatedConstant);
   const parts = joined ? joined.getChildren().map((c): string => c.getFirstToken().getStr()).filter((t): boolean => t !== "&") : [n.concatTokens()];
   const quote = parts[0]?.[0];
   if ((quote !== "'" && quote !== "`") || (joined && parts.some((t): boolean => t.length < 2 || t[0] !== quote || t.at(-1) !== quote))) return {refusal: ""};
