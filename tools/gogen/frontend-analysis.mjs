@@ -10,13 +10,13 @@ const abaplint = transpilerRequire("@abaplint/core");
 const {Expressions, ExpressionsCDS, Nodes} = abaplint;
 
 const trees = new WeakMap();
-const inlineTables = new WeakMap();
+/** @type {WeakMap<import("@abaplint/core").Nodes.StructureNode, Set<string>>} */ const inlineTables = new WeakMap();
 export function rearrangedClass(node, Rearranger) {
   if (!trees.has(node)) trees.set(node, new Rearranger().run("CLAS", node));
   return trees.get(node);
 }
 
-export function inlineTableLocals(body) {
+/** @param {import("@abaplint/core").Nodes.StructureNode | undefined} body @returns {Set<string>} */ export function inlineTableLocals(body) {
   if (!body) return new Set();
   if (!inlineTables.has(body)) {
     const names = new Set();

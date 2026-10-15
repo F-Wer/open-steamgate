@@ -63,7 +63,7 @@ export const DIALECTS = {
     divide: (a, b) => `(${a} / ${b})`,
     // and when the source asked for integer division, it says so
     intDiv: (a, b) => `DIV(${a}, ${b})`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     castInt: (e) => `CAST(${e} AS INTEGER)`,
@@ -108,7 +108,7 @@ export const DIALECTS = {
     },
     divide: (a, b) => `(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC))`,
     intDiv: (a, b) => `CAST(TRUNC(CAST(${a} AS NUMERIC) / CAST(${b} AS NUMERIC)) AS INTEGER)`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s} FROM ${from}${len === undefined ? "" : ` FOR ${len}`})`,
     // PostgreSQL rounds some numeric-to-integer casts. SQLScript truncates
@@ -148,7 +148,7 @@ export const DIALECTS = {
     guardZero: (divided, divisor) => `CASE WHEN (${divisor}) = 0 THEN error('division by zero') ELSE ${divided} END`,
     // `//` is the integer one, for when the source asked for it
     intDiv: (a, b) => `(${a} // ${b})`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `COALESCE(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTRING(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     // It raises like HANA on a value that will not convert -- and ROUNDS
@@ -210,7 +210,7 @@ export const DIALECTS = {
     // here where HANA raises, it is written down, and the conformance table
     // keeps measuring it.
     intDiv: (a, b) => `(${a} / ${b})`,
-    concat: (args) => args.join(" || "),
+    /** @param {readonly string[]} args */ concat: (args) => args.join(" || "),
     ifnull: (a, b) => `IFNULL(${a}, ${b})`,
     substr: (s, from, len) => `SUBSTR(${s}, ${from}${len === undefined ? "" : `, ${len}`})`,
     // SQLite's CAST never raises: 'x' becomes 0, which is a DIFFERENT
@@ -307,7 +307,7 @@ export class Refused extends Error {}
 // v DESC gives 2,1,N). PostgreSQL and DuckDB put NULL last ascending by
 // default, so the placement is written out on every engine rather than
 // left to each one's default
-const orderKey = (d, k) => `${d.quote(k.col)} ${k.desc ? "DESC NULLS LAST" : "ASC NULLS FIRST"}`;
+/** @param {(typeof DIALECTS)[keyof typeof DIALECTS]} d @param {import("./sqlscript-types.ts").SqlOrder} k */ const orderKey = (d, k) => `${d.quote(k.col)} ${k.desc ? "DESC NULLS LAST" : "ASC NULLS FIRST"}`;
 
 export function lower(rel, dialectName, options = {}) {
   const d = DIALECTS[dialectName];

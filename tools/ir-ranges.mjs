@@ -64,7 +64,7 @@ export function errorCode(error) {
 const upper = (v) => String(v ?? "").toUpperCase();
 const TRUE = () => bin("=", lit(1, T.int), lit(1, T.int), T.bool);
 const FALSE = () => bin("=", lit(1, T.int), lit(0, T.int), T.bool);
-const or = (parts) => parts.reduce((a, b) => bin("OR", a, b, T.bool));
+/** @param {readonly import("./sqlscript-types.ts").SqlExpr[]} parts */ const or = (parts) => parts.reduce((a, b) => bin("OR", a, b, T.bool));
 const and = (a, b) => bin("AND", a, b, T.bool);
 
 /** a LOW / HIGH value as the column's type binds it */

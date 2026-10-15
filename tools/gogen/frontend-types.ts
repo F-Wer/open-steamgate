@@ -99,3 +99,8 @@ export interface FactoryMethod { name: string; params: readonly FrontendParam[];
 export type ConstantIdentifier = Pick<abaplint.TypedIdentifier, "getType" | "getValue">;
 
 export type ConstantInitializer = ValueExpr | {readonly e: "float"; readonly value: number; readonly type: Type};
+
+export type LocalConstantHelpers = Pick<typeof import("./frontend-base.mjs"),
+  "Nodes" | "Structures" | "Statements" | "Expressions" | "isTok" | "isExpr" | "isStruct" | "isStmt" | "upper" | "goName" | "Unsupported"> & {
+  initialValue(node: abaplint.Nodes.StatementNode, ctx: MethodContext): Extract<FrontendStmt, {s: "assign"}>;
+};

@@ -428,7 +428,7 @@ export function whereColumns(t) {
 
 /** the hidden SUP_<p> parameters of a method, after its own */
 /** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {readonly import("./frontend-types.ts").FrontendParam[]} params @returns {readonly import("./frontend-types.ts").FrontendParam[]} */ function withSupplied(program, key, params) {
-  const set = suppliedAnswer(program, key);
+  /** @type {Set<string> | undefined} */ const set = suppliedAnswer(program, key);
   if (!set) return params;
   /** @type {import("./ir.ts").Param[]} */ const hidden = params.filter((p) => set.has(p.name)).map((p) => ({name: `SUP_${p.name}`, dir: "importing", byValue: true, type: C(1), optional: true, suppliedOf: p.name}));
   return [...params, ...hidden];
@@ -1484,7 +1484,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const branches = [];
     let others = null;
     for (const w of node.findDirectStructures(Structures.When)) {
-      const st = w.findDirectStatement(Statements.When) ?? w.findDirectStatement(Statements.WhenOthers);
+      /** @type {import("@abaplint/core").Nodes.StatementNode | undefined} */ const st = w.findDirectStatement(Statements.When) ?? w.findDirectStatement(Statements.WhenOthers);
       if (st.get() instanceof Statements.WhenOthers) { others = bodyOf(w, ctx); continue; }
       // WHEN a OR b OR c: the alternatives after the first sit in Or nodes
       // (only the first was read until 2026-09-23, silently)
@@ -2853,7 +2853,7 @@ const STRING_FNS = {
   return lowerFindResults(node, ctx, text, tw, bytes, resultNode, {Expressions, upper, source, charlike, Unsupported, lvalue, fieldOf, convert, XS, S});
 }
 
-/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function initialValue(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {Extract<import("./frontend-types.ts").FrontendStmt, {s: "assign"}>} */ function initialValue(node, ctx) {
   const name = upper(node.findFirstExpression(Expressions.DefinitionName).concatTokens());
   const type = ctx.locals.get(name);
   if (type === undefined) throw new Unsupported(`${name}: a VALUE for something that is not a local`);
