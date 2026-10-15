@@ -1,3 +1,4 @@
+import {children} from "./ir-children.ts";
 // Ownership is per declaration, never a change to an ABAP type or ABI.
 // Unknown/reference use positions conservatively retain string storage.
 export function sourceOwnershipSafety(reg) {
@@ -19,7 +20,6 @@ export function sourceOwnershipSafety(reg) {
   return out;
 }
 
-const children = (n) => Object.entries(n).filter(([k]) => !["type", "pos"].includes(k)).map(([, v]) => v);
 const places = new Set(["var", "attr", "static", "field", "fs", "row", "row_key", "refattr", "dref_field"]);
 const sourceOwner = (cls) => cls.name.startsWith("FUGR:") ? cls.name.slice(5) : cls.name.split(":")[0];
 const localKey = (cls, m) => `${cls.name}|${m.name ?? "CONSTRUCTOR"}`;

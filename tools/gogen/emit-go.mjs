@@ -7,7 +7,7 @@ import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {sinkLocals, generatedBindings} from "./sink-locals.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
-import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.mjs";
+import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.ts";
 import {emitBuiltinGo} from "./emit-builtins.mjs";
 import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.mjs";
 import {objectRttiGo, exceptionClass, nativeMessageText} from "./emit-exception.mjs";

@@ -1,6 +1,9 @@
-import {packedChecksum} from "./emit-packedint.mjs";
+import type {Expr, Stmt, ConcatBytesParts, ConcatBytesTable} from './ir.ts';
+import type {OwnershipContext, OwnedExpressionRenderers, OwnedRenderers, ByteRenderers} from './emit-ownership.ts';
+import {someExpression} from './ir-children.ts';
+import {packedChecksum} from "./emit-packedint.ts";
 // Owned xstring emission leaves types, signatures and generic descriptors alone.
-export function ownedExpression(e, ctx, h) {
+export function ownedExpression(e: Expr, ctx: OwnershipContext, h: OwnedExpressionRenderers): string | null {
   const {ownership, expr, place} = h;
   const checksum = packedChecksum(e, ctx, h);
   if (checksum !== null) return checksum;
@@ -11,14 +14,10 @@ export function ownedExpression(e, ctx, h) {
   return null;
 }
 
-const purePart = (n) => {
-  if (!n || typeof n !== "object") return true;
-  if (Array.isArray(n)) return n.every(purePart);
-  if (n.e && !["var", "attr", "static", "const", "xbytes", "substr", "conv", "int", "zero", "temp"].includes(n.e)) return false;
-  return Object.entries(n).every(([k, v]) => k === "type" || purePart(v));
-};
+const purePart = (n: Expr): boolean => !someExpression(n, (child) =>
+  !["var", "attr", "static", "const", "xbytes", "substr", "conv", "int", "zero", "temp"].includes(child.e));
 
-export function ownedStatement(st, ctx, t, h) {
+export function ownedStatement(st: Stmt, ctx: OwnershipContext, t: string, h: OwnedRenderers): string[] | null {
   const {ownership, expr, place} = h;
   if (st.s === "assign" && ownership.has(st.target, ctx) && st.target.type.k === "x") {
     const dst = `${place(st.target, ctx)}[:]`, v = st.value;
@@ -29,8 +28,9 @@ export function ownedStatement(st, ctx, t, h) {
     return [`${t}${h.helper("xsmall.Set")}(${dst}, ${expr(v, ctx)})`];
   }
   if (st.s === "clear" && ownership.has(st.target, ctx) && st.target.type.k === "x") return [`${t}clear(${place(st.target, ctx)}[:])`];
-  if (!ownership.has(st.target, ctx)) return null;
-  const target = place(st.target, ctx);
+  const slot = "target" in st ? st.target : undefined;
+  if (!ownership.has(slot, ctx)) return null;
+  const target = place(slot, ctx);
   if (st.s === "assign") return [`${t}${target}.Set(${expr(st.value, ctx)})`];
   if (st.s === "clear") return [`${t}${target}.Clear()`];
   if (st.s === "replace_bytes" && ownership.width(st.with, ctx) === 1 && st.len?.e === "int" && st.len.value === 1) return [`${t}s.Sy.Subrc = ${target}.StoreByte(${ownership.fixed(st.with, ctx) ? `${place(st.with, ctx)}[0]` : `${h.helper("xsmall.First")}(${expr(st.with, ctx)})`}, ${st.off ? expr(st.off, ctx) : "0"})`];
@@ -46,13 +46,13 @@ export function ownedStatement(st, ctx, t, h) {
   return null;
 }
 
-function byteConcatValue(st, ctx, expr, rowValue) {
+function byteConcatValue(st: ConcatBytesParts | ConcatBytesTable, ctx: OwnershipContext, expr: ByteRenderers['expr'], rowValue: ByteRenderers['rowValue']): string {
   if (st.table) return `func() string { var b []string; for _, ConcatRowStored := range ${expr(st.table, ctx)} { ConcatRow := ${rowValue(st.table.type, "ConcatRowStored")}; b = append(b, ${expr(st.row, ctx)}) }; return strings.Join(b, "") }()`;
   return st.parts.map((x) => expr(x, ctx)).join(" + ");
 }
 
 // The ordinary byte concatenation path is unchanged, including fixed-x fitting.
-export function emitByteConcat(st, ctx, t, {expr, place, rowValue}) {
+export function emitByteConcat(st: ConcatBytesParts | ConcatBytesTable, ctx: OwnershipContext, t: string, {expr, place, rowValue}: ByteRenderers): string[] {
   if (st.table) {
     return [`${t}${place(st.target, ctx)} = func() string { var b []string; for _, ConcatRowStored := range ${expr(st.table, ctx)} { ConcatRow := ${rowValue(st.table.type, "ConcatRowStored")}; b = append(b, ${expr(st.row, ctx)}) }; return strings.Join(b, "") }()`, `${t}s.Sy.Subrc = 0`];
   }
