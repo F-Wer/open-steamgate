@@ -22,6 +22,8 @@
     "tools/gogen/emit-bytes.ts",
     "tools/gogen/emit-int8.ts",
     "tools/gogen/emit-exception.ts",
+    "tools/gogen/emit-table-move.ts",
+    "tools/gogen/emit-go-types.ts",
     "tools/gogen/host-io.ts",
     "tools/gogen/fold-scalars.ts",
     "tools/gogen/append.ts",

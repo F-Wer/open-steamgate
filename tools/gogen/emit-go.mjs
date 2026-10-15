@@ -4,7 +4,7 @@ import {typeName, funcName} from "./go-symbols.ts";
 export {typeName, funcName} from "./go-symbols.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
 import {constructorFactories} from "./emit-constructors.ts";
-import {analyzeTableMoves} from "./emit-table-move.mjs";
+import {analyzeTableMoves} from "./emit-table-move.ts";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {sinkLocals, generatedBindings} from "./sink-locals.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";

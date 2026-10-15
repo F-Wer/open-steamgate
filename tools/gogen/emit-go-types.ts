@@ -20,9 +20,15 @@ export type CallExpr = RuntimeFields<Omit<RawCall, 'owner' | 'static' | 'callee'
   readonly static?: boolean;
   readonly callee?: string;
 };
-export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int'}>> | CallExpr
+// Ownership probes also synthesize substrings without the renderer's base hint.
+export interface SubstringExpr extends Omit<RuntimeFields<Extract<IR.Expr, {e: 'substr'}>>, 'base'> {
+  readonly base?: IR.Type;
+}
+export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int' | 'substr'}>> | CallExpr | SubstringExpr
   | {readonly e: 'int' | 'float'; readonly value: number; readonly type?: IR.Type};
-type StatementFields<T> = T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
+export interface LockField extends Pick<IR.TableColumn, 'name' | 'kind'> { readonly length: number }
+type StatementFields<T> = T extends {s: 'call_enq'} ? Omit<T, 'fields'> & {readonly fields?: readonly LockField[]}
+  : T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
   : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}
   : T extends {s: 'stub' | 'kernel_loop'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
   : T extends {s: 'call_dyn_static'} ? Omit<T, 'cls'> & {readonly cls: string | Expr}
@@ -126,7 +132,8 @@ export interface AmcChannel {
   readonly type: string;
   readonly authorities?: readonly {readonly path?: string; readonly program?: string; readonly activity?: string}[];
 }
-export interface FunctionModule extends Omit<IR.FunctionModule, 'sig'> {
+export interface FunctionModule extends Omit<IR.FunctionModule, 'sig' | 'module'> {
+  readonly module: Exclude<IR.FunctionModule['module'], IR.Method> | Method;
   readonly sig: Method | UnsupportedMethod;
 }
 export interface Program extends Omit<IR.Program, 'functionModules' | 'classes' | 'consts' | 'tables' | 'exceptionSupers' | 'reg' | 'structs' | 'interfaceAttrs' | 'intfOwnAttrs' | 'interfaceMethods' | 'sigs'> {
@@ -177,7 +184,7 @@ export interface TryFrame { level: number; mode: 'body' | 'catch'; used: Set<num
 export interface SinkSite { locals: readonly Local[]; depth: number }
 export type SunkLocals = Map<readonly Stmt[], readonly Local[]>;
 export interface Context {
-  readonly cls: Partial<Class>;
+  readonly cls: Partial<Omit<Class, 'constructor'>>;
   loop?: number;
   inCtor?: boolean;
   method?: Partial<Method>;
