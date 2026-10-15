@@ -342,3 +342,39 @@ test("plain class compilation and inactive hooks never load the recorder", () =>
     cwd: process.cwd(), env: {...process.env, GOGEN_PROVENANCE: "0"}, encoding: "utf8",
   });
 });
+
+test("selection uses parsed calls and static identifiers, preserving per-file query order", () => {
+  const c = syntheticCorpus({classes: 4});
+  c.files["zcl_select.clas.abap"] = classSource("zcl_select", `
+    rv = zcl_static=>value.
+    CALL FUNCTION 'zoracle_function'.
+    CALL FUNCTION 'ZNO_SUCH_FUNCTION'.
+    CALL FUNCTION dynamic_name.
+    rv = zcl_static => value.
+    " CALL FUNCTION 'ZCOMMENT'. zcl_comment=>value
+* CALL FUNCTION 'ZFULL_COMMENT'. zcl_comment=>value
+    DATA text TYPE string.
+    text = 'CALL FUNCTION ''ZLITERAL''. zcl_literal=>value'.
+    text = \`CALL FUNCTION 'ZBACKTICK'. zcl_literal=>value\`.
+    text = |CALL FUNCTION 'ZTEMPLATE'. zcl_literal=>value|.
+    text = |{ zcl_static=>value }|.
+  `);
+  for (const name of ["zcl_static", "zcl_comment", "zcl_literal"])
+    c.files[`${name}.clas.abap`] = classSource(name, "rv = 7.", "i", "CLASS-DATA value TYPE i.");
+  const reg = registry(c.files);
+  recordProvenance(() => {
+    reg.parse();
+    const wanted = ["zcl_select"];
+    expandProgramSelection(reg, wanted, core);
+    assert.deepEqual(wanted, ["zcl_select", "zoracle_group", "zcl_static"]);
+    const own = storedProvenance(reg, reg.getObject("CLAS", "ZCL_SELECT"));
+    const relevant = own.rows.filter(q => q.kind === "function-module-owner"
+      || q.kind === "getObject" && ["ZCL_STATIC", "ZCL_COMMENT", "ZCL_LITERAL"].includes(q.args[1]));
+    assert.deepEqual(relevant.map(q => [q.kind, q.args]), [
+      ["function-module-owner", ["ZORACLE_FUNCTION"]],
+      ["function-module-owner", ["ZNO_SUCH_FUNCTION"]],
+      ["getObject", ["CLAS", "ZCL_STATIC"]],
+    ]);
+    assert.ok(relevant.every(q => q.phase === "selection"));
+  });
+});

@@ -195,4 +195,7 @@ export interface ProvenanceGraph {
 export interface SelectionCore {
   Objects: {FunctionGroup: typeof Core.Objects.FunctionGroup};
   Visibility: {Public: Core.Visibility};
+  Statements: {CallFunction: typeof Core.Statements.CallFunction};
+  Expressions: {FunctionName: typeof Core.Expressions.FunctionName};
+  Tokens: {StringToken: typeof Core.Tokens.StringToken; Identifier: typeof Core.Tokens.Identifier};
 }

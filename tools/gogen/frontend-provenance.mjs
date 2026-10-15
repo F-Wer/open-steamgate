@@ -71,20 +71,38 @@ function loadRecorder() {
     const obj = withRole("scheduling", () => reg.getObject("CLAS", wanted[i]) ?? reg.getObject("FUGR", wanted[i]));
     const run = () => {
       for (const file of obj?.getABAPFiles() ?? []) {
-        for (const match of file.getRaw().matchAll(/\bCALL\s+FUNCTION\s+'([^']+)'/gi)) {
-          const group = fmGroups.get(upper(match[1]));
-          semanticQuery(reg, "function-module-owner", [upper(match[1])],
+        const statements = file.getStatements();
+        // Preserve the per-file order: all FM ownership queries precede static
+        // attribute lookups, even when those accesses occur earlier in the file.
+        for (const statement of statements) {
+          if (!(statement.get() instanceof abaplint.Statements.CallFunction)) continue;
+          if (statement.getTokens()[1]?.getStr().toUpperCase() !== "FUNCTION") continue;
+          const name = statement.findDirectExpression(abaplint.Expressions.FunctionName)?.getFirstToken();
+          if (!(name instanceof abaplint.Tokens.StringToken)) continue;
+          const literal = name.getStr();
+          if (!literal.startsWith("'") || !literal.endsWith("'") || literal.length <= 2) continue;
+          const functionName = upper(literal.slice(1, -1));
+          const group = fmGroups.get(functionName);
+          semanticQuery(reg, "function-module-owner", [functionName],
             group ? [`FUGR ${upper(group)}`] : [], {policy: "gogen-last-wins"});
           if (group && !wanted.includes(group)) wanted.push(group);
         }
-        // A PUBLIC CLASS-DATA read is a dependency too: its class constructor
-        // and storage must be emitted even when no method of that class is called.
-        for (const match of file.getRaw().matchAll(/\b([a-z_][\w]*)=>([a-z_]\w*)/gi)) {
-          const owner = match[1].toLowerCase();
-          const attr = upper(match[2]);
-          const def = reg.getObject("CLAS", owner)?.getDefinition();
-          if (def?.getAttributes().getStatic().some((a) => upper(a.getName()) === attr && a.getVisibility?.() === abaplint.Visibility.Public)
-              && !wanted.includes(owner)) wanted.push(owner);
+        // A PUBLIC CLASS-DATA read is a dependency too. Only identifier tokens
+        // surrounding a static arrow count; comments and literal text do not.
+        for (const statement of statements) {
+          const tokens = statement.getTokens();
+          for (let i = 1; i + 1 < tokens.length; i++) {
+            if (tokens[i].getStr() !== "=>"
+                || !(tokens[i - 1] instanceof abaplint.Tokens.Identifier)
+                || !(tokens[i + 1] instanceof abaplint.Tokens.Identifier)) continue;
+            // Keep the existing lookup spelling for namespaced owners: the
+            // former identifier match used the final namespace component.
+            const owner = tokens[i - 1].getStr().split("/").at(-1).toLowerCase();
+            const attr = upper(tokens[i + 1].getStr());
+            const def = reg.getObject("CLAS", owner)?.getDefinition();
+            if (def?.getAttributes().getStatic().some((a) => upper(a.getName()) === attr && a.getVisibility?.() === abaplint.Visibility.Public)
+                && !wanted.includes(owner)) wanted.push(owner);
+          }
         }
       }
     };
