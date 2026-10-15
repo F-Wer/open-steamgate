@@ -182,7 +182,7 @@ export interface Descriptor { readonly name: string; readonly type: TableType | 
 export interface NamedDescriptor { readonly name: string; readonly text: string }
 export interface TryFrame { level: number; mode: 'body' | 'catch'; used: Set<number> }
 export interface SinkSite { locals: readonly Local[]; depth: number }
-export type SunkLocals = Map<readonly Stmt[], readonly Local[]>;
+export type SunkLocals<Body extends readonly object[] = readonly Stmt[]> = Map<Body, readonly Local[]>;
 export interface Context {
   readonly cls: Partial<Omit<Class, 'constructor'>>;
   loop?: number;
