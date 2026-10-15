@@ -119,6 +119,15 @@ test("docs-only Git commits preserve tool identity; tool content changes it", ()
     writeFileSync(join(dir, "docs", "identity.md"), "docs edit\n");
     git("add", "docs/identity.md"); commit("docs only");
     assert.equal(identity(), before, "HEAD and the Git tree must not enter compiler identity");
+    const semanticIdentity = () => execFileSync(process.execPath, ["--input-type=module", "-e", `
+      import {toolIdentity} from ${JSON.stringify(pathToFileURL(join(dir, "tools/gogen/frontend-object-cache.mjs")).href)};
+      console.log(toolIdentity(true));
+    `], {cwd: dir, encoding: "utf8"}).trim();
+    const semanticBefore = semanticIdentity(), pins = join(dir, "libs.lock.json"), originalPins = readFileSync(pins);
+    writeFileSync(pins, Buffer.concat([originalPins, Buffer.from("\n")]));
+    assert.notEqual(identity(), before, "global identity still includes source-library pins");
+    assert.equal(semanticIdentity(), semanticBefore, "v3 source-library changes are guarded per artifact");
+    writeFileSync(pins, originalPins);
     const tool = join(dir, "tools/gogen/frontend-source-key.mjs");
     writeFileSync(tool, readFileSync(tool, "utf8") + "\n// tool identity test edit\n");
     assert.notEqual(identity(), before, "working-tree tool contents must enter compiler identity");

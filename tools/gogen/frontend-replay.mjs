@@ -16,13 +16,13 @@ function fingerprint(value, registry) {
       : definitionFingerprint(registry, v) : v);
 }
 const clone = (v) => v instanceof Map ? new Map(v) : v instanceof Set ? new Set(v) : Array.isArray(v) ? [...v] : v;
-function copy(program) {
+export function copyReplayProgram(program) {
   return Object.fromEntries(Object.entries(program).map(([k, v]) => [k, clone(v)]));
 }
 
 export function replayLowering(program, cached) {
   if (!cached) return false;
-  const trial = copy(program);
+  const trial = copyReplayProgram(program);
   try {
     for (const op of cached.ops) {
       if (op.kind === "measure") {

@@ -3,9 +3,11 @@ import {inputSnapshot} from "./frontend-inventory.mjs";
 // consuming a named answer, including an empty answer, belongs to its reader.
 import {enumerateObjects, semanticQuery, withArtifact, withRole, recordingProvenance} from "./frontend-provenance.mjs";
 const suppliedIndexes = new WeakMap();
+const localAnswers = new WeakMap();
 const keyOf = (obj) => `${obj.getType()} ${obj.getName().toUpperCase()}`;
 
 export function suppliedIndex(reg, wanted, core, methodsOf, declaringClass) {
+  localAnswers.set(reg, new Map());
   const out = new Map(), providers = new Map(), declarations = new Map(), recording = recordingProvenance();
   for (const obj of enumerateObjects(reg, "supplied-index", [], "scheduling",
     (o) => o instanceof core.Objects.Class && wanted.has(o.getName().toUpperCase()))) {
@@ -38,10 +40,33 @@ export function suppliedAnswer(program, key) {
 export function localDiscovery(reg, obj, includeTests, run) {
   return withArtifact({reg}, obj, () => {
     const value = run();
+    if (!localAnswers.has(reg)) localAnswers.set(reg, new Map());
+    localAnswers.get(reg).set(JSON.stringify([obj.getName().toUpperCase(), !!includeTests]), value.names);
     semanticQuery(reg, "locals", [obj.getName().toUpperCase(), !!includeTests], value.names,
       {providers: [keyOf(obj)], policy: "ordered-qualified-definitions"});
     return value.value;
   }, "local-definitions");
+}
+
+// These indexes were rebuilt from the current parsed registry/selection before
+// the class seam. Never answer from a persisted query's former providers.
+export function currentQueryAnswer(program, query) {
+  if (query.kind === "supplied") {
+    const key = query.args.join("=>"), index = suppliedIndexes.get(program.reg);
+    if (!index) throw new Error("supplied index unavailable");
+    const parameters = [...program.supplied.get(key) ?? []], providers = [...index.providers.get(key) ?? []];
+    return {result: parameters.length ? providers : [], parameters, providers};
+  }
+  if (query.kind === "locals") {
+    const result = localAnswers.get(program.reg)?.get(JSON.stringify(query.args));
+    if (!result) throw new Error("locals discovery unavailable");
+    return {result, providers: [`CLAS ${query.args[0]}`]};
+  }
+  if (query.kind === "lock") {
+    const provider = `ENQU ${query.args[0]}`, descriptor = program.lockObjects.get(query.args[0]);
+    return {result: descriptor ? [provider] : [], descriptor: descriptor ?? "MISSING",
+      providers: inputSnapshot(program.reg).objects.has(provider) ? [provider] : []};
+  }
 }
 
 export function lockAnswer(ctx, name) {

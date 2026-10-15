@@ -32,7 +32,7 @@ function diskFiles(dir) {
   return readdirSync(dir, {withFileTypes: true}).flatMap((e) => e.isDirectory() ? diskFiles(join(dir, e.name)) : [join(dir, e.name)]);
 }
 
-test("recording is opt-in with cacheDir, and explicit false overrides the environment", () => {
+test("public reporting is opt-in with cacheDir, and explicit false overrides the environment", () => {
   const dir = mkdtempSync(join(tmpdir(), "prov-optin-")), previous = process.env.GOGEN_PROVENANCE;
   try {
     writeFileSync(join(dir, "zcl_a.clas.abap"), classSource("zcl_a"));
@@ -57,7 +57,7 @@ test("disk entries reference the shared graph, which stores own rows and artifac
     compileProgram(options);
     const files = diskFiles(options.cacheDir);
     const entries = files.filter((f) => f.endsWith(".bin")).map((f) => deserialize(inflateRawSync(readFileSync(f).subarray(65))));
-    const entry = entries.find((e) => e.value.name === "ZCL_DDIC");
+    const entry = entries.find((e) => e.value?.name === "ZCL_DDIC");
     assert.ok(entry.valueBytes, "frozen lowering bytes");
     assert.equal(entry.value.provenance, undefined, "no duplicate per-entry transcript");
     const graph = deserialize(inflateRawSync(readFileSync(files.find((f) => f.endsWith(`${entry.metadata.graph}.provenance`)))));

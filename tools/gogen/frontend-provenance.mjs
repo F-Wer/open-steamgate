@@ -205,7 +205,7 @@ export function recordProvenance(run, {expose = true} = {}) {
   }
 }
 
-/** Recording and dependency metadata are opt-in, including for disk builds. */
+/** Disk builds record internally; expanded public reporting stays opt-in. */
 export function withProvenance(compile) {
   return (options) => {
     const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
@@ -216,7 +216,8 @@ export function withProvenance(compile) {
       finishInputs(program.reg);
       return program;
     };
-    return expose ? recordProvenance(run, {expose}) : run();
+    const record = expose || (options.cacheDir && options.provenance !== false);
+    return record ? recordProvenance(run, {expose}) : run();
   };
 }
 
@@ -231,7 +232,7 @@ export function beginProvenanceCompile(reg) {
 }
 
 export function withArtifact(ctx, obj, run, phase = "lowering") {
-  return active ? active.artifact(ctx.reg, obj.obj ?? obj, phase, run) : run();
+  return active && !active.auditDepth ? active.artifact(ctx.reg, obj.obj ?? obj, phase, run) : run();
 }
 
 export function artifactLowering(lower) {

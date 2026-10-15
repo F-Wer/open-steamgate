@@ -135,7 +135,7 @@ export function installHooks(core, requireCore, r) {
           try { value = fn.apply(this, args); } finally { if (entered) r.stack.pop(); }
           if (method === "getInclude" || method === "getModule") {
             r.query(state, {kind: method === "getInclude" ? "function-group-include" : "function-module-owner",
-              args: args.map(scalar), result: value ? [objectKey(this)] : [], policy: "group-member"}, caller);
+              args: args.map(scalar), target: objectKey(this), result: value ? [objectKey(this)] : [], policy: "group-member"}, caller);
           }
           return value;
         };
