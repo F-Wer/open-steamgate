@@ -390,6 +390,29 @@ test("selection uses parsed calls and static identifiers, preserving per-file qu
 });
 
 
+test("idle enumeration uses the current prototype method with the registry receiver", () => {
+  const code = `
+    import assert from 'node:assert/strict';
+    import {createRequire} from 'node:module';
+    import {enumerateObjects} from './tools/gogen/frontend-provenance.mjs';
+    const require = createRequire(import.meta.url);
+    const core = createRequire(require.resolve('@abaplint/transpiler/package.json'))('@abaplint/core');
+    const reg = new core.Registry();
+    reg.addFile(new core.MemoryFile('z.prog.abap', 'REPORT z.'));
+    const expected = [...core.Registry.prototype.getObjects.call(reg)];
+    reg.getObjects = () => { throw Error('instance method must not be called'); };
+    const original = core.Registry.prototype.getObjects;
+    let calls = 0;
+    core.Registry.prototype.getObjects = function() {
+      assert.equal(this, reg); calls++; return original.call(this);
+    };
+    assert.deepEqual(enumerateObjects(reg, 'test'), expected);
+    assert.equal(calls, 1);
+    assert.equal(require.cache[require.resolve('./tools/gogen/frontend-provenance-recorder.mjs')], undefined);
+  `;
+  execFileSync(process.execPath, ["--input-type=module", "-e", code], {encoding: "utf8"});
+});
+
 for (const used of [false, true]) test(`macro definition selection preserves source order (used=${used})`, () => {
   const c = syntheticCorpus({classes: 4});
   c.files["zcl_select.clas.abap"] = classSource("zcl_select", `

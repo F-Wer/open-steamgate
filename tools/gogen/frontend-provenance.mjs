@@ -2,6 +2,7 @@
 import {freshRegistry, finishInputs} from "./frontend-inventory.mjs";
 import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
+const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 /** @type {typeof import('./frontend-provenance-recorder.mjs') | undefined} */ let recorder;
 function loadRecorder() {
   return recorder ??= require("./frontend-provenance-recorder.mjs");
@@ -128,7 +129,7 @@ function loadRecorder() {
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').Role} role @param {(obj: import('./frontend-session-types.ts').ArtifactObject) => boolean} predicate @returns {import('./frontend-session-types.ts').ArtifactObject[]} */ export function enumerateObjects(reg, kind, args = [], role = "scheduling", predicate = () => true) {
-  return recorder ? recorder.enumerateObjects(reg, kind, args, role, predicate) : [...reg.getObjects()].filter(predicate);
+  return recorder ? recorder.enumerateObjects(reg, kind, args, role, predicate) : [...core.Registry.prototype.getObjects.call(reg)].filter(predicate);
 }
 
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {import('./frontend-session-types.ts').Query['kind']} kind @param {import('./frontend-session-types.ts').QueryScalar[]} args @param {import('./frontend-session-types.ts').QueryScalar[]} result @param {Partial<import('./frontend-session-types.ts').Query>} details @returns {void} */ export function semanticQuery(reg, kind, args, result, details = {}) {
