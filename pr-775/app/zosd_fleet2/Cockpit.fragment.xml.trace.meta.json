@@ -1,0 +1,42 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3-cockpit",
+  "generator_version": "0.7",
+  "lines": [
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 1, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 1},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 2, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 2},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 3, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 3},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 4, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 4},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 5, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 5},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 6, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 6},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 7, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 7},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 8, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 8},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 9, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 9},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 10, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 10},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 11, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 11},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 12, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 12},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 13, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 13},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 14, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 14},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 15, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 15},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 16, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 16},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 17, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 17},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 18, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 18},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 19, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 19},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 20, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 20},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 21, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 21},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 22, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 22},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 23, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 23},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 24, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 24},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 25, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 25},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 26, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 26},
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "line": 27, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 27}
+  ],
+  "model": "sha256:204c9c4a972314ea503b6b11cc5e2dc9762525d233afae99ed3ab36e8a31c7ec",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "cockpit/zosd_fleet2/Cockpit.fragment.xml", "hash": "sha256:023a26817fd9c8c80e0cd5f0c30846732da7e27bb9a2a12877a47edc3ab4cf66"}
+  ],
+  "set": "src/l2demo/fleet2.l3.yaml",
+  "template": "recipes/l3-cockpit/Cockpit.fragment.xml",
+  "templates": {"recipes/l3-cockpit/Cockpit.fragment.xml": "sha256:023a26817fd9c8c80e0cd5f0c30846732da7e27bb9a2a12877a47edc3ab4cf66"}
+}
