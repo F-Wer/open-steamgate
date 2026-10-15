@@ -32,11 +32,11 @@ Format adapted from `larshp/hithub` (MIT).
 
 ### ANOMALY-2026-10-15-tabl-elementary-builtins -- TABL field with COMPTYPE E and no ROLLNAME
 
-- Status: `refused` -- no workaround. gogen names the field and stops before the transpiler's DatabaseSetup (`tools/gogen/frontend-ddic.mjs`, called by `osabap.mjs` and `osg-build.mjs`).
+- Status: `refused` -- no workaround. On the osabap and osgo build paths gogen names the field and stops before the transpiler's DatabaseSetup (`tools/gogen/frontend-ddic.mjs`, called by `osabap.mjs` and `osg-build.mjs`, transparent tables only). `unit.mjs` and `semantics.mjs` still reach DatabaseSetup unchecked and get its message.
 - Affected version: `@abaplint/core 2.120.73`.
 - Input: an abapGit TABL field with `COMPTYPE=E`, a `DATATYPE` (e.g. `CLNT`, `LENG=3`) and no `ROLLNAME`. Written by one third-party generator, not seen in a system export.
 - SAP: an abapGit import of such a table on A4H was accepted and the tests that use it ran (reported by the generator's author, v0.5.0/v0.5.1; how the system stored the field is unmeasured; measure on A4H).
-- abaplint: `objects/table.js` takes every `COMPTYPE=E` through `DDIC.lookupDataElement`, so the field is UnknownType; the transpiler's DatabaseSetup then fails with "todo toType handle: UnknownType", naming neither table nor cause. The Node build path has the same failure.
+- abaplint: `objects/table.js` takes every `COMPTYPE=E` through `DDIC.lookupDataElement`, so the field is UnknownType; the transpiler's DatabaseSetup then fails with "database_setup: <TABLE>-<FIELD>, todo toType handle: UnknownType", which names the field but not the cause (the missing ROLLNAME). The Node build path has the same failure.
 - Decision: the generator moves its tables to data elements (ROLLNAME); OSG refuses the shape with a message naming table, field and DATATYPE. Fields are read from abaplint's parsed XML (`getFields`), not from the text.
 - Tests: `tools/gogen/frontend-ddic.test.mjs` (CDATA, empty and self-closing ROLLNAME, comments), `tools/gogen/osabap.test.mjs` "a TABL field with COMPTYPE E and no ROLLNAME is refused by name".
 - Upstream: none until a real system export with this shape is seen.
