@@ -87,7 +87,11 @@ export function readLeakAllow(file) {
   try { raw = JSON.parse(bytes.toString("utf8")); } catch (error) { fail("BAD_ALLOW", `${file}: not readable JSON (${error.name})`); }
   const allow = raw?.allow;
   if (!Array.isArray(allow)) fail("BAD_ALLOW", `${file}: expected {"allow": [...]}`);
+  // unknown keys are refused: a misspelled "Layer" would otherwise widen the scope
+  for (const key of Object.keys(raw)) if (!["allow", "note"].includes(key)) fail("BAD_ALLOW", `${file}: unknown key ${JSON.stringify(key)}`);
   for (const [i, entry] of allow.entries()) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail("BAD_ALLOW", `${file}: entry ${i} is not an object`);
+    for (const key of Object.keys(entry)) if (!["file", "value", "reason", "layer"].includes(key)) fail("BAD_ALLOW", `${file}: entry ${i} has unknown key ${JSON.stringify(key)}`);
     for (const key of ["file", "value", "reason"]) {
       if (typeof entry?.[key] !== "string" || !entry[key].trim()) fail("BAD_ALLOW", `${file}: entry ${i} needs a non-empty ${key}`);
     }
@@ -136,6 +140,9 @@ export function leakGate(trees, metadata, documents = [], allow = [], layerNames
     // system may carry the same one; a scope naming such a name is ambiguous
     const repeated = new Set(layerNames.filter((name, i) => layerNames.indexOf(name) !== i));
     const translated = allow.flatMap((entry) => {
+      // allow files are concatenated, so in a system an unscoped entry reviewed
+      // for one layer would excuse the same path and value in every other
+      if (entry.layer === undefined && trees.length > 1) fail("BAD_ALLOW", `allow entry for ${entry.file}: a system needs "layer" on every entry`);
       if (entry.layer !== undefined && repeated.has(entry.layer)) fail("BAD_ALLOW", `allow entry for ${entry.layer}:${entry.file}: more than one layer is called ${entry.layer}`);
       const hits = archive.filter(({path, layer}) => path === entry.file && (entry.layer === undefined || layer === entry.layer));
       if (!hits.length) fail("BAD_ALLOW", `allow entry for ${entry.layer ? `${entry.layer}:` : ""}${entry.file}: no such file in the layer`);
@@ -261,6 +268,7 @@ export async function main(args) {
     if (rest[i].startsWith("--")) {
       const key = rest[i].slice(2);
       if (!["name", "kind", "source", "out", "leak-allow"].includes(key) || !rest[i + 1] || rest[i + 1].startsWith("--")) fail("USAGE", `invalid option ${rest[i]}`);
+      if (key === "leak-allow" && command === "build") fail("USAGE", "build has no leak gate; --leak-allow belongs to push");
       if (key === "leak-allow") (options.allow ??= []).push(...readLeakAllow(rest[++i]));
       else options[key] = rest[++i];
     } else positionals.push(rest[i]);

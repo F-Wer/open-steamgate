@@ -302,9 +302,12 @@ describe("osd-layer: reproducible publishing", function () {
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}, {...entry, layer: "two"}], ["one", "two"])).not.to.throw();
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "three"}], ["one", "two"])).to.throw(/BAD_ALLOW|no such file/);
     expect(() => leakGate(trees, {}, [], [{...entry, layer: "one"}], ["one", "one"])).to.throw(/more than one layer/);
+    // an unscoped entry in a system is refused rather than applied to every layer
+    expect(() => leakGate(trees, {}, [], [entry], ["one", "two"])).to.throw(/needs "layer"/);
+    expect(() => leakGate([trees[0]], {}, [], [entry], ["one"])).not.to.throw();
   });
 
-  it("reads an allow file only with a reason on every entry", () => {
+  it("reads an allow file only with a reason on every entry", async () => {
     const file = join(root, "allow.json");
     writeFileSync(file, JSON.stringify({allow: [{file: "src/a.clas.abap", value: "v"}]}));
     expect(() => readLeakAllow(file)).to.throw(/reason/);
@@ -314,6 +317,13 @@ describe("osd-layer: reproducible publishing", function () {
     expect(readLeakAllow(file)).to.have.length(1);
     writeFileSync(file, JSON.stringify({allow: [{file: "a", value: "v", reason: "r", layer: ""}]}));
     expect(() => readLeakAllow(file)).to.throw(/layer/);
+    for (const bad of [{allow: [{file: "a", value: "v", reason: "r", Layer: "x"}]}, {allow: [], extra: 1}, {allow: ["x"]}, {allow: [[]]}]) {
+      writeFileSync(file, JSON.stringify(bad));
+      expect(() => readLeakAllow(file), JSON.stringify(bad)).to.throw(/BAD_ALLOW|unknown key|not an object/);
+    }
+    let refused;
+    try { await main(["build", folder, "--name", "x", "--kind", "input", "--out", join(root, "o"), "--leak-allow", file]); } catch (e) { refused = e; }
+    expect(refused?.message).to.match(/no leak gate/);
     writeFileSync(file, " ".repeat(1024 * 1024 + 1));
     expect(() => readLeakAllow(file)).to.throw(/1 MiB/);
     // a pipe stats as size 0; the cap is measured on what was read (a shell

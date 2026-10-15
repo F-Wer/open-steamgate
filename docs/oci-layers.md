@@ -73,8 +73,12 @@ format of `.leak-allow.json` whose `file` is the path inside the layer archive.
 Every entry needs a reason, applies to that archive path and value only, and an
 entry naming a path the layer does not have is refused rather than ignored. An
 entry may add `layer` (the layer's name) to apply to that layer of a system
-only. The flag repeats, and the metadata documents are never covered, whatever
-an archive file is called. The file belongs in the layer's own repository,
+only, and in a system every entry must name its layer. Unknown keys are
+refused. The flag repeats, and the metadata documents are never covered,
+whatever an archive file is called. An entry excuses any kind of hit, the
+identifier list's names included, but the allow file is itself published in
+the layer's repository: it is for public values (an upstream test's GUID), and
+a name from the identifier list must never be written into one. The file belongs in the layer's own repository,
 where it is reviewed; abapiti's rules layers use it for a GUID and a hex ID
 that are literals of abaplint's own public tests.
 
