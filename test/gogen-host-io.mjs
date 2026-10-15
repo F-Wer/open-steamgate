@@ -21,7 +21,10 @@ const exceptions = {
   "tools/gogen/frontend.mjs": {"node:module": ["createRequire"]},
   // Pure deep comparison of IR, with no host I/O. Keep its exact semantics.
   "tools/gogen/emit-table-move.mjs": {"node:util": ["isDeepStrictEqual"]},
-  // Stoker owns these active cache/provenance files; explicitly deferred.
+  // Not a host-io gap: the object cache (and its provenance/digest files) is an
+  // optional HOST module injected through session/cacheDir, outside the compiler
+  // closure that compileProgram loads without a cacheDir. abapiti/Go builds run
+  // without it. Do not route these through host-io.ts (stoker + dell, 2026-10-15).
   "tools/gogen/frontend-object-cache.mjs": {
     "node:crypto": ["createHash", "randomUUID"], "node:module": ["createRequire"],
     "node:fs": ["existsSync", "mkdirSync", "readFileSync", "readdirSync", "renameSync", "rmSync", "statSync", "utimesSync", "writeFileSync"],
