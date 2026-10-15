@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx" Version="4.0">
+  <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/UI.xml">
+    <edmx:Include Namespace="com.sap.vocabularies.UI.v1" Alias="UI"/>
+  </edmx:Reference>
+  <edmx:Reference Uri="https://sap.github.io/odata-vocabularies/vocabularies/Common.xml">
+    <edmx:Include Namespace="com.sap.vocabularies.Common.v1" Alias="Common"/>
+  </edmx:Reference>
+  <edmx:DataServices>
+    <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="stg.booking.annotations">
+      <Annotations Target="ZSTG_DEMO_SRV.Booking">
+        <Annotation Term="UI.HeaderInfo">
+          <Record Type="UI.HeaderInfoType">
+            <PropertyValue Property="TypeName" String="Booking"/>
+            <PropertyValue Property="TypeNamePlural" String="Bookings"/>
+            <PropertyValue Property="Title">
+              <Record Type="UI.DataField">
+                <PropertyValue Property="Value" Path="Customer"/>
+              </Record>
+            </PropertyValue>
+            <PropertyValue Property="Description">
+              <Record Type="UI.DataField">
+                <PropertyValue Property="Value" Path="BookingId"/>
+              </Record>
+            </PropertyValue>
+          </Record>
+        </Annotation>
+        <Annotation Term="UI.SelectionFields">
+          <Collection>
+            <PropertyPath>TravelId</PropertyPath>
+            <PropertyPath>BookingId</PropertyPath>
+            <PropertyPath>Customer</PropertyPath>
+          </Collection>
+        </Annotation>
+        <Annotation Term="UI.LineItem">
+          <Collection>
+            <!-- the travel is a link: intent Travel-manage with TravelId, the
+                 Travels app opens filtered on it -->
+            <Record Type="UI.DataFieldWithIntentBasedNavigation">
+              <PropertyValue Property="Value" Path="TravelId"/>
+              <PropertyValue Property="Label" String="Travel"/>
+              <PropertyValue Property="SemanticObject" String="Travel"/>
+              <PropertyValue Property="Action" String="manage"/>
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="BookingId"/>
+              <PropertyValue Property="Label" String="Booking"/>
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="Customer"/>
+              <PropertyValue Property="Label" String="Customer"/>
+            </Record>
+            <Record Type="UI.DataField">
+              <PropertyValue Property="Value" Path="FlightDate"/>
+              <PropertyValue Property="Label" String="Flight date"/>
+            </Record>
+          </Collection>
+        </Annotation>
+        <Annotation Term="UI.Facets">
+          <Collection>
+            <Record Type="UI.ReferenceFacet">
+              <PropertyValue Property="ID" String="General"/>
+              <PropertyValue Property="Label" String="General"/>
+              <PropertyValue Property="Target" AnnotationPath="@UI.FieldGroup#General"/>
+            </Record>
+          </Collection>
+        </Annotation>
+        <Annotation Term="UI.FieldGroup" Qualifier="General">
+          <Record Type="UI.FieldGroupType">
+            <PropertyValue Property="Data">
+              <Collection>
+                <Record Type="UI.DataFieldWithIntentBasedNavigation">
+                  <PropertyValue Property="Value" Path="TravelId"/>
+                  <PropertyValue Property="SemanticObject" String="Travel"/>
+                  <PropertyValue Property="Action" String="manage"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="BookingId"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="Customer"/>
+                </Record>
+                <Record Type="UI.DataField">
+                  <PropertyValue Property="Value" Path="FlightDate"/>
+                </Record>
+              </Collection>
+            </PropertyValue>
+          </Record>
+        </Annotation>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking/TravelId">
+        <Annotation Term="Common.Label" String="Travel"/>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking/BookingId">
+        <Annotation Term="Common.Label" String="Booking"/>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking/Customer">
+        <Annotation Term="Common.Label" String="Customer"/>
+      </Annotations>
+      <Annotations Target="ZSTG_DEMO_SRV.Booking/FlightDate">
+        <Annotation Term="Common.Label" String="Flight date"/>
+      </Annotations>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
