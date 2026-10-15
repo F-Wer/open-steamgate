@@ -11,7 +11,7 @@ test("every input category changes the frontend key", () => {
   const home = mkdtempSync(join(tmpdir(), "gogen-cache-key-"));
   const fixture = join(home, "src");
   const files = ["src/example.clas.abap", "src/example.clas.testclasses.abap", "src/example.tabl.xml",
-    "tools/gogen/frontend.mjs", "tools/gogen/frontend-local-constants.mjs", "tools/gogen/emit-local-constants.mjs", "tools/gogen/emit-go.mjs", "tools/gogen/go/abap/abap.go",
+    "tools/gogen/frontend.mjs", "tools/gogen/frontend-local-constants.mjs", "tools/gogen/emit-local-constants.ts", "tools/gogen/emit-go.mjs", "tools/gogen/go/abap/abap.go",
     "tools/gogen/ir.ts", "tools/gogen/go-symbols.ts", "tools/shared-contract.ts",
     "tools/osd-amc.mjs", "test/seed.mjs", "data/rows.tabu.json", "packs/example/data/rows.tabu.json",
     "abap_transpile.json", "package-lock.json", "libs.lock.json"];

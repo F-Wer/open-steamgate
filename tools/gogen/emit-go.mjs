@@ -2,17 +2,17 @@ import {env} from "./host-io.ts";
 import {append} from "./append.ts";
 import {typeName, funcName} from "./go-symbols.ts";
 export {typeName, funcName} from "./go-symbols.ts";
-import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
+import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
 import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.mjs";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {sinkLocals, generatedBindings} from "./sink-locals.mjs";
 import {analyzeOwnership} from "./frontend-owned.mjs";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.ts";
-import {emitBuiltinGo} from "./emit-builtins.mjs";
-import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.mjs";
+import {emitBuiltinGo} from "./emit-builtins.ts";
+import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.ts";
 import {objectRttiGo, exceptionClass, nativeMessageText} from "./emit-exception.mjs";
-import {emitByteStatement} from "./emit-bytes.mjs";
+import {emitByteStatement} from "./emit-bytes.ts";
 // IR -> Go source, for the Go backend spike.
 //
 // Nothing here decides semantics: the IR already says which calculation type
@@ -348,7 +348,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     for (const f of st.fields) out.push(`\t${ident(f.name)} ${goType(f.type)}`);
     out.push("}", "");
   }
-  append(out, (/** @type {import("./emit-go-types.ts").LocalConstantDeclarations} */ (localConstantDeclarations))(consts, {type: goType, literal: constLiteral}));
+  append(out, localConstantDeclarations(consts, {type: goType, literal: constLiteral}));
   if (consts.size > 0) out.push("");
   // interfaces used as reference types, and classes referred to but not compiled
   for (const [name, sigs] of program.interfaceMethods ?? []) {
@@ -867,7 +867,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
 }
 
 /** @param {import("./emit-go-types.ts").Constant} c @returns {string} */ function constLiteral(c) {
-  const hoisted = (/** @type {import("./emit-go-types.ts").LocalConstant} */ (localConstant))(c, {fields: STRUCTDEFS, expr, zero, ident, struct: (t, v) => `${t.go}{${v}}`});
+  const hoisted = localConstant(c, {fields: STRUCTDEFS, expr, zero, ident, struct: (t, v) => `${t.go}{${v}}`});
   if (hoisted !== undefined) return hoisted;
   // a structured constant: its components, an unset one initial
   if (c.type.k === "struct") {
@@ -2065,10 +2065,10 @@ ${t}	}`));
         ...(bind ? [`${t}\t\t\t${bind}`] : []), `${t}\t\t\ts.Sy.Subrc = 0`, `${t}\t\t\ts.Sy.Tabix = ${st.hashed ? "0" : `int32(i${n} + 1)`}`,
         `${t}\t\t\tbreak`, `${t}\t\t}`, `${t}\t}`, `${t}}`];
     }
-    case "replace_chars": HELPER_IMPORTS.add("charsection"); return (/** @type {import("./emit-go-types.ts").EmitByteStatement} */ (emitByteStatement))(st, ctx, t, {expr, place});
+    case "replace_chars": HELPER_IMPORTS.add("charsection"); return emitByteStatement(st, ctx, t, {expr, place});
     case "find_bytes":
     case "replace_bytes":
-    case "find_bytes_all": return (/** @type {import("./emit-go-types.ts").EmitByteStatement} */ (emitByteStatement))(st, ctx, t, {expr, place});
+    case "find_bytes_all": return emitByteStatement(st, ctx, t, {expr, place});
     case "find": {
       // IN TABLE and IN SECTION (ultra/sadl): see abap.FindTable / abap.FindSection
       const call = st.table ? `fok, fline, foff, flen, fsub := abap.FindTable(${expr(st.table, ctx)}, ${expr(st.pattern, ctx)}, ${st.regex}, ${st.icase}, ${st.subs.length}${st.pcre ? ", true" : ""})`
@@ -2196,7 +2196,7 @@ ${t}	}`));
 /** @type {Partial<Record<string, string>>} */ const I_OPS = {"+": "abap.AddI", "-": "abap.SubI", "*": "abap.MulI", "/": "abap.DivI", DIV: "abap.DivIntI", MOD: "abap.ModI"};
 /** @type {Partial<Record<string, string>>} */ const P_OPS = {"+": "abap.AddP", "-": "abap.SubP", "*": "abap.MulP", "/": "abap.DivP", DIV: "abap.DivIntP", MOD: "abap.ModP"};
 /** @type {Partial<Record<string, string>>} */ const F_OPS = {"/": "abap.DivF", DIV: "abap.DivIntF", MOD: "abap.ModF"};
-/** @type {Partial<Record<string, string>>} */ const FN_F = {SIN: "abap.Sin", COS: "abap.Cos", TAN: "math.Tan", SQRT: "abap.SqrtF", EXP: "math.Exp", LOG: "abap.LogF", LOG10: "math.Log10"};
+/** @type {ReadonlyMap<string, string>} */ const FN_F = new Map([["SIN", "abap.Sin"], ["COS", "abap.Cos"], ["TAN", "math.Tan"], ["SQRT", "abap.SqrtF"], ["EXP", "math.Exp"], ["LOG", "abap.LogF"], ["LOG10", "math.Log10"]]);
 
 /** @param {import("./emit-go-types.ts").Expr} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function expr(e, ctx) {
   const owned = (/** @type {import("./emit-go-types.ts").OwnedExpression} */ (ownedExpression))(e, ctx, {ownership: OWNERSHIP, expr, place, helper: helperFn});
@@ -2244,7 +2244,7 @@ ${t}	}`));
       if (e.type.k === "xstring") return `abap.BitXS(${JSON.stringify(e.op)}, ${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "i") return `${I_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.type.k === "p") return `${P_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
-      if (e.type.k === "int8") return `${(/** @type {Readonly<Partial<Record<string, string>>>} */ (I8_OPS))[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
+      if (e.type.k === "int8") return `${I8_OPS.get(e.op)}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (F_OPS[e.op] !== undefined) return `${F_OPS[e.op]}(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       if (e.op === "**") return `abap.PowF(${expr(e.l, ctx)}, ${expr(e.r, ctx)})`;
       return `(${expr(e.l, ctx)} ${e.op} ${expr(e.r, ctx)})`;
@@ -2363,7 +2363,7 @@ ${t}	}`));
 }
 
 /** @param {import("./emit-go-types.ts").Conversion} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function conv(e, ctx) {
-  const fast = (/** @type {import("./emit-go-types.ts").EmitPackedInt8} */ (emitPackedInt8))(e, (n) => expr(n, ctx), helperFn);
+  const fast = emitPackedInt8(e, (n) => expr(n, ctx), helperFn);
   if (fast !== null) return fast;
   const x = expr(e.x, ctx);
   const from = e.from.k;
@@ -2428,14 +2428,14 @@ ${t}	}`));
 }
 
 /** @param {import("./emit-go-types.ts").Builtin} e @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function fn(e, ctx) {
-  return (/** @type {import("./emit-go-types.ts").EmitBuiltinGo} */ (emitBuiltinGo))(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
+  return emitBuiltinGo(e, e.args.map((a) => expr(a, ctx)), FN_F, HELPER_IMPORTS);
 }
 
 // an initial reference: the frontend decided it from the static type
 // (frontend.mjs upcastable)
 
 /** @param {import("./emit-go-types.ts").Condition} c @param {import("./emit-go-types.ts").Context} ctx @returns {string} */ function cond(c, ctx) {
-  const fast = (/** @type {import("./emit-go-types.ts").EmitPackedComparison} */ (emitPackedComparison))(c, (n) => expr(n, ctx));
+  const fast = emitPackedComparison(c, (n) => expr(n, ctx));
   if (fast !== null) return fast;
   switch (c.c) {
     case "num_data_cmp": return `abap.CmpData(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
