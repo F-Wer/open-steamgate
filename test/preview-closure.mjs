@@ -135,6 +135,25 @@ self.result = [parseSamc(""), typeName("a")];`);
     expect(JSON.stringify(scope.self.result)).to.equal('[[],"A"]');
   });
 
+  for (const suffix of ["#fragment", "?query"]) {
+    it(`fails the build for an unapproved .ts module behind a ${suffix[0]} suffix`, async () => {
+      const {writeFileSync} = await import("node:fs");
+      const entry = resolve(scratch, "entry.mjs");
+      writeFileSync(resolve(scratch, "suffixed.ts"), "export const value = 1;");
+      writeFileSync(entry, `import {value} from "./suffixed.ts${suffix}"; self.result = value;`);
+      const stats = await compile(entry);
+      expect(stats.hasErrors()).to.equal(true);
+      expect(stats.toString({errorDetails: true})).to.include("Preview TypeScript outside allowlist:");
+    });
+  }
+
+  it("does not approve a dependency directory below tools/gogen", async () => {
+    const {includes} = (await import("node:module")).createRequire(import.meta.url)("../scripts/preview-typescript.cjs");
+    const nested = resolve("tools/gogen/node_modules/pkg/index.ts");
+    expect(includes.some(one => typeof one === "string" ? one === nested : one(nested))).to.equal(false);
+    expect(includes.some(one => typeof one === "string" ? one === resolve("tools/gogen/go-symbols.ts") : one(resolve("tools/gogen/go-symbols.ts")))).to.equal(true);
+  });
+
   for (const contents of ["export const value = 1;", "export const value: number = 1;"]) {
     it(`fails the build for an unapproved .ts module (${contents.includes(":") ? "typed" : "plain JS"})`, async () => {
       const {writeFileSync} = await import("node:fs");
