@@ -20,24 +20,32 @@ const digest = (value) => createHash("sha256").update(value).digest("hex");
 const walk = (dir) => readdirSync(dir, {withFileTypes: true}).sort((a, b) => a.name.localeCompare(b.name))
   .flatMap((e) => e.isDirectory() ? walk(join(dir, e.name)) : [join(dir, e.name)]);
 const identities = new Map();
+let sharedIdentity;
 export function toolIdentity(sourceIndependent = false) {
   if (identities.has(sourceIndependent)) return identities.get(sourceIndependent);
-  const hash = createHash("sha256").update("gogen-object-cache-2");
-  // Actual tool sources, locks and installed builds define the compiler.
-  // Repository commits (including docs-only ones) do not change its identity.
-  for (const file of walk(join(home, "tools")).filter((f) => /\.(mjs|ts|cjs|json)$/.test(f))) {
-    hash.update(file.slice(home.length)); hash.update(readFileSync(file));
+  if (!sharedIdentity) {
+    const hash = createHash("sha256").update("gogen-object-cache-tool-3");
+    const fileHash = (name, file) => hash.update(JSON.stringify([name, digest(readFileSync(file))]));
+    // Actual tool sources, locks and installed builds define the compiler.
+    // Repository commits (including docs-only ones) do not change its identity.
+    for (const file of walk(join(home, "tools")).filter((f) => /\.(mjs|ts|cjs|json)$/.test(f))) {
+      fileHash(file.slice(home.length), file);
+    }
+    if (existsSync(join(home, "package-lock.json"))) fileHash("package-lock.json", join(home, "package-lock.json"));
+    const require = createRequire(import.meta.url);
+    const tr = require.resolve("@abaplint/transpiler/package.json");
+    for (const path of [tr, createRequire(tr).resolve("@abaplint/core/package.json")]) {
+      fileHash("installed-package", path);
+      for (const file of walk(join(path, "..", "build"))) fileHash(file.slice(path.length), file);
+    }
+    sharedIdentity = hash.update(JSON.stringify([process.versions.node, process.versions.v8])).digest("hex");
   }
-  // Library source pins are guarded by per-artifact digests in v3. They remain
-  // part of the production whole-registry tool/version identity.
-  for (const name of sourceIndependent ? ["package-lock.json"] : ["package-lock.json", "libs.lock.json"]) if (existsSync(join(home, name))) hash.update(readFileSync(join(home, name)));
-  const require = createRequire(import.meta.url);
-  const tr = require.resolve("@abaplint/transpiler/package.json");
-  for (const path of [tr, createRequire(tr).resolve("@abaplint/core/package.json")]) {
-    hash.update(readFileSync(path));
-    for (const file of walk(join(path, "..", "build"))) { hash.update(file.slice(path.length)); hash.update(readFileSync(file)); }
-  }
-  const identity = hash.digest("hex"); identities.set(sourceIndependent, identity); return identity;
+  // Both variants share actual file hashes: the lazy v3 identity never walks
+  // the tools/installed builds again. Source pins remain per-artifact in v3.
+  const pins = !sourceIndependent && existsSync(join(home, "libs.lock.json"))
+    ? digest(readFileSync(join(home, "libs.lock.json"))) : null;
+  const identity = digest(JSON.stringify([sharedIdentity, pins]));
+  identities.set(sourceIndependent, identity); return identity;
 }
 
 // Preserve only data that can be replayed against a different registry. In
@@ -150,13 +158,13 @@ export function objectCache(registry, root) {
     throw new Error(`unknown GOGEN_CACHE_ORACLE_FAULT: ${fault}`);
   const objects = new Map(), byName = new Map();
   // AUDITED cache inventory: source guards, never semantic dependencies.
-  for (const [key, {obj, sources: inputs}] of inputSnapshot(registry).objects) {
+  for (const [key, {obj, dependency, sources: inputs}] of inputSnapshot(registry).objects) {
     // Macro collection keeps the first definition in registry input order.
     // Sorting these files would hide an order edit even from the global guard.
     const sources = inputs.map((s) => [s.name, s.raw]);
     if (fault === "sorted-files") sources.sort(([a], [b]) => a.localeCompare(b));
     const words = new Set(sources.flatMap(([, raw]) => raw.toUpperCase().match(/(?:\/[A-Z0-9_]+\/)?[A-Z_][A-Z0-9_]*/g) ?? []));
-    objects.set(key, {hash: digest(JSON.stringify(sources)), words});
+    objects.set(key, {hash: digest(JSON.stringify(sources)), words, dependency});
     if (!byName.has(obj.getName().toUpperCase())) byName.set(obj.getName().toUpperCase(), []);
     byName.get(obj.getName().toUpperCase()).push(key);
   }
@@ -165,15 +173,21 @@ export function objectCache(registry, root) {
   // A getObject transcript alone cannot recover those prior reads. Guard
   // every such artifact with all registry sources, including ordering and
   // absent objects; never infer independence from the main file's text.
-  const semanticInputs = [...objects].map(([k, v]) => [k, v.hash]);
+  const semanticInputs = [...objects].map(([k, v]) => [k, v.dependency, v.hash]);
   // Test-only fault injection: demonstrate that the oracle detects semantic
   // dependencies missing from source words / lowering-time getObject reads.
   // Never enable this outside cache-oracle tests.
-  const version = digest(JSON.stringify([toolIdentity(), registry.getConfig().get(),
+  // This content certificate names the generation directory. JSON framing
+  // binds ordered effective object/role/file/raw-text hashes to config/tools;
+  // it uses the loaded snapshot, never a stat or a separate disk scan. A new
+  // domain ignores old generations without changing their payload format.
+  // Selection and supplied/program state still pass replay guards. Source
+  // positions stay in the IR for both emission line modes.
+  const version = digest(JSON.stringify(["gogen-global-content-1", toolIdentity(), registry.getConfig().get(),
     fault === "no-version" || drop ? [] : semanticInputs]));
   const sourceKey = sourceKeys(objects, byName, version, drop);
   const shadow = recordingProvenance() ? shadowCache(registry, root,
-    hashV3(["gogen-entry-3", toolIdentity(true), registry.getConfig().get()]), portable) : undefined;
+    () => hashV3(["gogen-entry-3", toolIdentity(true), registry.getConfig().get()]), portable) : undefined;
   // Opening marks the version used, and so does a hit every few minutes, so
   // a long warm run that writes nothing is not taken for an abandoned one.
   let touched = Date.now();
@@ -323,7 +337,10 @@ export const compileDiskClass = artifactLowering(function compileDiskClass(ctx, 
   const file = obj.getMainABAPFile();
   const key = obj.getName().toUpperCase();
   const owner = `${obj.obj?.getType?.() ?? obj.getType?.() ?? "CLAS"} ${obj.owner ?? key}`;
-  const prediction = session?.disk?.shadow?.probe(owner, key, program);
+  // Exhaustive mode deliberately checks even global hits against a separate
+  // cold lowering. Ordinary compilation only pays for v3 after replay misses.
+  let prediction = (process.env.GOGEN_CACHE_SHADOW_VALIDATE === "1" || process.env.GOGEN_CACHE_SHADOW_EXHAUSTIVE === "1")
+    ? session?.disk?.shadow?.probe(owner, key, program) : undefined;
   if (prediction) session.disk.shadow.validate(prediction, ctx, obj, lower);
   let cached = session?.classes.get(key);
   const replay = (entry) => entry && entry.file === file && entry.structure === file.getStructure()
@@ -345,6 +362,10 @@ export const compileDiskClass = artifactLowering(function compileDiskClass(ctx, 
       prediction.row.completenessReason = "no-validated-v3-candidate";
     }
     return cached.ir;
+  }
+  if (!prediction) {
+    prediction = session?.disk?.shadow?.probe(owner, key, program);
+    if (prediction) session.disk.shadow.validate(prediction, ctx, obj, lower);
   }
   counts.lowered++;
   if (prediction) prediction.row.actuallyLowered = true;
