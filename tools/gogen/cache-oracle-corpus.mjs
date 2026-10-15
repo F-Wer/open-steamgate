@@ -98,6 +98,15 @@ ENDCLASS.
 CLASS-METHODS run RETURNING VALUE(rv) TYPE i. ENDCLASS.
 CLASS lcl_same IMPLEMENTATION. METHOD run. rv = value. ENDMETHOD. ENDCLASS.
 `;
+  addClass("zcl_borrow_provider", classSource("zcl_borrow_provider", "rv = value.", "i", "CONSTANTS value TYPE i VALUE 1."));
+  addClass("zcl_borrow_reader", classSource("zcl_borrow_reader", "rv = zcl_borrow_provider=>value."));
+  addClass("zcl_borrow_seam", classSource("zcl_borrow_seam", "rv = 0."));
+  // Reverse-named interface chain exercises repeated global definition passes.
+  for (let i = 0; i < 8; i++) {
+    const n = `zif_pass_${i}`;
+    files[`${n}.intf.abap`] = `INTERFACE ${n} PUBLIC. TYPES value TYPE ${i === 7 ? "i" : `zif_pass_${i + 1}=>value`}. ENDINTERFACE.\n`;
+  }
+  addClass("zcl_pass_reader", classSource("zcl_pass_reader", "rv = 7.", "zif_pass_0=>value"));
   const mutations = [], edit = (kind, file, from, to) => mutations.push({kind, edits: [{file, from, to}]});
   const control = "zcl_control_0001.clas.abap", original = files[control];
   edit("comment-only", control, "PUBLIC SECTION.", 'PUBLIC SECTION.\n" seeded oracle comment');
@@ -124,6 +133,8 @@ CLASS lcl_same IMPLEMENTATION. METHOD run. rv = value. ENDMETHOD. ENDCLASS.
   edit("pool-constant", "zorc.type.abap", "VALUE 7", "VALUE 9");
   edit("fugr-signature", "zoracle_group.fugr.xml", "<TYP>I</TYP>", "<TYP>INT8</TYP>");
   edit("same-object-local-definition", "zcl_control_0000.clas.testclasses.abap", "VALUE 1", "VALUE 9");
+  edit("cross-object-same-position-definition", "zcl_borrow_provider.clas.abap", "VALUE 1", "VALUE 9");
+  edit("global-definition-passes", "zif_pass_7.intf.abap", "TYPE i", "TYPE int8");
   mutations.push({kind: "file-order", order: ["zcl_order_macro.clas.macros.abap", "zcl_order_macro.clas.locals_def.abap"]});
   return {files, objects, mutations, seed, classes,
     featureClasses: [...objects.filter((o) => !o.startsWith("ZCL_CONTROL_") || o === "ZCL_CONTROL_READER"), "ZCL_CONTROL_0000:LCL_SAME"]};

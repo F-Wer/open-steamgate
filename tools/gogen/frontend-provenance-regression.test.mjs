@@ -263,7 +263,7 @@ test("session lowering built while recording was off has an explicit marker", ()
   assert.ok(marker(reg, "CLAS ZCL_A", "lowering-built-before-recording"));
 });
 
-test("disk lowering built while recording was off has an explicit marker", () => {
+test("disk metadata records internally while public provenance is off", () => {
   const dir = mkdtempSync(join(tmpdir(), "prov-lowering-"));
   try {
     writeFileSync(join(dir, "zcl_a.clas.abap"), classSource("zcl_a"));
@@ -271,7 +271,7 @@ test("disk lowering built while recording was off has an explicit marker", () =>
     compileProgram({...options, provenance: false});
     const p = compileProgram({...options, provenance: true});
     assert.ok(p.frontendCounts.reusedClasses.includes("ZCL_A"));
-    assert.ok(marker(p.reg, "CLAS ZCL_A", "lowering-built-before-recording"));
+    assert.equal(marker(p.reg, "CLAS ZCL_A", "lowering-built-before-recording"), false);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 

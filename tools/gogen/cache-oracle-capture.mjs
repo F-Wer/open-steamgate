@@ -1,3 +1,4 @@
+import {borrowedDefinitionArtifact} from "./cache-oracle-definitions.mjs";
 import {recordProvenance} from "./frontend-provenance.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync} from "node:fs";
@@ -53,7 +54,10 @@ function capture({folders, objects, cacheDir, order, provenance}) {
   const program = compileProgram({folders, objects, cacheDir, provenance, tolerant: true,
     includeTests: new Set(["ZCL_CONTROL_0000"]),
     registry: orderedRegistry(folders, order)});
-  return artifactsOf(program);
+  const capture = artifactsOf(program);
+  const borrowed = borrowedDefinitionArtifact(program, cacheDir);
+  if (borrowed !== undefined) capture.artifacts.borrowedDefinitionReplay = borrowed;
+  return capture;
 }
 
 export function artifactsOf(program) {

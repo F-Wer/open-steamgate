@@ -25,6 +25,8 @@ export function sensitivityFault(kind) {
   if (kind.startsWith("pool-")) return "drop:^TYPE";
   if (kind === "fugr-signature") return "drop:^FUGR";
   if (kind === "same-object-local-definition") return "no-version";
+  if (kind === "cross-object-same-position-definition") return "no-version,fingerprint-location-only";
+  if (kind === "global-definition-passes") return "drop:^INTF ZIF_PASS_";
   if (kind === "file-order") return "sorted-files";
   throw new Error(`mutation kind has no sensitivity row: ${kind}`);
 }

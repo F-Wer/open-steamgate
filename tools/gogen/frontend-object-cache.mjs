@@ -1,4 +1,4 @@
-import {artifactLowering, storedProvenance, inheritStoredProvenance} from "./frontend-provenance.mjs";
+import {artifactLowering, storedProvenance, inheritStoredProvenance, provenanceOf} from "./frontend-provenance.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
@@ -8,6 +8,7 @@ import {existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, st
 import {join, resolve} from "node:path";
 import {serialize, deserialize} from "node:v8";
 import {deflateRawSync, inflateRawSync} from "node:zlib";
+import {artifactDigestsOf} from "./frontend-artifact-digests.mjs";
 import {sourceKeys} from "./frontend-source-key.mjs";
 
 const here = import.meta.dirname, home = resolve(here, "../..");
@@ -136,7 +137,9 @@ function pruneVersions(root, current) {
 export function objectCache(registry, root) {
   if (!root) return;
   // Test-only. No other environment variable may enable weakened cache keys.
-  const fault = process.env.GOGEN_CACHE_ORACLE_FAULT;
+  const faultSpec = process.env.GOGEN_CACHE_ORACLE_FAULT;
+  const fault = faultSpec === "fingerprint-location-only" ? undefined
+    : faultSpec === "no-version,fingerprint-location-only" ? "no-version" : faultSpec;
   const drop = fault?.startsWith("drop:") ? new RegExp(fault.slice(5)) : undefined;
   if (fault && !["no-version", "sorted-files"].includes(fault) && !drop)
     throw new Error(`unknown GOGEN_CACHE_ORACLE_FAULT: ${fault}`);
@@ -173,7 +176,9 @@ export function objectCache(registry, root) {
   const selection = (program) => digest(JSON.stringify([...program.wanted]));
   const wholeSelection = (value) => value.replay?.ops.some((op) => op.key === "wanted"
     && (op.kind === "measure" || (op.kind === "read" && !op.method)));
-  return {
+  const pending = [];
+  const cache = {
+    begin() { pending.length = 0; },
     read(owner, name, program) {
       // Keep a separate variant only when lowering read the complete closure.
       // Membership-only transcripts remain reusable across different shards.
@@ -204,6 +209,35 @@ export function objectCache(registry, root) {
       }
     },
     write(owner, value, reads, program) {
+      if (!program.reg) { cache.persist({owner, value, reads, program}); return; }
+      // Freeze the lowering now, as the old immediate writer did. Later owners
+      // may mutate shared IR/effect values before final provenance is available.
+      try {
+        value = compactLowering(value);
+        if (!portable(value)) return;
+        value = structuredClone(value);
+      } catch { return; }
+      pending.push({owner, value, reads: [...reads], program: {wanted: new Set(program.wanted)}});
+    },
+    finish(program) {
+      if (!pending.length) return;
+      const manifests = provenanceOf(program, {internal: true}), digests = artifactDigestsOf(registry);
+      const fileOwners = new Map([...registry.getObjects()].flatMap((o) => o.getFiles().map((f) => [f.getFilename(), `${o.getType()} ${o.getName().toUpperCase()}`])));
+      for (const entry of pending.splice(0)) {
+        const manifest = manifests.get(entry.owner), keys = new Set();
+        for (const hit of manifest?.hits ?? []) for (const result of hit.result) {
+          const key = digests.has(result) ? result : fileOwners.get(result);
+          if (key) keys.add(key);
+        }
+        entry.metadata = {format: "gogen-dependency-digests-1", owner: entry.owner, entry: entry.value.name,
+          artifactDigest: digests.get(entry.owner) ?? null,
+          dependencyDigests: Object.fromEntries([...keys].sort().map((key) => [key, digests.get(key)])),
+          provenanceComplete: !!manifest && manifest.unknownScans.length === 0
+            && !!digests.get(entry.owner) && [...keys].every((key) => !!digests.get(key))};
+        cache.persist(entry);
+      }
+    },
+    persist({owner, value, reads, program, metadata}) {
       // Repeated reads can exceed the budget before compaction. A transcript
       // with unserializable arguments must still fall back to ordinary lowering.
       try { value = compactLowering(value); } catch { return; }
@@ -211,13 +245,14 @@ export function objectCache(registry, root) {
       const file = location(owner, value.name, wholeSelection(value) ? selection(program) : ""), temp = `${file}.${randomUUID()}.pending`;
       try {
         mkdirSync(join(root, version), {recursive: true});
-        const payload = deflateRawSync(serialize({key: sourceKey(owner, reads), reads, value}), {level: 1});
+        const payload = deflateRawSync(serialize({key: sourceKey(owner, reads), reads, ...(metadata ? {metadata} : {}), value}), {level: 1});
         writeFileSync(temp, Buffer.concat([Buffer.from(digest(payload) + "\n"), payload]));
         renameSync(temp, file);
       } catch { /* Cache availability must not change compilation. */ }
       finally { try { rmSync(temp, {force: true}); } catch { /* Unavailable root. */ } }
     },
   };
+  return cache;
 }
 
 const current = new Set(["currentClass", "currentOwner", "currentTypes"]);
@@ -244,6 +279,7 @@ export function prepareDiskSession(session, registry) {
     session.diskRoot = session.cacheDir;
     session.disk = objectCache(registry, session.cacheDir);
   }
+  session.disk?.begin();
 }
 
 function suppliedKey(program, owner) {

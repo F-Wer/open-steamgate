@@ -33,16 +33,153 @@ back to lowering. Final interfaces, RTTI, tables and other metadata are rebuilt.
 Neither source words nor lowering-time reads cover every semantic dependency.
 
 
+## Resolved-artifact digests (step 3)
+
+Every compilation computes one `gogen-resolved-artifact-1` SHA-256 digest
+per registry object after syntax checking, before lowering. This is always on,
+including without a cache. `frontend-artifact-digests.mjs` owns the projections
+and stores them in a registry-keyed weak table; no digest fields enter IR or
+replay-tracked program state. A new table replaces the previous compile's memo.
+
+The digest hashes canonical JSON tuples containing the uppercase `TYPE NAME`,
+ordered effective files (portable filenames, raw-source hashes), expanded
+syntax tree shapes and token text/positions (including macro virtual positions),
+global/local definitions, typed scopes and resolved DDIC types through core's
+`parseType(registry)` contract. Definitions include resolved parameter,
+attribute, constant and named types, parameter directions/defaults/optional
+flags, visibility, aliases, superclass/interfaces/friends, method flags and
+events/handler parameters. Scopes include local/inline types, deferred names
+and symbolic resolution references. Object-reference types use symbolic
+locations rather than recursively importing another definition's graph.
+
+Dictionary keys use code-point sorting; arrays preserve semantic/source order.
+Filenames strip directory prefixes. Expanded statements, definitions and
+recursively shared types are projected and hashed once within a compile.
+Statement hashes include token text and real/virtual positions; structure
+projections reuse those hashes instead of repeating token graphs. Parent links, registries,
+object identities, parser caches and Map insertion order never enter this
+format. The digest is a snapshot of what core actually resolved, including
+Unknown/Void types, rather than a claim that resolution succeeded. Unsupported
+shapes produce a `null` digest plus an inspection error; definitions belonging
+to such an owner decline replay. The global source/version guard remains
+unchanged, including for unknown or incomplete provenance.
+
+Replay definition fingerprints now contain location **plus** `{owner, digest}`.
+A same-name/file/start definition with changed semantic contents rejects replay
+atomically. Repeated reads reuse the owner's digest rather than serializing its
+graph. Definitions without a registry/owner digest refuse persistence.
+
+Disk builds record provenance internally even when public reporting is off,
+so every new entry has `gogen-dependency-digests-1` metadata: owner/entry name,
+owner artifact digest, a sorted `dependencyDigests` dictionary from the final
+expanded provenance manifest's **hits**, and `provenanceComplete`. Filename hits
+map back to their owning artifact. Writes finish after lowering/final metadata
+passes, so later provider observations are included. This metadata describes
+what the entry was built against; it is **not in the key or a replacement for
+miss/scan guards**. Unknown scans or unavailable digests make completeness
+false. Existing entries that predate metadata are labelled unavailable by the
+inspection command. Public `provenanceOf()` remains opt-in; cache builds collect
+the internal transcript regardless of the reporting setting.
+
+```sh
+# All current artifact digests, or one artifact (no cache needed).
+node tools/gogen/frontend-artifact-digests-cli.mjs src --show 'CLAS ZCL_READER'
+# Inspect the dependency digests stored for an entry, across retained versions.
+node tools/gogen/frontend-artifact-digests-cli.mjs --cache-dir .local/cache --entry ZCL_READER
+node --test tools/gogen/frontend-artifact-digests.test.mjs
+```
+
+The cross-object gate uses a real global class definition and a separate reader
+at the ordered replay/cache seam. The provider's constant changes `1` to `9`
+without changing filename, name or start. The reader borrows the pre-resolved
+definition through a program map, without source-word or lowering lookup edges.
+Under `no-version`, semantic fingerprints give EQUAL in both line modes;
+`no-version,fingerprint-location-only` gives MISMATCH on the supplemental
+`borrowedDefinitionReplay` artifact. The corpus also contains an ordinary global
+constant reader whose Go/JS cold output changes. This controlled seam is
+explicitly **not a normal cross-object local-class lowering path**: local
+class names are `OWNER:LOCAL`, local interfaces are `OWNER|LOCAL`, and ABAP local
+names resolve within their own class pool. No cross-pool local-definition read
+has been constructed. The seam isolates the fingerprint invariant that ordinary
+global word/getObject guards would otherwise mask.
+
+An eight-interface forward type chain exercises repeated global-definition
+passes and its unchanged class reader. A terminal type mutation must change
+cold Go/JS. The within-object first-wins macro reorder remains in the oracle.
+These gates use fresh registries/processes and compare warm with fresh cold;
+they do not implement retained-registry parser invalidation.
+
+### Step 3 validation and cost
+
+The combined sequential frontend/cache/CI-oracle run passes **221 tests**.
+The latest digest/CI recheck passes **16 tests**, followed by three focused
+checks for snapshot preservation, the cross-object fault, and backward-compatible
+`drop:` regular expressions containing commas. All have zero failures/skips.
+The CI oracle has **62 observations / 60 validated mutations, zero mismatches**,
+with lines on/off. The full 27-kind sensitivity matrix has 14 covered fault
+rows / 28 expected mismatches and 13 documented uncovered rows. The strengthened
+cross-object control is EQUAL under `no-version` in both line modes. Global type
+passes and first-wins macro order are covered; reversing global-definition
+candidate insertion preserves per-object digests, and the changed inventory's
+warm output matches its own fresh cold output under the retained global guard.
+
+The typing-proof record was captured on `543b1053` before implementation edits.
+Comparison passes **239 raw artifacts in each of six modes** (sink 0/1 times
+no-cache/cold/warm), with no normalization. Digest stability passes on both the
+small oracle corpus and all **651** real-library objects: two fresh processes
+per Node 26.9.0 / Bun 1.4.2 and provenance-off/on combination, eight processes per corpus.
+The real runs have no unsupported digest shapes. Size budget
+`--changed origin/main`, explicit-path leak scan, whitespace and suite-list
+checks exit zero; `frontend.mjs` remains **7,055 lines**, zero net growth.
+
+Three fresh-process runs per scenario/reporting setting, medians on Node
+26.9.0, pinned open-abap-core + ajson, every real class selected. Both the parent
+and candidate use `OSD_HEAVY_TMP=/mnt/ram/stoker`, with the shared Go build cache.
+The parent is an isolated source copy of `543b1053`. Digests are always on in
+the candidate; disk builds also collect internal provenance. Times include
+source loading, normalization, parse, syntax, digest projection, lowering,
+replay and final dependency-metadata expansion; emission and public report
+inspection are outside the frontend timer. Digest cost includes snapshot setup
+and is measured directly, rather than inferred from total-time subtraction.
+
+| Scenario, public reporting off | Parent total | Step 3 total | Digest projection | Total overhead |
+| --- | --- | --- | --- | --- |
+| No cache | 1,448.6 ms | 1,807.0 ms | 413.1 ms | +24.7% |
+| cacheDir cold | 1,697.6 ms | 3,344.6 ms | 375.2 ms | +97.0% |
+| cacheDir warm | 1,485.5 ms | 2,415.3 ms | 372.4 ms | +62.6% |
+
+With public provenance reporting on, candidate totals are
+2,155.9 / 3,399.6 / 2,516.3 ms
+(no-cache/cold/warm); direct digest costs are
+373.5 / 371.0 / 376.7 ms.
+All 18 candidate captures have identical resolved digests and emitted artifacts /
+class IR, and their emitted-artifact/IR hash equals all 18 parent captures.
+Every warm run reuses 251 classes and lowers 21, matching the parent; there are
+272 lowered classes in cold/no-cache runs and zero diagnostics.
+
+Cache file bytes grow from 526,839 to 6,436,245
+with public reporting off, and from 694,040 to 6,534,884
+with it on. The dependency dictionaries conservatively include registry-level
+hits inherited by every manifest, so they are dense. Warm caching remains slower
+than cache-disabled compilation on this corpus. These measurements leave the
+cost visible for step 4; no selective-reuse or performance-benefit claim follows.
+Reports remain local: `.local/digest-perf-parent-ram.json`,
+`.local/digest-perf-ram-final.json`, `.local/digest-real-stability.json`, and
+`.local/digest-sensitivity-final.json`. Scratch/cache copies are removed; the
+pinned library checkouts are unchanged.
+
 ## Semantic provenance (step 2)
 
 `compileProgram({provenance: true, ...})` records semantic resolution before
 `reg.parse()`, through global definition passes, syntax checking and lowering.
-Recording is **off by default**, including with `cacheDir`. Enable it with
+Public reporting is **off by default**. Disk builds now collect an internal
+transcript for step 3 metadata. Enable public reporting with
 `provenance: true` or `GOGEN_PROVENANCE=1`; explicit `provenance: false`
-overrides the environment. This stays opt-in until step 4 consumes the data.
-This is observation only: cache keys, source hashes, replay validation and the
-whole-registry version guard are unchanged. Resolved-artifact digests and
-selective per-entry keys remain steps 3 and 4.
+overrides the environment for public reporting. Builds without a disk cache
+keep recording opt-in.
+Provenance remains observational: it supplies step 3 metadata, without changing
+cache keys, source hashes or the whole-registry version guard. Selective
+per-entry keys remain step 4.
 
 The implementation lives in `frontend-provenance.mjs` and its version-specific
 `frontend-provenance-hooks.mjs` adapters. Scoped synchronous hooks restore the
@@ -93,9 +230,9 @@ Artifact reads add edges even when an abaplint getter or `SyntaxLogic.run()`
 returns a cached result. Manifests expand these stored edges at inspection
 time, inheriting the provider's queries with their original owner/phase.
 A second cached TABL consumer therefore still shows the DTEL's DOMA lookup.
-Disk IR and memory-session entries carry only the owner's own rows and edges:
-`{rows: [...], edges: ["TYPE NAME", ...]}`. They never persist a transitive
-closure. Replay restores these rows/edges, and `provenanceOf()` expands them
+The disk IR and memory-session `provenance` field carries only the owner's own rows and edges:
+`{rows: [...], edges: ["TYPE NAME", ...]}`. It never persists a transitive query
+closure; step 3 separately saves the deduplicated dependency digests. Replay restores these rows/edges, and `provenanceOf()` expands them
 against the current registry's provider artifacts on demand. The transcript
 still does not participate in cache validation.
 
@@ -105,7 +242,8 @@ An artifact subsequently built with recording off gets an `untraced-artifact`
 marker on its owner, even when a retained syntax session bypasses checking.
 Artifacts first encountered after they were built receive
 `artifact-built-before-recording`. Memory/disk replay without an own-row
-transcript receives `lowering-built-before-recording`.
+transcript receives `lowering-built-before-recording`. Public reporting being off with `cacheDir`
+still activates the internal recorder in step 3.
 
 Inventory snapshots copy filenames and SHA-256 content hashes; they do not
 retain core's mutable file array. Replacing, adding or removing a file, or
@@ -152,7 +290,7 @@ unknown scans and exception-safe restoration. On/off comparisons include Go,
 JS or its refusal, class IR, diagnostics/refusals/missing members and all final
 metadata compared by the cache oracle.
 
-### Fix-round validation and recording cost
+### Fix-round validation and recording cost (historical step 2)
 
 The focused regression gates cover opt-in/environment precedence, own-row disk
 storage/replay, recording gaps in syntax/DDIC/memory/disk lowering, immutable
@@ -342,7 +480,7 @@ correctness. `typing-proof.mjs` was unavailable on the Step 1 base; the capture
 module uses the same fresh-process, byte-comparison pattern described in its
 review, without importing an absent file.
 
-The cache alone reads `GOGEN_CACHE_ORACLE_FAULT`. Its exact accepted values are
+The cache and replay instrumentation read `GOGEN_CACHE_ORACLE_FAULT`. Its exact accepted values are
 **test-only**:
 
 - `no-version`: omit registry sources from the version digest.
@@ -350,6 +488,9 @@ The cache alone reads `GOGEN_CACHE_ORACLE_FAULT`. Its exact accepted values are
   regular expression from word-graph dependency edges and recorded `getObject`
   reads, including misses. Keys use uppercase `TYPE NAME`; the regex has no
   flags. The owner's own source hash and replay checks remain intact.
+- `fingerprint-location-only`: restore the old location-only definition
+  fingerprint. It may be combined with `no-version` as
+  `no-version,fingerprint-location-only` to expose the borrowed-definition seam.
 - `sorted-files`: retain the global guard but restore the old sorted-by-filename
   object hash, hiding within-object file-order edits.
 
@@ -404,6 +545,8 @@ The full matrix is a slower local mode; ordinary CI runs the normal oracle and t
 | pool-constant | `drop:^TYPE` | no | Not covered / unsupported: neither explicit nor implicit constant operand lowers. | None |
 | fugr-signature | `drop:^FUGR` | no | Not covered: caller never caches because its functionModules input contains circular registry/syntax graphs that cannot be fingerprinted; group lowering is outside class replay. | None |
 | same-object-local-definition | `no-version` | no | Not covered: reader owns definition, so its object hash invalidates even without global guard. | None |
+| cross-object-same-position-definition | `no-version,fingerprint-location-only` | yes | Covered at the controlled replay seam with a real global definition; strengthened fingerprints stay EQUAL under `no-version`. No cross-pool local borrowing path exists. | `borrowedDefinitionReplay` |
+| global-definition-passes | `drop:^INTF ZIF_PASS_` | yes | Covered: eight global interface type passes; terminal resolved type changes unchanged reader lowering. | `emitGo`, `emitJs`; `ZCL_PASS_READER` |
 | file-order | `sorted-files` | yes | Covered; first-wins macro expansion changes. | `emitGo`, `emitJs`; `ZCL_ORDER_MACRO` |
 
 The former `same-position-definition` case is now truthfully titled
@@ -413,9 +556,9 @@ invalidation both with the global guard and under `no-version`. This establishes
 owner-source invalidation only. A cross-object borrowed local-definition
 fixture has not been established: frontend local definitions are qualified as
 `OWNER:LOCAL` and ABAP local names resolve in their owning class pool. Global
-named definitions get ordinary source-word/getObject dependencies. The
-location-only fingerprint gap therefore remains **not covered**, rather than
-being presented as a global-guard regression.
+named definitions get ordinary source-word/getObject dependencies. Step 3 covers the fingerprint invariant at the controlled global-definition
+replay seam described above; the unavailable cross-pool local path remains
+explicitly outside that claim.
 
 ### Round-one measurements (historical)
 
@@ -473,7 +616,7 @@ material and is not distributed in a clean checkout.
 | FUGR scans | Function-module names differ from group names; ownership resolution scans groups without `getObject`. |
 | CDS aliases | SQL-view aliases are resolved by scanning DDLS providers. |
 | BAdI definitions | ENHS/BAdI lookup is a type-wide scan and can affect syntax acceptance before gogen refuses a statement. |
-| Definition fingerprints | Replay fingerprints include name/file/start position, not semantic contents. Borrowed definitions need a semantic guard; cross-object oracle coverage is not established. |
+| Definition fingerprints | Step 3 now guards the owner's semantic digest alongside location; controlled cross-object global-definition replay coverage is established. Normal cross-pool local borrowing remains unavailable. This alone does not cover incomplete provenance. |
 
 Cached DDIC types/scopes can also hide earlier reads, and global OO resolution
 passes make stopping/order behavior a semantic input. Passing mutation tests
@@ -488,8 +631,9 @@ does not prove that an incomplete dependency manifest is safe.
 2. **Semantic provenance and resolution queries before parsing.** Implemented: attribute
    named lookups, misses, filename/alias/scan resolution and cached-artifact reads
    to their owners. Unknown paths fail closed.
-3. **Resolved-artifact digests and stronger definition fingerprints.** Include
-   semantic contents alongside location and guard global resolution/order effects.
+3. **Resolved-artifact digests and stronger definition fingerprints.** Implemented:
+   resolved semantic snapshots, location plus owner digest, dependency digest
+   metadata and inspection; global resolution/order and replay sensitivity gates.
 4. **Per-entry schema-v3 keys for complete manifests.** Keep global guards for
    incomplete entries. Require the fresh-process oracle and exact control reuse
    assertions (for example, ten dependent classes lower while 290 others reuse).
@@ -499,5 +643,5 @@ does not prove that an incomplete dependency manifest is safe.
    Test retained registries against fresh cold after multi-edit/inventory/config
    sequences; narrow body/interface hashes only after dedicated cases pass.
 
-Steps 3–6 are plans. Step 2 adds observation and deliberately implements no
-selective per-class reuse across different registry versions.
+Steps 4–6 remain plans. Steps 2–3 add provenance, resolved digests and stronger
+replay guards; they implement no selective reuse across registry versions.

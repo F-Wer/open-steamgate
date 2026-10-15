@@ -20,7 +20,14 @@ export function runSensitivity(runOracle, {classes = 4, seed = 719, lineModes = 
     const result = runOracle({classes, seed, lineModes,
       scenarios: [{name: mutation.kind, steps: [mutation]}],
       env: {...process.env, GOGEN_CACHE_ORACLE_FAULT: fault}});
-    const row = {kind: mutation.kind, fault, mismatch: result.mismatches > 0,
+    let strengthened;
+    if (mutation.kind === "cross-object-same-position-definition") {
+      strengthened = runOracle({classes, seed, lineModes,
+        scenarios: [{name: mutation.kind, steps: [mutation]}],
+        env: {...process.env, GOGEN_CACHE_ORACLE_FAULT: "no-version"}});
+      if (strengthened.mismatches) throw new Error("semantic definition fingerprints failed relaxed oracle");
+    }
+    const row = {...(strengthened ? {strengthened} : {}), kind: mutation.kind, fault, mismatch: result.mismatches > 0,
       mismatches: result.mismatches,
       differingArtifacts: [...new Set(result.rows.flatMap((r) => r.differences.artifacts))],
       differingClasses: [...new Set(result.rows.flatMap((r) => r.differences.classes))], observations: result.rows, runtimeMs: result.runtimeMs,
