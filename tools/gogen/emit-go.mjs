@@ -7,7 +7,7 @@ import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.ts";
 import {omittedFactoryCall} from "./frontend.mjs";
 import {sinkLocals, generatedBindings} from "./sink-locals.ts";
-import {analyzeOwnership} from "./frontend-owned.mjs";
+import {analyzeOwnership} from "./frontend-owned.ts";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.ts";
 import {emitBuiltinGo} from "./emit-builtins.ts";
 import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.ts";

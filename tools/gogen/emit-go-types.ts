@@ -2,6 +2,7 @@
 // Erasable contracts for emit-go.mjs. IR tags stay discriminated so the
 // emitter's existing switches narrow nodes without a runtime adapter.
 import type * as IR from './ir.ts';
+import type {OwnershipSafetyMap} from './frontend-types.ts';
 import type {Layers as SymbolLayers} from './symbols.ts';
 
 export type {Type, Field, Param, ResolvedKey, SqlColumn, WriteType, TemplateOptions} from './ir.ts';
@@ -138,6 +139,7 @@ export interface FunctionModule extends Omit<IR.FunctionModule, 'sig' | 'module'
 }
 export interface Program extends Omit<IR.Program, 'functionModules' | 'classes' | 'consts' | 'tables' | 'exceptionSupers' | 'reg' | 'structs' | 'interfaceAttrs' | 'intfOwnAttrs' | 'interfaceMethods' | 'sigs'> {
   readonly classes: readonly Class[];
+  readonly ownershipSafety?: OwnershipSafetyMap;
   readonly functionModules?: Map<string, FunctionModule>;
   readonly reg?: IR.Program['reg'];
   readonly structs: StructDefinitions;
@@ -233,7 +235,7 @@ export type EmitByteStatement = (st: ByteStatement, ctx: ByteContext, indent: st
 export type EmitBuiltinGo = (e: Builtin, args: readonly string[], names: ReadonlyMap<string, string>, imports: Set<string>) => string;
 export type EmitPackedInt8 = (e: Conversion, render: (e: Expr) => string, helper: RenderName) => string | null;
 export type EmitPackedComparison = (c: Condition, render: (e: Expr) => string) => string | null;
-export type ExceptionClass = (cls: Partial<Class> | null | undefined, classes: ReadonlyMap<string, Class>) => boolean;
+export type ExceptionClass = (cls: Partial<Pick<Class, 'name' | 'super'>> | null | undefined, classes: ReadonlyMap<string, Class>) => boolean;
 export interface RttiHelpers { readonly goType: RenderType; readonly ident: RenderName }
 export type ObjectRttiGo = (program: ProgramInput, helpers: RttiHelpers) => string[];
 export interface MessageHelpers extends RttiHelpers {
