@@ -1,0 +1,19 @@
+{
+  "format": "osd-trace-meta/1",
+  "generator": "dsl-l3-cockpit",
+  "generator_version": "0.7",
+  "lines": [
+    {"file": "cockpit/zosd_fleet2/Component.js", "line": 1, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 1},
+    {"file": "cockpit/zosd_fleet2/Component.js", "line": 2, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 2},
+    {"file": "cockpit/zosd_fleet2/Component.js", "line": 3, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 3},
+    {"file": "cockpit/zosd_fleet2/Component.js", "line": 4, "node": "set/fleet2/cockpit", "set_line": 124, "template_line": 4}
+  ],
+  "model": "sha256:204c9c4a972314ea503b6b11cc5e2dc9762525d233afae99ed3ab36e8a31c7ec",
+  "model_serialization": "JSON.stringify (existing writer model)",
+  "outputs": [
+    {"file": "cockpit/zosd_fleet2/Component.js", "hash": "sha256:04479cf3a1aebe05a28ff07d2a8fc9f3429b1e5ed032b0ea8d05beb35f32b4cf"}
+  ],
+  "set": "src/l2demo/fleet2.l3.yaml",
+  "template": "recipes/l3-cockpit/Component.js",
+  "templates": {"recipes/l3-cockpit/Component.js": "sha256:013fd0a4ce704e13f01f5bb68c16532bea442cbeae1445a1c305c6194aa8723b"}
+}
