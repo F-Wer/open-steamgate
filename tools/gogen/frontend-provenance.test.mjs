@@ -32,6 +32,23 @@ function compile(files, objects) {
   });
 }
 
+for (const compiles of [2, 3]) test(`named queries survive ${compiles} compiles in one recording scope`, () => {
+  recordProvenance(() => {
+    let reg = registry({"zcl_a.clas.abap": classSource("zcl_a")});
+    let first;
+    for (let i = 0; i < compiles; i++) {
+      const p = compileProgram({registry: reg, folders: [], objects: ["ZCL_A"], tolerant: true, provenance: true});
+      reg = p.reg;
+      const scheduling = compilationProvenanceOf(p).scheduling.filter((q) => q.kind === "getObject");
+      assert.ok(scheduling.some((q) => q.args.join(" ") === "CLAS ZCL_A"
+        && q.result.join(" ") === "CLAS ZCL_A"), `compile ${i + 1} records selection`);
+      const manifest = rows(provenanceOf(p).get("CLAS ZCL_A"));
+      if (!first) first = manifest;
+      else assert.deepEqual(manifest, first, `compile ${i + 1} retains provider and rebuilds lowering queries`);
+    }
+  });
+});
+
 test("pre-parse manifests cover implicit pools, include macros, FM ownership and DDIC chains", () => {
   const c = corpus(), p = compile(c.files, c.objects), manifests = provenanceOf(p);
   const implicit = manifests.get("CLAS ZCL_POOL_IMPLICIT");

@@ -258,6 +258,9 @@ export function beginProvenanceCompile(reg) {
   // Retain provider-building observations, never a previous entry's transcript.
   state.lowerings.clear();
   state.finalOutput = empty();
+  // Lowering/final-output entries are replaced above; scheduling keeps its
+  // entry, so expire its interned tuples along with the pruned query rows.
+  active.named.delete(state.scheduling);
   state.scheduling.queries = new Map([...state.scheduling.queries].filter(([, row]) =>
     row.kind.startsWith("registry-") || ["global-definitions", "include-macro-context"].includes(row.kind)));
 }
