@@ -1,3 +1,4 @@
+import {withProvenance, expandProgramSelection, withArtifact} from "./frontend-provenance.mjs";
 import {isSourceIdentity} from "../osd-source-identity.mjs";
 import {append} from "./append.mjs";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
@@ -108,7 +109,7 @@ const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
  */
 // skip(path): a file not to load, for a layered build where a later folder
 // hides an object an earlier one holds (osg-build.mjs; ultra/packs)
-export function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
+export const compileProgram = withProvenance(function compileProgram({folders, objects, tolerant = false, skip = () => false, includeTests = false, registry, session, cacheDir}) {
   const config = abaplint.Config.getDefault().get();
   config.syntax = {...config.syntax, version: "v758", errorNamespace: "."};
   // only the syntax check and parser errors are read below (parser_error is a
@@ -177,28 +178,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   // A literal CALL FUNCTION is a dependency on its function group. The
   // registry already knows each module's group; include it before signatures
   // are built, including calls made by a module in another group.
-  const fmGroups = new Map();
-  for (const g of reg.getObjects()) if (g instanceof abaplint.Objects.FunctionGroup) {
-    for (const m of g.getModules()) fmGroups.set(upper(m.getName()), g.getName().toLowerCase());
-  }
-  for (let i = 0; i < wanted.length; i++) {
-    const obj = reg.getObject("CLAS", wanted[i]) ?? reg.getObject("FUGR", wanted[i]);
-    for (const file of obj?.getABAPFiles() ?? []) {
-      for (const match of file.getRaw().matchAll(/\bCALL\s+FUNCTION\s+'([^']+)'/gi)) {
-        const group = fmGroups.get(upper(match[1]));
-        if (group && !wanted.includes(group)) wanted.push(group);
-      }
-      // A PUBLIC CLASS-DATA read is a dependency too: its class constructor
-      // and storage must be emitted even when no method of that class is called.
-      for (const match of file.getRaw().matchAll(/\b([a-z_][\w]*)=>([a-z_]\w*)/gi)) {
-        const owner = match[1].toLowerCase();
-        const attr = upper(match[2]);
-        const def = reg.getObject("CLAS", owner)?.getDefinition();
-        if (def?.getAttributes().getStatic().some((a) => upper(a.getName()) === attr && a.getVisibility?.() === abaplint.Visibility.Public)
-            && !wanted.includes(owner)) wanted.push(owner);
-      }
-    }
-  }
+  expandProgramSelection(reg, wanted, abaplint);
 
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
@@ -246,7 +226,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   // a group the front end cannot even read (an error that is not a refusal)
   // is left out whole, named in skipped, and its modules stay refused
   const readable = groups.filter((g) => {
-    try { functionGroupSignatures(ctx0, g); return true; } catch (e) {
+    try { withArtifact(ctx0, g, () => functionGroupSignatures(ctx0, g), "function-signature"); return true; } catch (e) {
       program.skipped.push(`${fugrOwner(g)}: ${e.message}`);
       for (const [k, v] of program.functionModules) if (v.owner === fugrOwner(g)) program.functionModules.delete(k);
       return false;
@@ -264,7 +244,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
     if (obj instanceof abaplint.Objects.Class && wanted.includes(obj.getName().toLowerCase())) program.classes.push(compile(ctx0, obj, lowerClass, session));
   }
   for (const l of localDefs) program.classes.push(compile(ctx0, l, lowerClass, session));
-  for (const g of readable) program.classes.push(functionGroupIr(ctx0, g));
+  for (const g of readable) program.classes.push(withArtifact(ctx0, g, () => functionGroupIr(ctx0, g)));
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
   program.interfaceMethods = new Map();
@@ -293,7 +273,7 @@ export function compileProgram({folders, objects, tolerant = false, skip = () =>
   program.lockObjects = lockObjectRegistry(reg, program);
   finishSession(session, reg);
   return Object.assign(program, {amcChannels: samcOf(folders), ownershipSafety: session ? (session.ownershipSafety ??= sourceOwnershipSafety(reg)) : sourceOwnershipSafety(reg)});
-}
+});
 
 /**
  * The table registry (go/abap tables.go, README "The table registry"): every

@@ -1,3 +1,4 @@
+import {recordProvenance} from "./frontend-provenance.mjs";
 import {createRequire} from "node:module";
 import {readFileSync, readdirSync} from "node:fs";
 import {join} from "node:path";
@@ -12,7 +13,7 @@ const abaplint = createRequire(require.resolve("@abaplint/transpiler/package.jso
 export const jsonArtifact = (value) => JSON.stringify(value, (_, v) =>
   v instanceof Map ? {map: [...v]} : v instanceof Set ? {set: [...v]} : v);
 
-export function orderedRegistry(folders, order = []) {
+export function orderedRegistry(folders, order = [], {parse = true} = {}) {
   const config = abaplint.Config.getDefault().get();
   // Model a missing external provider: abaplint leaves its type unresolved,
   // so gogen can record the failed lookup instead of skipping a syntax-broken
@@ -38,16 +39,24 @@ export function orderedRegistry(folders, order = []) {
   slots.forEach((slot, i) => { files[slot] = selected[i]; });
   for (const {name, path} of files) registry.addFile(new abaplint.MemoryFile(name,
     lowerNarrowSubmit(lowerBoolx(readFileSync(path, "utf8"), name, abaplint), name, abaplint)));
-  registry.parse();
+  if (parse) registry.parse();
   return registry;
 }
 
 // Always called in a fresh child by the oracle. Cache-disabled compilation
 // uses the ordinary frontend, including its different PERSIST_LOWERING path.
-export function captureArtifacts({folders, objects, cacheDir, order}) {
-  const program = compileProgram({folders, objects, cacheDir, tolerant: true,
+export function captureArtifacts(options) {
+  return options.provenance ?? !!options.cacheDir
+    ? recordProvenance(() => capture(options)) : capture(options);
+}
+function capture({folders, objects, cacheDir, order, provenance}) {
+  const program = compileProgram({folders, objects, cacheDir, provenance, tolerant: true,
     includeTests: new Set(["ZCL_CONTROL_0000"]),
     registry: orderedRegistry(folders, order)});
+  return artifactsOf(program);
+}
+
+export function artifactsOf(program) {
   const artifacts = {emitGo: emitGo(program)};
   try { artifacts.emitJs = emitJs(program); }
   catch (error) { artifacts.jsRefusal = `${error.name}: ${error.message}`; }

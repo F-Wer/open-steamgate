@@ -1,3 +1,4 @@
+import {artifactLowering} from "./frontend-provenance.mjs";
 import {append} from "./append.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // A unit closure keeps one immutable registry. Reuse lowering only for
@@ -59,7 +60,7 @@ function suppliedKey(program, owner) {
   return JSON.stringify([...program.supplied].filter(([k]) => k.startsWith(`${owner}=>`)).map(([k, v]) => [k, [...v]]));
 }
 
-export function compileClass(ctx, obj, lower, session) {
+export const compileClass = artifactLowering(function compileClass(ctx, obj, lower, session) {
   const program = ctx.program;
   const counts = program.frontendCounts;
   const file = obj.getMainABAPFile();
@@ -98,7 +99,7 @@ export function compileClass(ctx, obj, lower, session) {
     replay: recorded.replay, supplied: suppliedKey(program, key),
     current: Object.fromEntries([...current].map((k) => [k, program[k]]))});
   return ir;
-}
+});
 
 export function finishSession(session, registry) {
   // Abaplint can synthesize registry files while resolving dictionary types.
