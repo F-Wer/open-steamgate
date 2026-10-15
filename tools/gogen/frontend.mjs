@@ -1575,7 +1575,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       const nm = /<[\w]+>/.exec(lt.concatTokens())?.[0];
       if (nm === undefined || !ctx.fieldSymbols.has(upper(nm))) throw new Unsupported(`LOOP ASSIGNING ${lt.concatTokens()}`);
       fs = upper(nm);
-      if (table.type.row.k === "struct") table.type.stable = true;
+      if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
     } else {
       // (ultra/events) LOOP ... TRANSPORTING NO FIELDS and the like have no target
       if (!lt?.findFirstExpression(Expressions.Target)) throw new Unsupported(`LOOP form: ${text}`);
@@ -1973,7 +1973,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     const initial = /\bINITIAL\s+LINE\b/i.test(text);
     const valueNode = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     if (!initial && !valueNode) throw new Unsupported(`APPEND REFERENCE INTO form: ${text}`);
-    table.type.stable = true;
+    const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true;
     return {s: "append", table, value: initial ? {e: "zero", type: table.type.row} : convert(source(valueNode, ctx, table.type.row), table.type.row), refInto};
   }
   // APPEND ASSIGNING gives the field symbol the new row's address.
@@ -1984,7 +1984,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (table.type.k !== "table") throw new Unsupported(`APPEND ... ASSIGNING to a ${table.type.k}`);
     refuseSorted(table, "APPEND to");
     if (!fsType || fsType.k === "data" || !sameType(fsType, table.type.row) || (fsType.k === "struct" && fsType.go !== table.type.row.go)) throw new Unsupported(`APPEND ... ASSIGNING ${fsName}: ${text}`);
-    if (table.type.row.k === "struct") table.type.stable = true;
+    if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
     const value = node.findDirectExpression(Expressions.SimpleSource4) ?? node.findDirectExpression(Expressions.Source);
     return {s: "append", table, value: convert(source(value, ctx, table.type.row), table.type.row), fs: fsName};
   }
@@ -2037,7 +2037,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (table.type.k === "data" && table.type.table && fsType?.k === "data") return {s: "append_initial_data", table, fs: fsName};
     if (table.type.k !== "table" || !fsType || fsType.k === "data" || !sameType(fsType, table.type.row)) throw new Unsupported(`APPEND form: ${text}`);
     refuseSorted(table, "APPEND to");
-    table.type.stable = true;
+    const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true;
     return {s: "append", table, value: {e: "zero", type: table.type.row}, fs: fsName};
   }
   if (isStmt(node, Statements.Append)) {
@@ -2089,7 +2089,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     if (rt && /\bASSIGNING\b/i.test(rt.concatTokens())) {
       fs = upper(/<[\w]+>/.exec(rt.concatTokens())?.[0] ?? "");
       if (!ctx.fieldSymbols.has(fs)) throw new Unsupported(`READ TABLE ASSIGNING ${fs}`);
-      if (table.type.row.k === "struct") table.type.stable = true;
+      if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
     } else if (rt && /^TRANSPORTING\s+NO\s+FIELDS$/i.test(rt.concatTokens().trim())) {
       // only sy-subrc and sy-tabix
     } else if (rt) {
@@ -2099,7 +2099,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       refInto = /\bREFERENCE\s+INTO\b/i.test(rt.concatTokens());
       if (refInto) {
         if (into.type.k !== "dref") throw new Unsupported(`READ TABLE REFERENCE INTO a ${into.type.k}`);
-        table.type.stable = true;
+        const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true;
       } else if (!sameType(into.type, table.type.row)) into = {...into, conv: true};
     }
     // WITH [TABLE] KEY k COMPONENTS c = v ...: a secondary key's order (secondaryKey)
@@ -2162,7 +2162,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       const fsName = upper(/ASSIGNING\s+(?:FIELD-SYMBOL\(\s*)?(<[\w]+>)/i.exec(text)?.[1] ?? "");
       if (!ctx.fieldSymbols.has(fsName)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}`);
       if (ctx.fieldSymbols.get(fsName).k !== "data" && !sameType(ctx.fieldSymbols.get(fsName), table.type.row)) throw new Unsupported(`READ TABLE ASSIGNING ${fsName}: typed unlike the rows`);
-      if (table.type.row.k === "struct") table.type.stable = true;
+      if (table.type.row.k === "struct") { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
       return {s: "read_index", table, index, fs: fsName};
     }
     const into = lvalue(node.findFirstExpression(Expressions.ReadTableTarget).findFirstExpression(Expressions.Target), ctx);
@@ -2370,7 +2370,7 @@ function compiledFunctionCall(node, ctx, text, name) {
     // NON-UNIQUE key goes is not measured): the row goes before the first
     // row with a greater key, not at all when one has the same key
     if (table.type.sorted) {
-      if (refInto) table.type.stable = true;
+      if (refInto) { const tableType = /** @type {import("./frontend-types.ts").Mutable<import("./frontend-types.ts").TableType>} */ (table.type); tableType.stable = true; }
       if (!table.type.unique) throw new Unsupported(`INSERT INTO TABLE of a SORTED table with a NON-UNIQUE key`);
       const line = table.type.sorted.length === 1 && table.type.sorted[0] === "TABLE_LINE";
       const sortKeys = line ? [{line: true, type: table.type.row}] : table.type.sorted.map((k) => ({name: fieldOf(ctx, table.type.row, k, text).name, type: fieldOf(ctx, table.type.row, k, text).type}));
