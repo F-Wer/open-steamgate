@@ -78,6 +78,19 @@ A same-name/file/start definition with changed semantic contents rejects replay
 atomically. Repeated reads reuse the owner's digest rather than serializing its
 graph. Definitions without a registry/owner digest refuse persistence.
 
+The definition fingerprint is **owner-local**. A DEFAULT naming another object's
+constant projects its token text symbolically, as lowering uses it. Inherited
+members are represented only by superclass name, and an exception superclass is
+also a symbolic edge. These external semantics are covered only by provenance
+dependencies: step 4 must key on dependency digests as well as the fingerprint.
+
+Resetting the digest memo does not repair parser artifacts in a retained registry.
+A provider TYPE edit left its consumer's IntegerType in a retained registry;
+a fresh registry resolved Integer8Type. Step 4 must use a fresh registry after
+edits. Core also does not resolve READ-ONLY on DATA attributes: only the tokens
+and raw-source hash carry it. Step 6 must account for that resolution boundary.
+
+
 Disk builds record `gogen-dependency-digests-1` metadata only with provenance
 recording (`GOGEN_PROVENANCE=1` / `provenance: true`, or an explicit enclosing
 `recordProvenance` session). Explicit `provenance: false` overrides the environment.

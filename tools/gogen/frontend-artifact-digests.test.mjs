@@ -35,6 +35,27 @@ test("resolved hashes propagate hidden pool and DDIC changes into unchanged scop
   for (const key of ["CLAS ZCL_POOL_IMPLICIT", "CLAS ZCL_POOL_EXPLICIT", "TABL ZORACLE_TAB", "DTEL ZORACLE_NUM", "CLAS ZCL_DDIC"])
     assert.notEqual(after.get(key), before.get(key), key);
   assert.equal(after.get("CLAS ZCL_CONTROL_0001"), before.get("CLAS ZCL_CONTROL_0001"));
+  // Keep owners unchanged: only their DTEL's domain length/scale changes.
+  writeFileSync(join(dir, "zcl_shape.clas.abap"), `CLASS zcl_shape DEFINITION PUBLIC.
+PUBLIC SECTION. DATA value TYPE zoracle_num.
+EVENTS changed EXPORTING VALUE(value) TYPE zoracle_num.
+ENDCLASS. CLASS zcl_shape IMPLEMENTATION. ENDCLASS.`);
+  writeFileSync(join(dir, "zif_shape.intf.abap"), `INTERFACE zif_shape PUBLIC.
+METHODS run IMPORTING value TYPE zoracle_num. ENDINTERFACE.`);
+  const unchanged = [];
+  for (const [datatype, field, oldValue, newValue] of [
+    ["CHAR", "LENG", "000010", "000020"], ["DEC", "DECIMALS", "000002", "000004"],
+  ]) {
+    const domain = c.files["zoracle_num.doma.xml"].replace("INT4", datatype)
+      .replace("</DD01V>", "<DECIMALS>000002</DECIMALS></DD01V>");
+    writeFileSync(join(dir, "zoracle_num.doma.xml"), domain);
+    const original = artifactDigestsOf(build(dir, c));
+    writeFileSync(join(dir, "zoracle_num.doma.xml"), domain.replace(`<${field}>${oldValue}`, `<${field}>${newValue}`));
+    const edited = artifactDigestsOf(build(dir, c));
+    for (const key of ["CLAS ZCL_SHAPE", "INTF ZIF_SHAPE"])
+      if (edited.get(key) === original.get(key)) unchanged.push(`${datatype} ${field}: ${key}`);
+  }
+  assert.deepEqual(unchanged, [], "resolved owner digests must change for length and scale edits");
 }));
 
 test("expanded macro text and virtual positions change an unchanged consumer digest", () => scratch((dir) => {
@@ -194,3 +215,60 @@ test("cross-object oracle: location-only mismatches, semantic fingerprint stays 
     if (mismatches) for (const row of result.rows) assert.ok(row.differences.artifacts.includes("borrowedDefinitionReplay"));
   }
 });
+
+
+test("definition fingerprints and replay refuse unsupported or missing owner digests", () => {
+  class ClassDefinition {
+    getName() { return "ZBAD"; }
+    getFilename() { return "zbad.abap"; }
+    getStart() { return {getRow: () => 1, getCol: () => 1}; }
+  }
+  const def = new ClassDefinition();
+  const unsupported = {getType: () => "TABL", getName: () => "ZBAD",
+    getFiles: () => [{getFilename: () => def.getFilename(), getRaw: () => ""}],
+    parseType: () => new Map()};
+  const outcomes = [];
+  for (const objects of [[unsupported], []]) {
+    const reg = {getObjects: () => objects};
+    let error;
+    try { definitionFingerprint(reg, def); } catch (caught) { error = caught; }
+    outcomes.push(error instanceof TypeError && error.message === "definition has no resolved owner digest");
+    const recorded = recordLowering({reg, definitions: new Map([["bad", def]])},
+      (p) => p.definitions.get("bad").getName());
+    assert.equal(recorded.ir, "ZBAD", "lowering still succeeds");
+    outcomes.push(recorded.replay === undefined);
+  }
+  assert.deepEqual(outcomes, [true, true, true, true], "null and absent owners must throw and refuse persistence");
+});
+
+test("definition projection pins metadata, attributes, named types, defaults, parameters and flags", () => scratch((dir) => {
+  writeFileSync(join(dir, "zcl_projection.clas.abap"), `CLASS zcl_projection DEFINITION PUBLIC.
+PUBLIC SECTION. DATA value TYPE i. TYPES named TYPE i.
+METHODS run IMPORTING iv TYPE i DEFAULT 1.
+ENDCLASS. CLASS zcl_projection IMPLEMENTATION. METHOD run. value = iv. ENDMETHOD. ENDCLASS.`);
+  const p = compileProgram({folders: [dir], objects: [], tolerant: true});
+  const def = p.reg.getObject("CLAS", "ZCL_PROJECTION").getDefinition();
+  const method = [...def.getMethodDefinitions().getAll()][0], params = method.getParameters();
+  // Direct definition projections exclude the redundant syntax/scope ingredients.
+  const project = () => prepareArtifactDigests(p.reg).definition(def);
+  const probe = (name, change, restore) => {
+    const before = project(); change();
+    assert.notEqual(project(), before, name); restore();
+  };
+  const override = (name, obj, key, value) => {
+    const previous = obj[key];
+    probe(name, () => { obj[key] = value; }, () => { obj[key] = previous; });
+  };
+  const attr = def.getAttributes().getAll()[0];
+  override("identifier meta", attr, "getMeta", () => ["projection-probe"]);
+  override("attributes", def.getAttributes(), "getAll", () => []);
+  override("named types", def.getTypeDefinitions(), "getAll", () => []);
+  override("parameter defaults", params, "getParameterDefault", () => undefined);
+  override("parameter identifiers", params.getAll()[0], "getMeta", () => ["parameter-probe"]);
+  override("method flags", method, "isStatic", () => !method.is_static);
+  const scope = p.reg.getObject("CLAS", "ZCL_PROJECTION").syntaxResult.spaghetti.getTop();
+  const projected = JSON.stringify(prepareArtifactDigests(p.reg).scope(scope));
+  const clearReferences = (s) => { s.getData().references = []; s.getChildren().forEach(clearReferences); };
+  clearReferences(scope);
+  assert.notEqual(JSON.stringify(prepareArtifactDigests(p.reg).scope(scope)), projected, "scope references");
+}));
