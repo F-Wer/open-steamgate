@@ -52,9 +52,9 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
     if (a.getVisibility() !== abaplint.Visibility.Public && !(inside && (friend || ctx.className === at || a.getVisibility() === abaplint.Visibility.Protected))) {
       throw new Unsupported(`${owner}=>${attr} is ${a.getVisibility() === abaplint.Visibility.Private ? "private" : "protected"} to ${at}`);
     }
-    const file = ctx.reg.getObject("CLAS", at.split(":")[0])?.getABAPFiles().find((f) => f.getFilename() === a.getFilename());
-    const declaration = file?.getStatements().find((st) => st.getTokens().some((t) => t.getStart().getRow() === a.getToken().getStart().getRow() && t.getStart().getCol() === a.getToken().getStart().getCol()));
-    const readOnly = /\bREAD\s*-\s*ONLY\b/i.test(declaration?.concatTokens() ?? "");
+    const file = pool?.getABAPFiles().find((f) => f.getFilename() === a.getFilename());
+    const definition = file?.getInfo().getClassDefinitionByName(at.split(":").at(-1));
+    const readOnly = definition?.attributes.find((x) => upper(x.name) === attr)?.readOnly === true;
     if (write && !inside && readOnly) {
       throw new Unsupported(`${owner}=>${attr}: a write to a READ-ONLY attribute outside ${at}`);
     }

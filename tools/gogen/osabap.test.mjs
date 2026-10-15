@@ -732,3 +732,36 @@ START-OF-SELECTION.
     rmSync(dir, {recursive: true, force: true});
   }
 });
+
+test("native report distinguishes keyword-looking literals from CASE, FIND and REPLACE flags", () => {
+  const dir = mkdtempSync(join(tmpdir(), "osabap-token-parsers-"));
+  try {
+    const report = join(dir, "ztokenparsers.prog.abap");
+    writeFileSync(report, `REPORT ztokenparsers.
+PARAMETERS p_run TYPE abap_bool AS CHECKBOX DEFAULT abap_true.
+START-OF-SELECTION.
+  DATA picked TYPE i.
+  CASE 'x'. WHEN 'OTHERS'. picked = 1. ENDCASE.
+  WRITE / picked.
+  CASE 'x'. WHEN 'OTHERS'. picked = 1. WHEN OTHERS. picked = 2. ENDCASE.
+  WRITE / picked.
+  FIND 'IGNORING CASE' IN 'ignoring case'.
+  WRITE / sy-subrc.
+  FIND 'IGNORING CASE' IN 'ignoring case' IGNORING CASE.
+  WRITE / sy-subrc.
+  DATA text TYPE string VALUE 'ignoring case'.
+  REPLACE 'IGNORING CASE' IN text WITH 'ok'.
+  WRITE / sy-subrc.
+  REPLACE 'IGNORING CASE' IN text WITH 'ok' IGNORING CASE.
+  WRITE / text.
+  DATA bait TYPE string VALUE 'INTO TABLE @DATA(fake)'.
+  DATA fake TYPE string.
+  fake = 'ordinary'.
+  WRITE / fake.
+`);
+    execFileSync(process.execPath, [builder, report], {stdio: "inherit"});
+    const result = run(["--run"]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "0\n2\n4\n0\n4\nok\nordinary\n");
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+});

@@ -2081,7 +2081,7 @@ function structure(node, ctx) {
     let others = null;
     for (const w of node.findDirectStructures(Structures.When)) {
       const st = w.findDirectStatement(Statements.When) ?? w.findDirectStatement(Statements.WhenOthers);
-      if (st.get() instanceof Statements.WhenOthers || /\bOTHERS\b/i.test(st.concatTokens())) { others = bodyOf(w, ctx); continue; }
+      if (st.get() instanceof Statements.WhenOthers) { others = bodyOf(w, ctx); continue; }
       // WHEN a OR b OR c: the alternatives after the first sit in Or nodes
       // (only the first was read until 2026-09-23, silently)
       const alts = [...st.findDirectExpressions(Expressions.Source), ...st.findDirectExpressions(Expressions.Or).map((o) => o.findDirectExpression(Expressions.Source))];
@@ -3165,14 +3165,17 @@ function statement(node, ctx) {
     // overlap, n is 0 and sy-subrc 4 when there is none; REGEX may be a
     // CL_ABAP_REGEX object (open-abap-core's: its PATTERN and MV_IGNORE_CASE)
     const tw = words.filter((w) => w !== "" && w !== ".").join(" ");
-    if (/^FIND ALL OCCURRENCES OF IN (IGNORING CASE )?MATCH COUNT$/.test(tw) && node.findDirectExpressions(Expressions.Source).length === 2) {
+    const matches = (...parts) => parts.reduce((forms, part) => forms.flatMap((form) =>
+      (Array.isArray(part) ? part : [part]).map((p) => [form, p].filter(Boolean).join(" "))), [""]).includes(tw);
+    const hasKeywords = (...seq) => words.some((_, i) => seq.every((w, j) => words[i + j] === w));
+    if (matches("FIND ALL OCCURRENCES OF IN", ["", "IGNORING CASE"], "MATCH COUNT") && node.findDirectExpressions(Expressions.Source).length === 2) {
       const [pat, subj] = node.findDirectExpressions(Expressions.Source);
       const kind = upper(node.findDirectExpression(Expressions.FindType)?.concatTokens() ?? "");
       if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
       const regex = kind !== "";
       const pcre = kind === "PCRE";
       let pattern = source(pat, ctx);
-      let icase = {e: "flag", value: /\bIGNORING\s+CASE\b/i.test(text), type: {k: "bool"}};
+      let icase = {e: "flag", value: hasKeywords("IGNORING", "CASE"), type: {k: "bool"}};
       if (!pcre && regex && pattern.type.k === "ref" && pattern.type.name === "CL_ABAP_REGEX" && ctx.program.wanted.has("CL_ABAP_REGEX") && !icase.value) {
         const base = pattern;
         pattern = {e: "refattr", base, name: "PATTERN", type: S};
@@ -3187,11 +3190,11 @@ function statement(node, ctx) {
     // [REGEX | PCRE] p IN s [IGNORING CASE] RESULTS r, r a match_result or a
     // match_result_tab (open-abap-core's CL_ABAP_MATCHER, CL_IXML). A4H
     // 2026-09-25 (ZCL_GOGEN_T_FINDRES, _FINDPCRE): see abap.FindResults
-    if (/^FIND (FIRST OCCURRENCE OF |ALL OCCURRENCES OF )?IN ((IGNORING|RESPECTING) CASE )?RESULTS$/.test(tw)
+    if (matches("FIND", ["", "FIRST OCCURRENCE OF", "ALL OCCURRENCES OF"], "IN", ["", "IGNORING CASE", "RESPECTING CASE"], "RESULTS")
       && node.findDirectExpressions(Expressions.Source).length === 2) return findResults(node, ctx, text, tw);
     const byteFind = lowerByteFind(node, ctx, text, kids, words, tw, byteStatementHelpers);
     if (byteFind) return byteFind;
-    if (words.includes("ALL") || /\b(RESULTS|MATCH\s+COUNT|IN\s+BYTE\s+MODE|RESPECTING)\b/i.test(text)) throw new Unsupported(`FIND form: ${text}`);
+    if (words.includes("ALL") || words.includes("RESULTS") || words.includes("RESPECTING") || hasKeywords("MATCH", "COUNT") || hasKeywords("IN", "BYTE", "MODE")) throw new Unsupported(`FIND form: ${text}`);
     const ft = node.findDirectExpression(Expressions.FindType);
     const kind = ft ? upper(ft.concatTokens()) : "";
     if (kind && kind !== "REGEX" && kind !== "PCRE") throw new Unsupported(`FIND ${kind}`);
@@ -3215,7 +3218,7 @@ function statement(node, ctx) {
     const patX = source(pat, ctx);
     if (!charlike(patX.type)) throw new Unsupported(`FIND of a ${patX.type.k}`);
     const out = {s: "find", regex: kind !== "", pcre: kind === "PCRE", pattern: convert(patX, S),
-      icase: /\bIGNORING\s+CASE\b/i.test(text), subs: [], off: null, len: null};
+      icase: hasKeywords("IGNORING", "CASE"), subs: [], off: null, len: null};
     if (inTable) {
       const tb = source(subj, ctx);
       if (tb.type.k !== "table" || tb.type.row.k !== "string") throw new Unsupported(`FIND IN TABLE of a ${tb.type.k === "table" ? `table of ${tb.type.row.k}` : tb.type.k}`);
