@@ -38,6 +38,13 @@ const exceptions = {
   "tools/gogen/frontend-source-key.mjs": {"node:crypto": ["createHash"]},
   "tools/gogen/frontend-artifact-digests.mjs": {"node:crypto": ["createHash"], "node:path": ["basename"]},
   "tools/gogen/frontend-inventory.mjs": {"node:crypto": ["createHash"], "node:module": ["createRequire"]},
+  "tools/gogen/frontend-v3-shadow.mjs": {
+    "node:fs": ["mkdirSync", "readFileSync", "writeFileSync", "renameSync", "rmSync"], "node:path": ["join"],
+    "node:crypto": ["createHash", "randomUUID"], "node:v8": ["serialize", "deserialize"],
+    "node:zlib": ["deflateRawSync", "inflateRawSync"],
+  },
+  "tools/gogen/frontend-v3-key.mjs": {"node:crypto": ["createHash"]},
+  "tools/gogen/frontend-v3-queries.mjs": {"node:module": ["createRequire"]},
 };
 const hostImports = {"node:fs": ["readFileSync", "readdirSync", "writeFileSync"],
   "node:path": ["*"], "node:child_process": ["execFileSync"]};
