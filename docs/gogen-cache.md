@@ -32,6 +32,225 @@ Nonportable graphs, nested mutations, corrupt entries and unavailable caches fal
 back to lowering. Final interfaces, RTTI, tables and other metadata are rebuilt.
 Neither source words nor lowering-time reads cover every semantic dependency.
 
+
+## Semantic provenance (step 2)
+
+`compileProgram({provenance: true, ...})` records semantic resolution before
+`reg.parse()`, through global definition passes, syntax checking and lowering.
+Recording is **off by default**, including with `cacheDir`. Enable it with
+`provenance: true` or `GOGEN_PROVENANCE=1`; explicit `provenance: false`
+overrides the environment. This stays opt-in until step 4 consumes the data.
+This is observation only: cache keys, source hashes, replay validation and the
+whole-registry version guard are unchanged. Resolved-artifact digests and
+selective per-entry keys remain steps 3 and 4.
+
+The implementation lives in `frontend-provenance.mjs` and its version-specific
+`frontend-provenance-hooks.mjs` adapters. Scoped synchronous hooks restore the
+original descriptors in `finally`, including on errors. The frontend's FM
+selection walk was moved unchanged into the recorder module so its index reads
+and named ownership queries can be attributed to each consumer. Function-group
+signature/lowering work and class lowering have explicit artifact contexts.
+`frontend.mjs` shrinks by 20 physical lines.
+
+```js
+import {compileProgram} from "./tools/gogen/frontend.mjs";
+import {provenanceOf, recordProvenance} from "./tools/gogen/frontend-provenance.mjs";
+const program = compileProgram({folders: ["src"], objects: ["ZCL_READER"], provenance: true});
+const manifest = provenanceOf(program).get("CLAS ZCL_READER");
+// With a supplied registry, wrap its construction/parse too:
+recordProvenance(() => { registry.parse(); return compileProgram({registry, folders: [], objects}); });
+```
+
+`provenanceOf(program)`, `provenanceOf(session)` and `provenanceOf(registry)`
+return a `Map` keyed by uppercase `TYPE NAME`, including non-selected registry
+objects. Each value is `{hits: [], misses: [], scans: [], unknownScans: []}`.
+A named-query row has `artifact` (the original owner), `phase`, `kind`, `args`
+and `result`. An empty result is a miss, rather than an omitted dependency:
+
+```json
+{"artifact":"DTEL ZORACLE_NUM","phase":"ddic-type","kind":"getObject",
+ "args":["DOMA","ZORACLE_NUM"],"result":["DOMA ZORACLE_NUM"]}
+```
+
+Scans additionally have `scan` (`getObjects` or `getObjectsByType`), ordered
+visited `result` object keys and `complete`. `complete: false` preserves early
+termination at the winning candidate. `queryArgs`, where available, identify
+the enclosing semantic query separately from the iterator's arguments.
+For example, a `cds-alias` scan has `args: ["DDLS"]` and
+`queryArgs: ["ZSQLALIAS"]`. Unknown scans have `kind: "unknown-scan"` and a
+short `site` stack. Names used in case-insensitive resolution are normalized
+for inspection; filenames in results retain their actual spelling.
+
+The recorder covers named object/file/filename-owner/first-object lookups;
+implicit type-pool type and constant prefixes; FUGR module ownership and
+includes; CDS definition/SQL-view aliases; include parents and sibling macro
+context; ENHS/BAdI scans and BDEF lookups. Recursive `parseType` artifact edges
+retain TABL/DTEL/DOMA, TTYP, VIEW, structure INCLUDE and APPEND dependencies.
+The FM index preserves gogen's last-wins enumeration, while core's ownership
+and alias scans preserve their first-match prefix order.
+
+Artifact reads add edges even when an abaplint getter or `SyntaxLogic.run()`
+returns a cached result. Manifests expand these stored edges at inspection
+time, inheriting the provider's queries with their original owner/phase.
+A second cached TABL consumer therefore still shows the DTEL's DOMA lookup.
+Disk IR and memory-session entries carry only the owner's own rows and edges:
+`{rows: [...], edges: ["TYPE NAME", ...]}`. They never persist a transitive
+closure. Replay restores these rows/edges, and `provenanceOf()` expands them
+against the current registry's provider artifacts on demand. The transcript
+still does not participate in cache validation.
+
+Artifact identities (syntax result, parsed type, definition, parsed files and
+FM/include metadata) are snapshotted at the end of each recording session.
+An artifact subsequently built with recording off gets an `untraced-artifact`
+marker on its owner, even when a retained syntax session bypasses checking.
+Artifacts first encountered after they were built receive
+`artifact-built-before-recording`. Memory/disk replay without an own-row
+transcript receives `lowering-built-before-recording`.
+
+Inventory snapshots copy filenames and SHA-256 content hashes; they do not
+retain core's mutable file array. Replacing, adding or removing a file, or
+changing registry configuration, prunes old query/edge rows and marks retained
+artifacts incomplete (`retained-registry-edit` / `retained-registry-config-edit`).
+This does not repair abaplint's caches or implement parser invalidation.
+
+Actual lowering reads of `program.functionModules` add a named
+`function-module-owner` query and provider edge, including CALL FUNCTION
+expanded from a macro. Unknown scan sites use repo-relative or module-relative
+paths (external frames use `<external>/basename`); absent/unrecognised stack
+frames remain unknown scans. Folder mode reads `.asddls` for gogen's CDS
+metadata but does not register it in core. CDS alias provenance therefore
+requires supplied registries containing DDLS files; this limitation is unchanged.
+
+Registry orchestration has no single object owner. Such rows use
+`artifact: "<registry>"` and are conservatively included in every object's
+manifest. An unclassified iterator remains in `unknownScans`, even if nested
+inside a known syntax pass. These manifests **are not evidence that the global
+guard can be removed**. A later key implementation must retain the global guard
+or decline reuse for every entry with unknown/incomplete provenance.
+
+```sh
+node tools/gogen/frontend-provenance.mjs <folders...> \
+  --objects ZCL_READER --show 'CLAS ZCL_READER'
+node --test tools/gogen/frontend-provenance.test.mjs
+# Run the combined frontend/cache suites sequentially: ownership tests generate
+# temporary tools/**/*.mjs, which intentionally enter compiler identity.
+node --test --test-concurrency=1 tools/gogen/frontend-*.test.mjs tools/gogen/cache-oracle.test.mjs
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh \
+  node tools/gogen/frontend-provenance-bench.mjs --rounds 3 \
+  --report .local/provenance-300.json
+# Pinned complete library trees; every real class is selected, tolerant refusals retained.
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh \
+  node tools/gogen/frontend-provenance-bench.mjs --real --rounds 3 \
+  --report .local/provenance-real.json
+```
+
+The focused gates exercise each channel above, named/scan misses, candidate
+order and early stopping, cached DDIC inheritance, disk replay inheritance,
+unknown scans and exception-safe restoration. On/off comparisons include Go,
+JS or its refusal, class IR, diagnostics/refusals/missing members and all final
+metadata compared by the cache oracle.
+
+### Fix-round validation and recording cost
+
+The focused regression gates cover opt-in/environment precedence, own-row disk
+storage/replay, recording gaps in syntax/DDIC/memory/disk lowering, immutable
+replace/add/remove snapshots and stale-row pruning, configuration edits, empty
+stack frames in a child process, portable sites, macro-expanded FM signatures,
+and owner isolation for sibling INCLUDE macros. The hook sweep runs one adapter
+mutation at a time in a disposable copy and verifies a passing baseline first:
+
+```sh
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh \
+  node tools/gogen/frontend-provenance-mutations.mjs \
+  --report .local/provfix-mutations.json
+```
+
+The 48-mutation sweep kills 42 mutations. It kills every specifically requested
+hook: query/link edges (separately and together), selection artifact context,
+all artifact reads, owners-map lookup, getModule/getInclude adapters and their
+named queries, pool constants, procedural includes and cross-include consumer
+attribution. The combined edge mutation fails the subclass DDIC and implicit
+pool interface fixture too. Every fail-closed marker mutation is killed.
+The six survivors preserve dependency linkage through another wrapped method
+in this pinned core (they are redundant observations, not uncovered leaf reads):
+
+| Surviving removed getter hook | Remaining path to the same provider owner |
+| --- | --- |
+| `getClassDefinition` | Calls wrapped `getMainABAPFile`, which calls wrapped `getABAPFiles`. |
+| `getMainABAPFile` | Calls wrapped `getABAPFiles`. |
+| `getIncludeFiles` | Calls wrapped `getIncludes` and `getABAPFiles`. |
+| `getSequencedFiles` | Calls wrapped `getABAPFiles` for classes; wrapped `getMainABAPFile`/`getModules`/`getABAPFiles` for groups. |
+| `getSQLViewName` | Calls wrapped DDLS `parse`, including for cached data. |
+| `getDefinitionName` | Calls wrapped DDLS `parse`, including for cached data. |
+
+Isolated cached `getDefinition`, `getIncludes`, `getModules` and
+`listBadiDefinitions` reads each kill their own getter-hook mutation. A survivor
+without an explicit redundancy explanation makes the sweep exit nonzero.
+Scratch is removed in `finally`. The local JSON report names the failing tests
+for every killed hook.
+
+| Review item | Regression / red evidence |
+| --- | --- |
+| 1. Opt-in and storage | Default/env/explicit-false test; decode persisted binary entries to check own rows plus edges and warm DDIC inheritance. Both fail on the original implementation. |
+| 2. Untraced artifacts | Parse while recording, compile with recording off, reuse syntax/session with recording on; also rebuild cached DDIC off. Both fail on the original implementation; marker-removal mutations fail too. |
+| 3. Retained edits | Replace/add/remove files, remove an object, and change config; assert markers and prune obsolete queries. All fail before the fix. |
+| 4. Empty stack | Child with `--stack-trace-limit=0`, including iteration without owner context; originally throws. Stack-fallback/unknown-scan mutations fail. |
+| 5. FM lowering | Macro-expanded CALL FUNCTION, DDIC signature chain, DOMA INT4→INT8 changes Go; original manifest lacks the lowering ownership row. Removing the new lowering query fails. |
+| 6. Hook sensitivity | Consumer-owned selection, cached reads, superclass DDIC, implicit pool interface, group getters, constants/includes and unrelated-object isolation; all requested hook-removal mutations fail. |
+| 7. Portable sites/CDS | External absolute frame and cwd/module paths must be scrubbed; original code and site-normalization removal fail. Folder-mode DDLS limitation documented above. |
+
+The final combined sequential frontend/CI-oracle run passes **211 tests** in
+280.6 s, including 37 provenance tests. The separately recording-enabled
+CI oracle passes all six tests in 111.8 s. In each oracle run: 58 observations,
+56 validated mutations, zero mismatches; the no-version negative control
+still produces the required mismatches in both line modes. The changed-file
+size budget, explicit-path leak scan and suite registration all exit zero.
+`frontend.mjs` has zero net added lines in this fix round (the branch remains
+20 lines smaller than the step-1 base). The sole default-off scalar-entry
+shape failure discovered during validation was fixed and its 52-test targeted
+recheck and final combined run both pass.
+
+Three fresh-process runs per scenario, median frontend milliseconds,
+Node 26.9.0, pinned libraries from `libs.lock.json`:
+
+| Corpus | Scenario | Recording off | Recording on | Overhead |
+| --- | --- | --- | --- | --- |
+| open-abap-core + ajson | No cache | 1,448.1 ms | 1,748.4 ms | +20.7% |
+| open-abap-core + ajson | cacheDir cold | 1,697.1 ms | 2,096.2 ms | +23.5% |
+| open-abap-core + ajson | cacheDir warm | 1,513.0 ms | 1,859.1 ms | +22.9% |
+| Oracle 300 + fixtures | No cache | 301.4 ms | 367.3 ms | +21.8% |
+| Oracle 300 + fixtures | cacheDir cold | 494.3 ms | 553.4 ms | +11.9% |
+| Oracle 300 + fixtures | cacheDir warm | 359.8 ms | 414.8 ms | +15.3% |
+
+| Corpus | Cache bytes off | Cache bytes on | Growth |
+| --- | --- | --- | --- |
+| open-abap-core + ajson | 526,812 | 694,009 | +31.7% |
+| Oracle 300 + fixtures | 265,987 | 301,662 | +13.4% |
+
+All 18 runs per corpus have identical artifact/class-IR digests across recording
+and cache modes. The real registry has 651 objects / 272 lowered classes with
+zero diagnostics; every warm run reuses 251 classes and lowers 21. The synthetic
+warm runs reuse 325 and lower one. Warm cache still costs more than no-cache
+compilation on these corpora; recording remains opt-in until its consumers
+and performance gates are implemented. Reports remain local as
+`.local/provfix-perf-real-final.json`, `.local/provfix-perf-300-final.json`, and
+`.local/provfix-mutations.json`. Benchmark cache sizes count actual file bytes, not allocated blocks;
+timing covers source loading, normalization, parse, syntax and lowering, and
+excludes emission and diagnostic closure expansion. Warm children follow cold
+primes in a separate process. Each mode's on/off emitted artifacts and class IR
+must have the same SHA-256 digest. No library checkout is edited.
+
+The real corpus still exposes unknown registry orchestration scans: supplied
+parameter discovery, local class/interface collection, selected groups and
+class dispatch, lock construction (twice), RTTI, table metadata and source
+ownership. With cacheDir, disk-session preparation, cache inventory and session
+finalization add three further unclassified sites. These rows remain global
+and conservatively appear in all manifests. No claim of selective invalidation
+or permission to remove the global guard follows from these results.
+
 ## Oracle
 
 `tools/gogen/cache-oracle.mjs` exports corpus generation, mutation application,
@@ -266,7 +485,7 @@ does not prove that an incomplete dependency manifest is safe.
    pools, same-object local definitions, file order, compiler identity, every mutation
    category, and the existing cache/replay/portability gates. Retained-registry
    parser invalidation is outside this step; all edited captures rebuild registries.
-2. **Semantic provenance and resolution queries before parsing.** Attribute
+2. **Semantic provenance and resolution queries before parsing.** Implemented: attribute
    named lookups, misses, filename/alias/scan resolution and cached-artifact reads
    to their owners. Unknown paths fail closed.
 3. **Resolved-artifact digests and stronger definition fingerprints.** Include
@@ -280,5 +499,5 @@ does not prove that an incomplete dependency manifest is safe.
    Test retained registries against fresh cold after multi-edit/inventory/config
    sequences; narrow body/interface hashes only after dedicated cases pass.
 
-Steps 2–6 are plans. This change deliberately implements no selective per-class
-reuse across different registry versions and adds nothing to `frontend.mjs`.
+Steps 3–6 are plans. Step 2 adds observation and deliberately implements no
+selective per-class reuse across different registry versions.

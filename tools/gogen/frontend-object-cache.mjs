@@ -1,3 +1,4 @@
+import {artifactLowering, storedProvenance, inheritStoredProvenance} from "./frontend-provenance.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // Portable class lowerings. The registry still parses/checks normally; replay
 // verifies the program inputs and ordering before applying cached IR effects.
@@ -189,6 +190,7 @@ export function objectCache(registry, root) {
     },
     record(lower) {
       const reads = new Set(), original = registry.getObject;
+      const descriptor = Object.getOwnPropertyDescriptor(registry, "getObject");
       registry.getObject = function(type, name) {
         const value = original.call(this, type, name);
         const key = type && name && `${type.toUpperCase()} ${name.toUpperCase()}`;
@@ -196,7 +198,10 @@ export function objectCache(registry, root) {
         return value;
       };
       try { return {value: lower(), reads: [...reads]}; }
-      finally { registry.getObject = original; }
+      finally {
+        if (descriptor) Object.defineProperty(registry, "getObject", descriptor);
+        else delete registry.getObject;
+      }
     },
     write(owner, value, reads, program) {
       // Repeated reads can exceed the budget before compaction. A transcript
@@ -245,7 +250,7 @@ function suppliedKey(program, owner) {
   return JSON.stringify([...program.supplied].filter(([k]) => k.startsWith(`${owner}=>`)).map(([k, v]) => [k, [...v]]));
 }
 
-export function compileDiskClass(ctx, obj, lower, session) {
+export const compileDiskClass = artifactLowering(function compileDiskClass(ctx, obj, lower, session) {
   const program = ctx.program;
   const counts = program.frontendCounts;
   const file = obj.getMainABAPFile();
@@ -261,6 +266,7 @@ export function compileDiskClass(ctx, obj, lower, session) {
     valid = replay(cached);
   }
   if (valid) {
+    inheritStoredProvenance(program.reg, obj, cached.provenance);
     Object.assign(program, cached.current);
     counts.reused++;
     counts.reusedClasses.push(key);
@@ -282,8 +288,9 @@ export function compileDiskClass(ctx, obj, lower, session) {
   const {value, reads} = session.disk.record(run);
   const entry = session.classes.get(key);
   if (entry) {
+    entry.provenance = storedProvenance(program.reg, obj);
     const {file: ignoredFile, structure: ignoredStructure, ...portable} = entry;
     session.disk.write(owner, {...portable, name: key}, reads, program);
   }
   return value;
-}
+});

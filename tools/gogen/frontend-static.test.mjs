@@ -109,7 +109,7 @@ ENDMETHOD. ENDCLASS.`);
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
 
-test("private statics refuse outsiders and subclasses with the declaring owner", () => {
+test("private statics reject outsiders and subclasses during syntax, with or without provenance", () => {
   const dir = mkdtempSync(join(tmpdir(), "gogen-private-static-"));
   try {
     writeFileSync(join(dir, "zcl_pv.clas.abap"), `CLASS zcl_pv DEFINITION PUBLIC CREATE PUBLIC.
@@ -121,9 +121,18 @@ ENDCLASS. CLASS zcl_pv IMPLEMENTATION. ENDCLASS.`);
       writeFileSync(join(dir, "zcl_out.clas.abap"), `CLASS zcl_out DEFINITION PUBLIC ${inheritance} CREATE PUBLIC.
 PUBLIC SECTION. CLASS-METHODS run.
 ENDCLASS. CLASS zcl_out IMPLEMENTATION. METHOD run. zcl_pv=>gv_priv = '01'. ENDMETHOD. ENDCLASS.`);
-      const p = compileProgram({folders: [dir], objects: ["ZCL_PV", "ZCL_OUT"], tolerant: true});
-      assert.match(p.partial.join("\n"), /ZCL_PV=>GV_PRIV is private to ZCL_PV/);
-      assert.equal(analyzeOwnership(p).declarations.has(p.classes.find(c => c.name === "ZCL_PV").attributes.find(a => a.name === "GV_PROT")), false);
+      let off;
+      for (const provenance of [false, true]) {
+        const p = compileProgram({folders: [dir], objects: ["ZCL_PV", "ZCL_OUT"], tolerant: true, provenance});
+        // Pinned core rejects this before lowering, so it must not become an
+        // emitted class merely because no gogen partial refusal was produced.
+        assert.deepEqual(p.broken, ["zcl_out"]);
+        assert.equal(p.diagnostics.length, 1);
+        assert.match(p.diagnostics[0].message, /Attribute "gv_priv" is private and cannot be accessed/);
+        assert.equal(p.classes.some((c) => c.name === "ZCL_OUT"), false);
+        assert.equal(analyzeOwnership(p).declarations.has(p.classes.find(c => c.name === "ZCL_PV").attributes.find(a => a.name === "GV_PROT")), false);
+        if (provenance) assert.equal(emitJs(p), off); else off = emitJs(p);
+      }
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
 });
