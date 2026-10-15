@@ -32,7 +32,7 @@ export interface ProgramSnapshot extends Map<string, unknown> {
 export interface ArtifactObject {
   getType(): string;
   getName(): string;
-  getFiles(): SourceFile[];
+  getFiles(): readonly SourceFile[];
   isDirty?(): boolean;
   syntaxResult?: unknown;
   parsedType?: unknown;

@@ -2,7 +2,7 @@
 import {freshRegistry, finishInputs} from "./frontend-inventory.mjs";
 import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
-const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
+/** @type {typeof import("@abaplint/core")} */ const core = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
 /** @type {typeof import('./frontend-provenance-recorder.mjs') | undefined} */ let recorder;
 function loadRecorder() {
   return recorder ??= require("./frontend-provenance-recorder.mjs");
@@ -15,7 +15,7 @@ function loadRecorder() {
 /** Disk builds record internally; expanded public reporting stays opt-in. */
 /** @param {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-session-types.ts').SessionProgram} compile @returns {(options: import('./frontend-session-types.ts').CompileOptions) => import('./frontend-session-types.ts').SessionProgram} */ export function withProvenance(compile) {
   return (options) => {
-    const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
+    /** @type {boolean} */ const expose = options.provenance ?? (process.env.GOGEN_PROVENANCE === "1");
     const run = () => {
       if (options.registry) options = {...options, registry: freshRegistry(options.registry, options.session)};
       if (options.registry) recorder?.inventoryProvenance(options.registry);
@@ -23,7 +23,7 @@ function loadRecorder() {
       finishInputs(program.reg);
       return program;
     };
-    const record = expose || (options.cacheDir && options.provenance !== false);
+    /** @type {boolean | string | undefined} */ const record = expose || (options.cacheDir && options.provenance !== false);
     return record ? recordProvenance(run, {expose}) : run();
   };
 }
@@ -60,8 +60,8 @@ function loadRecorder() {
 // FM ownership query beside the gogen scan (normal ABAP syntax only checks FM
 // ownership in Cloud language mode).
 /** @param {import('./frontend-session-types.ts').Registry} reg @param {string[]} wanted @param {import('./frontend-session-types.ts').SelectionCore} abaplint @returns {void} */ export function expandProgramSelection(reg, wanted, abaplint) {
-  const upper = (s) => String(s).toUpperCase();
-  const fmGroups = new Map();
+  /** @param {unknown} s @returns {string} */ const upper = (s) => String(s).toUpperCase();
+  /** @type {Map<string, string>} */ const fmGroups = new Map();
   const index = () => {
     for (const g of enumerateObjects(reg, "function-module-index", [], "scheduling", (o) => o instanceof abaplint.Objects.FunctionGroup)) {
       for (const m of g.getModules()) fmGroups.set(upper(m.getName()), g.getName().toLowerCase());
