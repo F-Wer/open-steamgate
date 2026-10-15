@@ -42,38 +42,38 @@ const require = createRequire(import.meta.url);
 // The transpiler's database setup and rearranger use its own @abaplint/core.
 // Keep registry objects from that same copy so instanceof checks find tables.
 const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
-const abaplint = transpilerRequire("@abaplint/core");
-const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
+/** @type {typeof import("@abaplint/core")} */ const abaplint = transpilerRequire("@abaplint/core");
+/** @type {typeof import("@abaplint/transpiler/build/src/rearranger.js")} */ const {Rearranger} = require("@abaplint/transpiler/build/src/rearranger");
 const {Nodes, Statements, Structures, Expressions, BasicTypes} = abaplint;
 
 export class Unsupported extends Error {}
 // A class outside the program is named, so a closure can add it and retry
 // instead of refusing the caller for good.
-function notInProgram(ctx, cls, message) {
+/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {string} cls @param {string} message @returns {Unsupported} */ function notInProgram(ctx, cls, message) {
   ctx.program.missing.add(cls);
   return new Unsupported(message);
 }
 
-export const I = {k: "i"};
-export const F = {k: "f"};
-export const INT8 = {k: "int8"};
+/** @type {Extract<import("./ir.ts").Type, {k: "i"}>} */ export const I = {k: "i"};
+/** @type {Extract<import("./ir.ts").Type, {k: "f"}>} */ export const F = {k: "f"};
+/** @type {Extract<import("./ir.ts").Type, {k: "int8"}>} */ export const INT8 = {k: "int8"};
 // calculation type p: an exact intermediate value (go/abap packed.go),
 // rounded only when it lands in a field; len 16 is the 31 digits a p
 // literal may have
-const P31 = {k: "p", len: 16, dec: 0, calc: true};
-export const S = {k: "string"};
-const C = (len) => ({k: "c", len});
-const X = (len) => ({k: "x", len});
-const XS = {k: "xstring"};
-const EXC = {k: "exc"};
+/** @type {Extract<import("./ir.ts").Type, {k: "p"}>} */ const P31 = {k: "p", len: 16, dec: 0, calc: true};
+/** @type {Extract<import("./ir.ts").Type, {k: "string"}>} */ export const S = {k: "string"};
+/** @param {number} len @returns {Extract<import("./ir.ts").Type, {k: "c"}>} */ const C = (len) => ({k: "c", len});
+/** @param {number} len @returns {Extract<import("./ir.ts").Type, {k: "x"}>} */ const X = (len) => ({k: "x", len});
+/** @type {Extract<import("./ir.ts").Type, {k: "xstring"}>} */ const XS = {k: "xstring"};
+/** @type {Extract<import("./ir.ts").Type, {k: "exc"}>} */ const EXC = {k: "exc"};
 
-const isExpr = (n, cls) => n instanceof Nodes.ExpressionNode && n.get() instanceof cls;
-const isStmt = (n, cls) => n instanceof Nodes.StatementNode && n.get() instanceof cls;
-const isStruct = (n, cls) => n instanceof Nodes.StructureNode && n.get() instanceof cls;
-const isTok = (n, s) => n instanceof Nodes.TokenNode && (s === undefined || upper(n.getFirstToken().getStr()) === s);
-const tokenStr = (n) => n.getFirstToken().getStr();
-const upper = (s) => String(s).toUpperCase();
-const goName = (s) => {
+/** @param {unknown} n @param {import("./frontend-types.ts").NodeClass} cls @returns {n is import("@abaplint/core").Nodes.ExpressionNode} */ const isExpr = (n, cls) => n instanceof Nodes.ExpressionNode && n.get() instanceof cls;
+/** @param {unknown} n @param {import("./frontend-types.ts").NodeClass} cls @returns {n is import("@abaplint/core").Nodes.StatementNode} */ const isStmt = (n, cls) => n instanceof Nodes.StatementNode && n.get() instanceof cls;
+/** @param {unknown} n @param {import("./frontend-types.ts").NodeClass} cls @returns {n is import("@abaplint/core").Nodes.StructureNode} */ const isStruct = (n, cls) => n instanceof Nodes.StructureNode && n.get() instanceof cls;
+/** @param {unknown} n @param {string} [s] @returns {n is import("@abaplint/core").Nodes.TokenNode} */ const isTok = (n, s) => n instanceof Nodes.TokenNode && (s === undefined || upper(n.getFirstToken().getStr()) === s);
+/** @param {import("@abaplint/core").INode} n @returns {string} */ const tokenStr = (n) => n.getFirstToken().getStr();
+/** @param {unknown} s @returns {string} */ const upper = (s) => String(s).toUpperCase();
+/** @param {string} s @returns {string} */ const goName = (s) => {
   const name = upper(s).replace(/=>|~|-/g, "__").replace(/[^A-Z0-9_]/g, "_");
   return name.startsWith("_") ? `N${name}` : name;
 };
@@ -83,9 +83,9 @@ const goName = (s) => {
 // rows (APPEND, INSERT INDEX, MODIFY INDEX, SORT, SELECT / SPLIT INTO TABLE)
 // refuses one, and a move between a SORTED and another table is not the
 // same type (it would have to sort)
-const refuseSorted = (t, what) => { if (t?.type?.sorted) throw new Unsupported(`${what} a SORTED table`); };
-const sameSort = (a, b) => (a.sorted ?? null) === null ? (b.sorted ?? null) === null : (b.sorted !== undefined && a.sorted.join() === b.sorted.join() && a.unique === b.unique);
-export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || (sameType(a.row, b.row) && sameSort(a, b)))
+/** @param {{type: import("./ir.ts").Type} | undefined} t @param {string} what @returns {void} */ const refuseSorted = (t, what) => { if (t?.type?.sorted) throw new Unsupported(`${what} a SORTED table`); };
+/** @param {import("./frontend-types.ts").TableType} a @param {import("./frontend-types.ts").TableType} b @returns {boolean} */ const sameSort = (a, b) => (a.sorted ?? null) === null ? (b.sorted ?? null) === null : (b.sorted !== undefined && a.sorted.join() === b.sorted.join() && a.unique === b.unique);
+/** @param {import("./ir.ts").Type} a @param {import("./ir.ts").Type} b @returns {boolean} */ export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || (sameType(a.row, b.row) && sameSort(a, b)))
   && (a.k !== "struct" || a.go === b.go) && (a.k !== "c" && a.k !== "x" || a.len === b.len)
   && (a.k !== "ref" || a.name === b.name)
   && (a.k !== "p" || (!!a.calc === !!b.calc && (a.calc || (a.len === b.len && a.dec === b.dec))));
@@ -95,12 +95,12 @@ export const sameType = (a, b) => a.k === b.k && (a.k !== "table" || (sameType(a
  * APPEND included. VALUE( ) is a copy. So a composite IMPORTING by
  * reference is a pointer in Go, and a VALUE( ) one is cloned at the call.
  */
-export const composite = (t) => t?.k === "table" || t?.k === "struct";
-export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
-const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
-const charlike = (t) => t.k === "c" || t.k === "string";
+/** @param {import("./ir.ts").Type | null | undefined} t @returns {t is Extract<import("./ir.ts").Type, {k: "table" | "struct"}>} */ export const composite = (t) => t?.k === "table" || t?.k === "struct";
+/** @param {import("./ir.ts").Param} p @returns {boolean} */ export const byRef = (p) => p.dir === "importing" && composite(p.type) && !p.byValue;
+/** @param {import("./ir.ts").Type} t @returns {t is Extract<import("./ir.ts").Type, {k: "i" | "f" | "int8"}>} */ const numeric = (t) => t.k === "i" || t.k === "f" || t.k === "int8";
+/** @param {import("./ir.ts").Type} t @returns {t is Extract<import("./ir.ts").Type, {k: "c" | "string"}>} */ const charlike = (t) => t.k === "c" || t.k === "string";
 const byteStatementHelpers = {Nodes, Expressions, upper, isExpr, source, lvalue, convert, charlike, Unsupported, I, S, XS, findResults};
-const cdsViewsByRegistry = new WeakMap();
+/** @type {WeakMap<import("@abaplint/core").IRegistry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
 const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
 
 /* ------------------------------------------------------------------- program */
@@ -122,13 +122,13 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   // Reset the ordinary module counter on each compile, as on main.
   FAE_N = 0;
   PERSIST_LOWERING = !!cacheDir;
-  const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
+  /** @type {import("@abaplint/core").IRegistry} */ const reg = registry ?? new abaplint.Registry(new abaplint.Config(JSON.stringify(config)));
   beginProvenanceCompile(reg);
   // Load every file for resolution; lower and report diagnostics for selected objects.
-  const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
-  let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
-  const ddls = [];
-  const walk = (dir) => {
+  /** @param {string} fn @returns {string} */ const objName = (fn) => fn.split("/").pop().split(".")[0].toLowerCase().replace(/#/g, "/");
+  /** @type {string[]} */ let wanted = objects.map((o) => o.toLowerCase().replace(/#/g, "/"));
+  /** @type {string[]} */ const ddls = [];
+  /** @param {string} dir @returns {void} */ const walk = (dir) => {
     for (const e of readdirSync(dir, {withFileTypes: true}).sort((x, y) => x.name.localeCompare(y.name))) {
       const path = join(dir, e.name);
       if (e.isDirectory()) walk(path);
@@ -185,21 +185,21 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   // Eager collections keep first writes inside the replay proxies. Anonymous
   // type identities use a Map so their ordered effects can be replayed too;
   // these keys already belong to the registry retained for this compilation.
-  const program = {anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
+  /** @type {import("./frontend-types.ts").FrontendProgram} */ const program = {anonStructs: new Map(), badStructs: new Map(), ddicOutputLen: new Map(),
     excAttrs: new Set(), dynStatics: new Set(), intfOwnAttrs: new Map(), interfaceAttrs: new Map(), structs: new Map(), consts: new Map(), classes: [], skipped: [], missing: new Set(), wanted: new Set(wanted.map(upper)),
     diagnostics, frontendCounts: {lowered: 0, reused: 0, loweredClasses: [], reusedClasses: []}, interfaces: new Set(), reg, sigs: new Map(), broken: [...broken], partial: [], events: new Map()};
   if (PERSIST_LOWERING) Object.assign(program, {faeN: 0, localDefs: new Map()});
   if (PERSIST_LOWERING) PROGRAM = program;
   program.supplied = suppliedIndex(reg, program.wanted, abaplint, suppliedMethods, declaringClass);
   PROGRAM = program;
-  const ctx0 = {reg, program};
+  /** @type {import("./frontend-types.ts").CompilationContext} */ const ctx0 = {reg, program};
   // the local classes of the owners that have them compiled (LOCAL_CLASSES),
   // named OWNER:LOCAL: wanted before any class compiles, so the owner's
   // CREATE OBJECT ... TYPE lcl_x finds its class
   program.locals = new Map();
   program.localInterfaces = new Map();
   LOCAL_DEFS.clear();
-  const localDefs = [];
+  /** @type {import("./frontend-types.ts").LocalClass[]} */ const localDefs = [];
   for (const obj of enumerateObjects(reg, "local-dispatch", [], "scheduling", (o) => o instanceof abaplint.Objects.Class && wanted.includes(o.getName().toLowerCase()) && (includeTests || LOCAL_CLASSES.has(upper(o.getName()))))) {
     localDiscovery(reg, obj, includeTests === true || includeTests?.has?.(upper(obj.getName())), () => {
     if (LOCAL_CLASSES.has(upper(obj.getName()))) {
@@ -249,13 +249,13 @@ export const compileProgram = withProvenance(function compileProgram({folders, o
   // every interface used as a reference type: its methods whose signature
   // types, which is what a class must provide to satisfy it
   program.interfaceMethods = new Map();
-  withRole("final-output", () => { const ictx = {reg, program};
+  withRole("final-output", () => { /** @type {import("./frontend-types.ts").CompilationContext} */ const ictx = {reg, program};
   let pending = [...program.interfaces];
   while (pending.length > 0) {
     for (const name of pending) {
       // its own methods and those of the interfaces it includes (INTERFACES
       // inside an interface), which are called as COMP~M through it
-      const sigs = [];
+      /** @type {import("./frontend-types.ts").MethodSignature[]} */ const sigs = [];
       for (const i of [name, ...componentInterfaces(reg, name)]) {
         const all = reg.getObject("INTF", i)?.getDefinition()?.getMethodDefinitions();
         if (!all) continue;
@@ -311,8 +311,8 @@ export function whereColumns(t) {
   return Object.fromEntries(t.columns.filter((c) => c.type !== null).map((c) => [c.name, c.kind === "N" ? {type: c.type, kind: "NUMC"} : {type: c.type}]));
 }
 
-export function tableRegistry(reg, program) {
-  const out = [];
+/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").FrontendTable[]} */ export function tableRegistry(reg, program) {
+  /** @type {import("./frontend-types.ts").FrontendTable[]} */ const out = [];
   const saved = [program.currentClass, program.currentTypes];
   program.currentClass = undefined;
   program.currentTypes = undefined;
@@ -374,8 +374,8 @@ export function tableRegistry(reg, program) {
 }
 
 /** each ENQU object's primary table, keyed by the object name */
-export function lockObjectRegistry(reg, program, role = "scheduling") {
-  const out = new Map();
+/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @param {string} [role] @returns {Map<string, import("./frontend-types.ts").LockObject>} */ export function lockObjectRegistry(reg, program, role = "scheduling") {
+  /** @type {Map<string, import("./frontend-types.ts").LockObject>} */ const out = new Map();
   for (const obj of enumerateObjects(reg, "lock-inventory", [], role, (o) => o instanceof abaplint.Objects.LockObject)) {
     withArtifact({reg}, obj, () => {
     const name = upper(obj.getName());
@@ -413,13 +413,13 @@ export function lockObjectRegistry(reg, program, role = "scheduling") {
  * so a name that exists but is not a structure dumps instead of reading as
  * TYPE_NOT_FOUND.
  */
-function rttiTable(reg, program) {
-  const structs = new Map();
-  const add = (name, t) => {
+/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./frontend-types.ts").RttiTable} */ function rttiTable(reg, program) {
+  /** @type {Map<string, {name: string; kind: string}[]>} */ const structs = new Map();
+  /** @param {string} name @param {import("@abaplint/core").AbstractType} t @returns {void} */ const add = (name, t) => {
     if (!(t instanceof BasicTypes.StructureType)) return;
     structs.set(name, t.getComponents().map((c) => ({name: upper(c.name), kind: typeKindOf(c.type)})));
   };
-  const known = new Set();
+  /** @type {Set<string>} */ const known = new Set();
   for (const obj of enumerateObjects(reg, "rtti-inventory", [], "final-output")) {
     const n = upper(obj.getName());
     if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
@@ -441,7 +441,7 @@ function rttiTable(reg, program) {
 }
 
 /** the RTTI type kind (cl_abap_typedescr=>typekind_*) of an abaplint type */
-function typeKindOf(t) {
+/** @param {import("@abaplint/core").AbstractType | undefined} t @returns {string} */ function typeKindOf(t) {
   if (t instanceof BasicTypes.CharacterType) return "C";
   if (t instanceof BasicTypes.NumericType) return "N";
   if (t instanceof BasicTypes.DateType) return "D";
@@ -463,11 +463,11 @@ function typeKindOf(t) {
 }
 
 /** ALIASES a FOR i~m of a class or interface (or a superclass): i~m */
-function aliasTarget(reg, owner, name) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} owner @param {string} name @returns {string | undefined} */ function aliasTarget(reg, owner, name) {
   for (const o of [owner, ...ancestors(reg, owner)]) {
     const def = reg.getObject("INTF", o)?.getDefinition() ?? clasDef(reg, o);
     const all = def?.getAliases?.();
-    const list = Array.isArray(all) ? all : all?.getAll?.() ?? [];
+    /** @type {ReturnType<import("@abaplint/core").IInterfaceDefinition["getAliases"]>} */ const list = Array.isArray(all) ? all : all?.getAll?.() ?? [];
     const hit = list.find((x) => upper(x.getName()) === name);
     if (hit) return upper(hit.getComponent());
   }
@@ -483,8 +483,8 @@ function aliasTarget(reg, owner, name) {
 // per parsed file, the methods that ask IS SUPPLIED: a closure build calls
 // suppliedParams once a round over the same registry (abapiti's Registry
 // set, 2110 classes: 10 s of a 104 s build before this)
-const suppliedOfFile = new WeakMap();
-function suppliedMethods(file) {
+/** @type {WeakMap<import("@abaplint/core").ABAPFile, import("./frontend-types.ts").SuppliedMethod[]>} */ const suppliedOfFile = new WeakMap();
+/** @param {import("@abaplint/core").ABAPFile} file @returns {import("./frontend-types.ts").SuppliedMethod[]} */ function suppliedMethods(file) {
   let methods = suppliedOfFile.get(file);
   if (methods) return methods;
   methods = [];
@@ -499,15 +499,15 @@ function suppliedMethods(file) {
 }
 
 /** the hidden SUP_<p> parameters of a method, after its own */
-function withSupplied(program, key, params) {
+/** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {readonly import("./frontend-types.ts").FrontendParam[]} params @returns {readonly import("./frontend-types.ts").FrontendParam[]} */ function withSupplied(program, key, params) {
   const set = suppliedAnswer(program, key);
   if (!set) return params;
-  const hidden = params.filter((p) => set.has(p.name)).map((p) => ({name: `SUP_${p.name}`, dir: "importing", byValue: true, type: C(1), optional: true, suppliedOf: p.name}));
+  /** @type {import("./ir.ts").Param[]} */ const hidden = params.filter((p) => set.has(p.name)).map((p) => ({name: `SUP_${p.name}`, dir: "importing", byValue: true, type: C(1), optional: true, suppliedOf: p.name}));
   return [...params, ...hidden];
 }
 
 /** the interfaces an interface includes, transitively */
-function componentInterfaces(reg, intf, seen = new Set()) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} intf @param {Set<string>} [seen] @returns {string[]} */ function componentInterfaces(reg, intf, seen = new Set()) {
   for (const c of reg.getObject("INTF", intf)?.getDefinition()?.getImplementing?.() ?? []) {
     const n = upper(c.name);
     if (!seen.has(n)) { seen.add(n); componentInterfaces(reg, n, seen); }
@@ -534,14 +534,14 @@ const LOCAL_CLASSES = new Set(["CL_EXPRESS_ICF_SHIM", "/UI2/CL_JSON", "CL_SXML_S
 // LOCAL_CLASSES by its compiled name (OWNER:LOCAL)
 // Track local definitions only for persisted lowerings. Ordinary sessions
 // retain main's module-local map, without adding reads to their transcripts.
-const LOCAL_DEFS = new Map();
+/** @type {Map<string, import("@abaplint/core").IClassDefinition>} */ const LOCAL_DEFS = new Map();
 let PERSIST_LOWERING = false;
-const clasDef = (reg, name) => (PERSIST_LOWERING ? PROGRAM.localDefs : LOCAL_DEFS).get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} name @returns {import("@abaplint/core").IClassDefinition | undefined} */ const clasDef = (reg, name) => (PERSIST_LOWERING ? PROGRAM.localDefs : LOCAL_DEFS).get(name) ?? reg.getObject("CLAS", name)?.getDefinition();
 
-function localClasses(reg, obj, includeTests = false) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {import("@abaplint/core").Objects.Class} obj @param {boolean} [includeTests] @returns {import("./frontend-types.ts").LocalClass[]} */ function localClasses(reg, obj, includeTests = false) {
   const owner = upper(obj.getName());
   const top = new abaplint.SyntaxLogic(reg, obj).run().spaghetti.getTop();
-  const out = [];
+  /** @type {import("./frontend-types.ts").LocalClass[]} */ const out = [];
   for (const file of obj.getABAPFiles()) {
     if (file === obj.getMainABAPFile()) continue;
     const testInclude = /\.testclasses\.abap$/i.test(file.getFilename());
@@ -712,7 +712,7 @@ export function readClass(folder) {
 // ultra/events: the host functions whose TYPE p parameters are read as p(16,7) (typeOf)
 const P_GENERIC = new Set(["CL_ABAP_TSTMP=>SUBTRACT", "CL_ABAP_TSTMP=>SUBTRACTSECS"]);
 /** methods whose ABAP is kernel code in the transpiler runtime, and the host function that does their work */
-const NATIVE = new Map([
+/** @type {Map<string, string | {fn: string; args: string[]}>} */ const NATIVE = new Map([
   // ultra/events (the WEBGUI's transaction sessions, ZCL_OSD_TRAN_SESSION):
   // the seconds from TSTMP2 to TSTMP1, their fractions cut off, as
   // open-abap-core's kernel lines compute them (its RETURNING is an i; a
@@ -823,7 +823,7 @@ const NATIVE = new Map([
  *                         statements up to the line {end}
  *   {bound}               a line of that loop whose work the binds do
  */
-const KERNEL = new Map([
+/** @type {Map<string, import("./frontend-types.ts").KernelSpec>} */ const KERNEL = new Map([
   // ADT capability answers match Node's parent kernel / non-one-runtime host.
   ["ZCL_OSD_ADT_HOST=>ONE_RUNTIME|rv_on.set(abap.context.RFCDestinations.STORE?.localSystem ? \"X\" : \"\");", {fn: "abap.ADTOneRuntime", args: ["&RV_ON:c"]}],
   ["ZCL_OSD_KERNEL_GUARD=>HAS_SERVING_DATABASE|if (globalThis.__osdAdtKernel !== undefined) rv_available.set(\" \");", {fn: "abap.ADTUnavailable", args: ["&RV_AVAILABLE:c"]}],
@@ -890,19 +890,19 @@ const KERNEL = new Map([
 ]);
 
 /** the line of a WRITE '@KERNEL ...' as the JavaScript it holds, else undefined */
-function kernelText(node) {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @returns {string | undefined} */ function kernelText(node) {
   if (!(node instanceof Nodes.StatementNode) || !isStmt(node, Statements.Write)) return undefined;
   const m = /^WRITE\s+'@KERNEL(.*)'\s*\.?$/is.exec(node.concatTokens());
   return m === null ? undefined : m[1].replace(/''/g, "'").trim();
 }
 
-function kernelOf(node, ctx) {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").KernelSpec | undefined} */ function kernelOf(node, ctx) {
   const text = kernelText(node);
   return text === undefined ? undefined : KERNEL.get(`${ctx.className}=>${ctx.method}|${text}`);
 }
 
 /** the arguments of a host function (see KERNEL), resolved in the method */
-function nativeArgs(specs, ctx) {
+/** @param {readonly string[]} specs @param {import("./frontend-types.ts").VariableContext} ctx @returns {import("./frontend-types.ts").NativeArgument[]} */ function nativeArgs(specs, ctx) {
   return specs.map((spec) => {
     const m = /^(&?)([\w\/~]+)(?:(->|-)([\w]+))?:(\w+)$/.exec(spec);
     if (m === null) throw new Error(`host function argument ${spec}`);
@@ -1242,11 +1242,11 @@ function compiledFunctionCall(node, ctx, text, name) {
  * written type is refused by the ordinary conversion rules.
  * UTF-8 / UTF-16LE text <-> bytes: cl_abap_conv_out_ce / cl_abap_conv_in_ce.
  */
-const NATIVE_ME = new Map([
+/** @type {Map<string, import("./frontend-types.ts").NativeMe>} */ const NATIVE_ME = new Map([
   ["CL_ABAP_CONV_OUT_CE=>CONVERT", {fn: "Native_CONV_OUT_CONVERT", params: [["DATA", "importing", "string"], ["N", "importing", "i", true], ["BUFFER", "exporting", "xstring"]]}],
   ["CL_ABAP_CONV_IN_CE=>CONVERT", {fn: "Native_CONV_IN_CONVERT", params: [["INPUT", "importing", "xstring"], ["N", "importing", "i", true], ["DATA", "exporting", "string"]]}],
 ]);
-const nativeMeSig = (program, key, name) => {
+/** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} key @param {string} name @returns {import("./frontend-types.ts").Signature} */ const nativeMeSig = (program, key, name) => {
   const n = NATIVE_ME.get(key);
   const T = {string: S, xstring: XS, i: I};
   const own = n.params.map(([pn, dir, t, optional]) => ({name: pn, dir, byValue: false, type: T[t], optional: optional === true}));
@@ -1255,7 +1255,7 @@ const nativeMeSig = (program, key, name) => {
 
 /* --------------------------------------------------------------------- types */
 
-function typeOf(t, where, program) {
+/** @param {import("@abaplint/core").AbstractType} t @param {string} where @param {import("./frontend-types.ts").FrontendProgram} program @returns {import("./ir.ts").Type} */ function typeOf(t, where, program) {
   // generic data: TYPE any / data / ANY TABLE, and data references. A
   // generic value is a binding to a typed slot (abap.Data in Go)
   if (t instanceof BasicTypes.AnyType || t instanceof BasicTypes.DataType || t instanceof BasicTypes.SimpleType) return {k: "data"};
@@ -1368,7 +1368,7 @@ function typeOf(t, where, program) {
     }
     if (program.badStructs?.has(go)) throw new Unsupported(program.badStructs.get(go));
     if (!program.structs.has(go)) {
-      const st = {k: "struct", go, fields: [], shape, ...(q ? {qname: upper(q)} : {})};
+      /** @type {import("./frontend-types.ts").StructType} */ const st = {k: "struct", go, fields: [], shape, ...(q ? {qname: upper(q)} : {})};
       program.structs.set(go, st); // before the fields: a struct may nest itself through a table
       try {
         st.fields = comps.map((c) => ({name: upper(c.name), type: rttiNamed(typeOf(c.type, `${where}-${c.name}`, program), c.type)}));
@@ -1403,7 +1403,7 @@ function typeOf(t, where, program) {
  * is not a data element of the registry, or whose XML has no OUTPUTLEN, is
  * left out, and RTTI keeps refusing it.
  */
-function ddicOutputLength(name) {
+/** @param {string} name @returns {void} */ function ddicOutputLength(name) {
   const map = PROGRAM.ddicOutputLen;
   if (map.has(name) || name.includes("-") || !REG) return;
   const xmlOf = (type, n) => REG.getObject(type, n)?.getXMLFile?.()?.getRaw?.() ?? "";
@@ -1424,7 +1424,7 @@ function ddicOutputLength(name) {
  * COMPONENT, and naming every local would give every generic binding a
  * descriptor of its own.
  */
-function rttiNamed(ir, t) {
+/** @param {import("./ir.ts").Type} ir @param {import("@abaplint/core").AbstractType} t @returns {import("./ir.ts").Type} */ function rttiNamed(ir, t) {
   if (["struct", "table", "dref", "ref", "exc", "data"].includes(ir.k)) return ir;
   const q = t.getQualifiedName?.();
   // abaplint gives a NUMC data element its name as the qualified name only
@@ -1435,8 +1435,8 @@ function rttiNamed(ir, t) {
   return {...ir, ...(q ? {qname: upper(q)} : {}), ...(d ? {ddic: upper(d)} : {})};
 }
 
-const structOf = (ctx, t) => ctx.program.structs.get(t.go);
-const fieldOf = (ctx, t, name, where) => {
+/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {Extract<import("./ir.ts").Type, {k: "struct"}>} t @returns {import("./frontend-types.ts").StructType | undefined} */ const structOf = (ctx, t) => ctx.program.structs.get(t.go);
+/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {import("./ir.ts").Type} t @param {string} name @param {string} where @returns {import("./ir.ts").Field} */ const fieldOf = (ctx, t, name, where) => {
   if (t.k !== "struct") throw new Unsupported(`${where}: component ${name} of a non-structure`);
   const f = structOf(ctx, t).fields.find((x) => x.name === upper(name));
   if (f === undefined) throw new Unsupported(`${where}: no component ${name}`);
@@ -1445,7 +1445,7 @@ const fieldOf = (ctx, t, name, where) => {
 
 /* --------------------------------------------------------------------- class */
 
-function classIr(ctx0, obj) {
+/** @param {import("./frontend-types.ts").CompilationContext} ctx0 @param {import("./frontend-types.ts").ClassSource} obj @returns {import("./frontend-types.ts").FrontendClass} */ function classIr(ctx0, obj) {
   const {reg, program} = ctx0;
   program.currentClass = goName(obj.getName());
   // the class whose local classes a REF TO / CREATE OBJECT names (ultra/json)
@@ -1465,7 +1465,7 @@ function classIr(ctx0, obj) {
   // attributes and constants live in the class implementation scope
   const implScope = findScope(spaghetti.getTop(), "class_implementation", scopeName);
   const defScope = findScope(spaghetti.getTop(), "class_definition", scopeName);
-  const attributes = [];
+  /** @type {import("./frontend-types.ts").FrontendAttribute[]} */ const attributes = [];
   const ownAttrs = new Set(def.getAttributes().getAll().map((a) => upper(a.getName())));
   const classVars = {...(defScope?.getData().vars ?? {}), ...(implScope?.getData().vars ?? {})};
   // a private attribute a CATCH of runtime exceptions in this class takes INTO
@@ -1475,7 +1475,7 @@ function classIr(ctx0, obj) {
   // count
   const privateAttrs = new Set(def.getAttributes().getAll()
     .filter((a) => a.getVisibility?.() === abaplint.Visibility.Private).map((a) => upper(a.getName())));
-  const inThisClass = (scope) => {
+  /** @param {import("./frontend-types.ts").Scope | undefined} scope @returns {boolean} */ const inThisClass = (scope) => {
     for (let x = scope; x; x = x.getParent()) {
       const id = x.getIdentifier();
       if (id.stype === "class_implementation") return upper(id.sname) === upper(scopeName);
@@ -1518,15 +1518,15 @@ function classIr(ctx0, obj) {
   }
 
   // signatures: the class's own methods plus the interfaces' it implements
-  const signatures = new Map();
-  const addSig = (m, prefix, isStatic) => {
+  /** @type {Map<string, import("./frontend-types.ts").MethodSignature>} */ const signatures = new Map();
+  /** @param {import("./frontend-types.ts").MethodDefinition} m @param {string} prefix @param {boolean} isStatic @returns {void} */ const addSig = (m, prefix, isStatic) => {
     const name = prefix + upper(m.getName());
     const where = `${className}=>${name}`;
     if (NATIVE_ME.has(where)) { signatures.set(name, nativeMeSig(program, where, name)); return; }
     try {
       const p = m.getParameters();
       const optional = new Set((p.getOptional?.() ?? []).map(upper));
-      const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
+      /** @param {import("@abaplint/core").TypedIdentifier} x @param {NonNullable<import("./ir.ts").Param["dir"]>} dir @returns {import("./frontend-types.ts").FrontendParam} */ const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeOf(x.getType(), where, program),
         default: defaultOf(p, x), defaultOwner: prefix ? prefix.slice(0, -1) : className, defOwner: prefix ? prefix.slice(0, -1) : className, optional: optional.has(upper(x.getName()))});
       const ret = p.getReturning();
       const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
@@ -1546,7 +1546,7 @@ function classIr(ctx0, obj) {
   // the interface or superclass the method comes from (without this an
   // inherited IF_APC_WSP_EXTENSION~ON_START read its I_MESSAGE_MANAGER as
   // an empty local)
-  const origin = (m) => {
+  /** @param {{getName(): string}} m @returns {import("./frontend-types.ts").MethodDefinition} */ const origin = (m) => {
     const nm = upper(m.getName());
     if (nm.includes("~")) {
       const [intf, meth] = nm.split("~");
@@ -1616,7 +1616,7 @@ function classIr(ctx0, obj) {
       }
     }
   }
-  const cls = {name: className, hostReplaced: HOST_REPLACED.has(className), attributes, methods: [], constructor: null, stubs: [],
+  /** @type {import("./frontend-types.ts").FrontendClass} */ const cls = {name: className, hostReplaced: HOST_REPLACED.has(className), attributes, methods: [], constructor: null, stubs: [],
     interfaces: def.getImplementing().map((i) => upper(i.name)), super: sup && program.wanted.has(sup) ? sup : null, abstract: def.isAbstract()};
   cls.abstracts = [...signatures.values()].filter((x) => x.abstract && !x.unsupported && !x.name.includes("~"));
   cls.signatures = signatures;
@@ -1675,7 +1675,7 @@ function classIr(ctx0, obj) {
       // {fn, args}: the host function takes the places and values named
       // (attributes and parameters, "&" for a place it writes) instead of
       // the parameters in their order
-      const st = typeof native === "string" ? {s: "native", fn: native}
+      /** @type {import("./frontend-types.ts").FrontendStmt} */ const st = typeof native === "string" ? {s: "native", fn: native}
         : {s: "native", fn: native.fn, args: nativeArgs(native.args, {program, reg, className, scopeName, method: name, sig, signatures, spaghetti, locals: new Map(), fieldSymbols: new Map()})};
       cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [st],
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
@@ -1766,7 +1766,7 @@ function classIr(ctx0, obj) {
 // the scope of that kind, the one of the class named when a name is given
 // (a class with local classes has one class_implementation per class, and
 // the locals come first); without a match by name, the first of the kind
-function findScope(node, stype, name) {
+/** @param {import("./frontend-types.ts").Scope} node @param {import("./frontend-types.ts").ScopeKind} stype @param {string} [name] @returns {import("./frontend-types.ts").Scope | undefined} */ function findScope(node, stype, name) {
   if (name !== undefined) {
     const named = findScopeNamed(node, stype, upper(name));
     if (named) return named;
@@ -1779,7 +1779,7 @@ function findScope(node, stype, name) {
   return undefined;
 }
 
-function findScopeNamed(node, stype, name) {
+/** @param {import("./frontend-types.ts").Scope} node @param {import("./frontend-types.ts").ScopeKind} stype @param {string} name @returns {import("./frontend-types.ts").Scope | undefined} */ function findScopeNamed(node, stype, name) {
   if (node.getIdentifier().stype === stype && upper(node.getIdentifier().sname) === name) return node;
   for (const c of node.getChildren()) {
     const f = findScopeNamed(c, stype, name);
@@ -1788,7 +1788,7 @@ function findScopeNamed(node, stype, name) {
   return undefined;
 }
 
-function defaultOf(params, x) {
+/** @param {import("./frontend-types.ts").MethodParameters} params @param {import("@abaplint/core").TypedIdentifier} x @returns {string | undefined} */ function defaultOf(params, x) {
   const d = params.getParameterDefault?.(x.getName());
   return d === undefined ? undefined : d.concatTokens();
 }
@@ -1801,7 +1801,7 @@ function defaultOf(params, x) {
  * appended rows until the machine ran out of memory (2026-09-23).
  * Literals only; anything else is refused, not guessed.
  */
-function attributeValue(id, type, where) {
+/** @param {import("@abaplint/core").TypedIdentifier} id @param {import("./ir.ts").Type} type @param {string} where @returns {string | undefined} */ function attributeValue(id, type, where) {
   const raw = id.getValue?.();
   if (raw === undefined || raw === null || raw === "") return undefined;
   if (typeof raw !== "string" && typeof raw !== "number") throw new Unsupported(`${where}: structured VALUE`);
@@ -1817,16 +1817,16 @@ function attributeValue(id, type, where) {
   return value;
 }
 
-function registerConst(program, name, id, className) {
+/** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} name @param {import("./frontend-types.ts").ConstantIdentifier} id @param {string} className @returns {string | undefined} */ function registerConst(program, name, id, className) {
   const go = goName(name.includes("~") ? name : `${className}=>${name}`);
   if (program.consts.has(go)) return go;
-  let type;
+  /** @type {import("./ir.ts").Type} */ let type;
   try { type = typeOf(id.getType(), name, program); } catch (e) { if (e instanceof Unsupported) return undefined; throw e; }
   let value = id.getValue?.();
   const SCALAR = ["i", "int8", "f", "c", "string", "x", "xstring"];
   // a quote inside a literal is written twice: '#''"' is #'" (the Zork
   // alphabet shifted by one character after it until this was read right)
-  const unquote = (v) => {
+  /** @param {string | number | undefined} v @returns {string} */ const unquote = (v) => {
     v = String(v);
     if (/^'.*'$/s.test(v)) return v.slice(1, -1).replaceAll("''", "'");
     if (/^`.*`$/s.test(v)) return v.slice(1, -1).replaceAll("``", "`");
@@ -1838,7 +1838,7 @@ function registerConst(program, name, id, className) {
     const byName = new Map(Object.entries(value).map(([k, v]) => [upper(k), v]));
     // an n component (MSGNO of a T100 key) whose VALUE is exactly its digits:
     // the characters are the value; any other n VALUE is not measured
-    const nDigits = (f) => f.type.k === "n" && byName.has(f.name) && new RegExp(`^[0-9]{${f.type.len}}$`).test(unquote(byName.get(f.name)));
+    /** @param {import("./ir.ts").Field} f @returns {boolean} */ const nDigits = (f) => f.type.k === "n" && byName.has(f.name) && new RegExp(`^[0-9]{${f.type.len}}$`).test(unquote(byName.get(f.name)));
     if (fields.length === 0 || fields.some((f) => (!SCALAR.includes(f.type.k) && !nDigits(f)) || typeof byName.get(f.name) === "object")) return undefined;
     program.consts.set(go, {go, type, value: Object.fromEntries(fields.map((f) => [f.name, byName.has(f.name) ? unquote(byName.get(f.name)) : undefined]))});
     return go;
@@ -1859,14 +1859,14 @@ function registerConst(program, name, id, className) {
 /* ---------------------------------------------------------------- statements */
 
 // the statements and control structures of a body, Normal and Body unwrapped
-const flatChildren = (node) => node.getChildren().flatMap((c) => (c instanceof Nodes.StructureNode && (isStruct(c, Structures.Normal) || isStruct(c, Structures.Body)) ? flatChildren(c) : [c]));
+/** @param {import("@abaplint/core").Nodes.StructureNode} node @returns {(import("@abaplint/core").Nodes.StatementNode | import("@abaplint/core").Nodes.StructureNode)[]} */ const flatChildren = (node) => node.getChildren().flatMap((c) => (c instanceof Nodes.StructureNode && (isStruct(c, Structures.Normal) || isStruct(c, Structures.Body)) ? flatChildren(c) : [c]));
 
-function block(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StructureNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt[]} */ function block(node, ctx) {
   return blockList(flatChildren(node), ctx);
 }
 
-function blockList(children, ctx) {
-  const out = [];
+/** @param {readonly (import("@abaplint/core").Nodes.StatementNode | import("@abaplint/core").Nodes.StructureNode)[]} children @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt[]} */ function blockList(children, ctx) {
+  /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const out = [];
   for (let i = 0; i < children.length; i += 1) {
     const child = children[i];
     // a host loop (KERNEL): the statements up to its closing line are its body
@@ -1958,7 +1958,7 @@ const RUNTIME_CX_SUPER = {CX_SY_REPLACE_INFINITE_LOOP: "CX_DYNAMIC_CHECK", CX_SY
 // when an up cast from it to the target is legal (A4H 7.58, 2026-10-08:
 // REF TO zcl_a -> zcl_a true, -> a subclass false; REF TO object -> zcl_a
 // false; REF TO zif_x -> zif_x true)
-function upcastable(reg, from, to) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").RefType} from @param {import("./frontend-types.ts").RefType} to @returns {boolean} */ function upcastable(reg, from, to) {
   if (to.name === "OBJECT" || from.name === to.name) return true;
   if (from.name === "OBJECT") return false;
   if (!to.intf) return !from.intf && isSubclass(reg, from.name, to.name);
@@ -1967,11 +1967,11 @@ function upcastable(reg, from, to) {
     .some((i) => upper(i.name) === to.name || componentInterfaces(reg, upper(i.name)).includes(to.name)));
 }
 
-function isSubclass(reg, cls, ancestor) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} ancestor @returns {boolean} */ function isSubclass(reg, cls, ancestor) {
   return chainHas(PROGRAM ?? reg, reg, cls, ancestor, (c) => clasDef(reg, c)?.getSuperClass()?.toUpperCase() ?? RUNTIME_CX_SUPER[c]);
 }
 
-function leaves(stmts, inLoop = false) {
+/** @param {readonly import("./frontend-types.ts").FrontendStmt[] | null | undefined} stmts @param {boolean} [inLoop] @returns {boolean} */ function leaves(stmts, inLoop = false) {
   for (const st of stmts ?? []) {
     if (st.s === "return") return true;
     if ((st.s === "exit" || st.s === "continue") && !inLoop) return true;
@@ -1983,7 +1983,7 @@ function leaves(stmts, inLoop = false) {
   return false;
 }
 
-function tryBlock(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StructureNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function tryBlock(node, ctx) {
   const body = bodyOf(node, ctx);
   const seen = [];
   const catches = node.findDirectStructures(Structures.Catch).map((c) => {
@@ -2052,12 +2052,12 @@ function tryBlock(node, ctx) {
   return {s: "try", body, catches, cleanup};
 }
 
-const bodyOf = (n, ctx) => {
+/** @param {import("@abaplint/core").Nodes.StructureNode} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt[]} */ const bodyOf = (n, ctx) => {
   const b = n.findDirectStructure(Structures.Body);
   return b === undefined ? [] : block(b, ctx);
 };
 
-function structure(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StructureNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function structure(node, ctx) {
   if (isStruct(node, Structures.Types)) return {s: "nop"};
   if (isStruct(node, Structures.Data)) {
     if (/\bVALUE\b/i.test(node.concatTokens())) throw new Unsupported(`DATA BEGIN OF with VALUE: ${node.concatTokens().slice(0, 60)}`);
@@ -2113,7 +2113,7 @@ function structure(node, ctx) {
     // LOOP AT ref->* (ultra/json, CL_SXML_STRING_READER's reader): what a data
     // reference points to, generic data in Go and JS alike
     const derefLoop = /^([\w\/~]+)->\*$/.exec(st.findFirstExpression(Expressions.LoopSource).concatTokens());
-    let table;
+    /** @type {import("./frontend-types.ts").ValueExpr} */ let table;
     if (derefLoop) {
       const ref = variable(derefLoop[1], ctx);
       if (ref.type.k !== "dref") throw new Unsupported(`LOOP AT ->* of a ${ref.type.k}`);
@@ -2130,10 +2130,10 @@ function structure(node, ctx) {
       // ($ZOSG_TMP_0421) visits a row appended during the loop, where the
       // key order taken once would not: refused, not silently wrong.
       // Over-refusal (lo->mt of another instance) is accepted.
-      const bare = (t) => upper(t).replace(/\s+/g, "").replace(/\[.*$/, "").replace(/^.*(=>|->)/, "");
+      /** @param {string} t @returns {string} */ const bare = (t) => upper(t).replace(/\s+/g, "").replace(/\[.*$/, "").replace(/^.*(=>|->)/, "");
       const name = bare(st.findFirstExpression(Expressions.LoopSource).concatTokens());
       const esc = name.replace(/[^\w]/g, "\\$&");
-      const hit = (t) => { const b = bare(t); return b === name || name.startsWith(`${b}-`) || b.startsWith(`${name}-`); };
+      /** @param {string} t @returns {boolean} */ const hit = (t) => { const b = bare(t); return b === name || name.startsWith(`${b}-`) || b.startsWith(`${name}-`); };
       for (const s of node.findAllStatementNodes()) {
         if (s === st) continue;
         const stext = upper(s.concatTokens());
@@ -2156,7 +2156,7 @@ function structure(node, ctx) {
       if (!nm || !["data", "struct"].includes(fsType?.k) || /\b(WHERE|FROM|TO|INTO|USING)\b/i.test(text.replace(/ASSIGNING.*/i, ""))) throw new Unsupported(`LOOP form over a generic table: ${text}`);
       // a typed field symbol (ultra/json): each row must be a value of that
       // structure, checked at run time as ASSIGN ref->* TO <typed> is
-      const loop = {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), token: {}};
+      /** @type {import("./frontend-types.ts").LoopState} */ const loop = {s: "loop_data", table, fs: upper(nm), ...(fsType.k === "struct" ? {fsType, text} : {}), token: {}};
       (ctx.loopStack ??= []).push(loop);
       try { loop.body = bodyOf(node, ctx); } finally { ctx.loopStack.pop(); }
       return loop;
@@ -2165,8 +2165,8 @@ function structure(node, ctx) {
     const lt = st.findFirstExpression(Expressions.LoopTarget);
     if (!lt) throw new Unsupported(`LOOP form: ${text}`);
     const fsNode = lt.findFirstExpression(Expressions.FSTarget) ?? lt.findFirstExpression(Expressions.TargetFieldSymbol);
-    let into = null;
-    let fs = null;
+    /** @type {import("./frontend-types.ts").ValueExpr | null} */ let into = null;
+    /** @type {string | null} */ let fs = null;
     if (/\bASSIGNING\b/i.test(lt.concatTokens())) {
       const nm = /<[\w]+>/.exec(lt.concatTokens())?.[0];
       if (nm === undefined || !ctx.fieldSymbols.has(upper(nm))) throw new Unsupported(`LOOP ASSIGNING ${lt.concatTokens()}`);
@@ -2185,7 +2185,7 @@ function structure(node, ctx) {
       }
     }
     void fsNode;
-    const bound = (kw) => {
+    /** @param {string} kw @returns {import("./frontend-types.ts").ValueExpr | null} */ const bound = (kw) => {
       const e = st.getChildren();
       const at = e.findIndex((c) => isTok(c, kw));
       return at < 0 ? null : convert(source(e[at + 1], ctx, I), I);
@@ -2203,7 +2203,7 @@ function structure(node, ctx) {
     // ultra/itab: the loop is known to its body, for DELETE itab (the
     // current row) inside it
     // (a shared token object, not the loop itself, so the IR stays a tree)
-    const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), ...(dynamicKeys ? {dynamicKeys} : {}), token: {}};
+    /** @type {import("./frontend-types.ts").LoopState} */ const loop = {s: "loop", table, into, fs, where, from: bound("FROM"), to: bound("TO"), rowType: table.type.row, ...(key ? {key} : {}), ...(dynamicKeys ? {dynamicKeys} : {}), token: {}};
     (ctx.loopStack ??= []).push(loop);
     // critic fix: inside the body the loop's field symbol is freshly
     // assigned on every pass until a DELETE of the current row makes it
@@ -2240,7 +2240,7 @@ function structure(node, ctx) {
  * Node's runtime sorts a copy stably, so its duplicates come oldest first:
  * ANORMALIES secondary-key-duplicates. The Go and JS emitters follow A4H.
  */
-function secondaryKey(tableType, keyName, ctx, text, hashedOk = false) {
+/** @param {import("./frontend-types.ts").TableType} tableType @param {string} keyName @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @param {boolean} [hashedOk] @returns {import("./ir.ts").ResolvedKey | null} */ function secondaryKey(tableType, keyName, ctx, text, hashedOk = false) {
   const name = upper(keyName);
   if (name === "PRIMARY_KEY") return null;
   const k = (tableType.secondary ?? []).find((x) => x.name === name);
@@ -2256,7 +2256,7 @@ function secondaryKey(tableType, keyName, ctx, text, hashedOk = false) {
 }
 
 /** statements that add a row anywhere but the end, or remove one, on a table with a non-unique sorted secondary key */
-function keyGuard(tableType, what, ctx = null) {
+/** @param {import("./frontend-types.ts").TableType} tableType @param {string} what @param {import("./frontend-types.ts").MethodContext | null} [ctx] @returns {void} */ function keyGuard(tableType, what, ctx = null) {
   // AJSON's tree has one node per (path,name). The non-unique secondary
   // declarations order only array children (path,index) or ordered object
   // children (path,order); those are unique within their respective sets.
@@ -2267,29 +2267,29 @@ function keyGuard(tableType, what, ctx = null) {
 }
 
 /** statements that add rows other than APPEND, on a table with a unique secondary key */
-function uniqueGuard(tableType, what) {
+/** @param {import("./frontend-types.ts").TableType} tableType @param {string} what @returns {void} */ function uniqueGuard(tableType, what) {
   const unique = (tableType?.secondary ?? []).filter((k) => k.unique);
   if (unique.length) throw new Unsupported(`${what} on a table with the unique secondary key ${unique[0].name}`);
 }
 
 /** String operators share exactly the logical-expression semantics. */
-function stringComparison(op, l, r) {
-  const kinds = {CP: "cp", NP: "cp", CA: "ca", NA: "ca", CS: "cs", NS: "cs", CO: "co", CN: "co"};
+/** @param {string} op @param {import("./frontend-types.ts").ValueExpr} l @param {import("./frontend-types.ts").ValueExpr} r @returns {import("./ir.ts").Condition | null} */ function stringComparison(op, l, r) {
+  /** @type {Readonly<Record<string, "cp" | "ca" | "cs" | "co">>} */ const kinds = {CP: "cp", NP: "cp", CA: "ca", NA: "ca", CS: "cs", NS: "cs", CO: "co", CN: "co"};
   if (!kinds[op]) return null;
   const kind = kinds[op];
   // CS keeps the subject's blanks; CA/CO keep both. CP keeps escaped
   // pattern blanks and distinguishes fixed subjects from strings.
-  const c = {c: kind, l: padded(l), r: kind === "cs" ? convert(r, S) : padded(r),
+  /** @type {import("./ir.ts").Condition} */ const c = {c: kind, l: padded(l), r: kind === "cs" ? convert(r, S) : padded(r),
     cpat: r.type.k === "c", csubject: l.type.k === "c"};
   return ["NP", "NA", "NS", "CN"].includes(op) ? {c: "not", x: c} : c;
 }
 
 /** the type two numbers of a WHERE compare in: f, else int8 when both are i/int8 and either is int8 (abapiti 043), else i as before (a packed side keeps its old lowering) */
-const whereCalc = (a, b) => (a.k === "f" || b.k === "f" ? F : numeric(a) && numeric(b) && (a.k === "int8" || b.k === "int8") ? {k: "int8"} : I);
+/** @param {import("./ir.ts").Type} a @param {import("./ir.ts").Type} b @returns {import("./ir.ts").Type} */ const whereCalc = (a, b) => (a.k === "f" || b.k === "f" ? F : numeric(a) && numeric(b) && (a.k === "int8" || b.k === "int8") ? {k: "int8"} : I);
 
 /** WHERE comp op value [AND ...] over the rows of a table of structures */
-function whereOf(cc, rowType, ctx, text) {
-  const where = [];
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} cc @param {import("./ir.ts").Type} rowType @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./ir.ts").Where[]} */ function whereOf(cc, rowType, ctx, text) {
+  /** @type {import("./ir.ts").Where[]} */ const where = [];
   for (const k of cc.getChildren()) {
     if (isTok(k, "AND")) continue;
     // ultra/itab: a component of a component (param-shape) is read through
@@ -2347,7 +2347,7 @@ function whereOf(cc, rowType, ctx, text) {
   return where;
 }
 
-function statement(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt | undefined} */ function statement(node, ctx) {
   const text = node.concatTokens();
   // Dynamic access can name any method local, even a literal name omitted
   // from the lowered IR. STATICS and opaque kernel code also retain lifetime.
@@ -3291,13 +3291,13 @@ function statement(node, ctx) {
 const GENERATE_REFUSED = "GENERATE SUBROUTINE POOL is not supported";
 // what the emitters spell as a place (emit-go.mjs place()), constants and sy excluded
 const PLACES = new Set(["var", "attr", "static", "field", "dref_field", "fs", "refattr", "row", "row_key"]);
-function generateSubroutine(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function generateSubroutine(node, ctx) {
   const kids = node.getChildren();
-  const after = (kw) => {
+  /** @param {string} kw @returns {import("./frontend-types.ts").SyntaxNode | undefined} */ const after = (kw) => {
     const i = kids.findIndex((k, j) => isTok(k, kw) && kids[j + 1] instanceof Nodes.ExpressionNode);
     return i < 0 ? undefined : kids[i + 1];
   };
-  const body = [];
+  /** @type {import("./frontend-types.ts").FrontendStmt[]} */ const body = [];
   const name = after("NAME");
   if (name !== undefined) {
     // NAME is a Source in abaplint's grammar and a field the kernel writes:
@@ -3330,12 +3330,12 @@ function generateSubroutine(node, ctx) {
 // A c operand keeps its trailing blanks where ABAP keeps them: the
 // separator of SPLIT (measured, 'a ' splits `a b` into '' and 'b'). A c
 // value is stored without them, so its declared length pads it back.
-function padded(x) {
+/** @param {import("./frontend-types.ts").ValueExpr} x @returns {import("./frontend-types.ts").ValueExpr} */ function padded(x) {
   const v = convert(x, S);
   return x.type.k === "c" ? {e: "padc", x: v, n: x.type.len, type: S} : v;
 }
 
-function splitStatement(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function splitStatement(node, ctx, text) {
   // measured on A4H: an empty string gives no rows, and one empty last
   // piece after a trailing separator is dropped (a| -> [a], a|| -> [a,'']);
   // an empty separator does not split; a c separator keeps its blanks
@@ -3367,7 +3367,7 @@ function splitStatement(node, ctx, text) {
 // name a has too gets a's value by the conversion rules, the others are
 // left alone, sy-subrc too (measured on A4H). A component that is itself a
 // structure or a table on either side is not flat and is refused.
-function moveCorresponding(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function moveCorresponding(node, ctx, text) {
   if (/\b(EXPANDING|KEEPING)\b/i.test(text)) throw new Unsupported(`MOVE-CORRESPONDING form: ${text}`);
   const from = source(node.findDirectExpression(Expressions.Source), ctx);
   const tNode = node.findDirectExpression(Expressions.SimpleTarget) ?? node.findDirectExpression(Expressions.Target);
@@ -3407,7 +3407,7 @@ const STRING_FNS = {
   // ultra/events: substring_before / _after( val sub ), abapGit's parse_fields
   SUBSTRING_BEFORE: ["VAL", "SUB"], SUBSTRING_AFTER: ["VAL", "SUB"],
 };
-function stringFn(name, direct, named, ctx, text) {
+/** @param {string} name @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} direct @param {import("@abaplint/core").Nodes.ExpressionNode | undefined} named @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").ValueExpr} */ function stringFn(name, direct, named, ctx, text) {
   const ps = named?.findDirectExpressions(Expressions.ParameterS) ?? [];
   const given = new Map(ps.map((p) => [upper(p.findDirectExpression(Expressions.ParameterName).concatTokens()), p.findDirectExpression(Expressions.Source)]));
   if (direct) given.set("VAL", direct);
@@ -3456,18 +3456,18 @@ function stringFn(name, direct, named, ctx, text) {
     given.has("CASE") ? chars("CASE") : {e: "str", value: "", type: S}, given.has("MIN") ? int("MIN") : {e: "int", value: 1, type: I}], type: S};
 }
 
-function findResults(node, ctx, text, tw, bytes = false, resultNode = null) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @param {string} tw @param {boolean} [bytes] @param {import("@abaplint/core").Nodes.ExpressionNode | null} [resultNode] @returns {Extract<import("./frontend-types.ts").FrontendStmt, {s: "find_results"}>} */ function findResults(node, ctx, text, tw, bytes = false, resultNode = null) {
   return lowerFindResults(node, ctx, text, tw, bytes, resultNode, {Expressions, upper, source, charlike, Unsupported, lvalue, fieldOf, convert, XS, S});
 }
 
-function initialValue(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function initialValue(node, ctx) {
   const name = upper(node.findFirstExpression(Expressions.DefinitionName).concatTokens());
   const type = ctx.locals.get(name);
   if (type === undefined) throw new Unsupported(`${name}: a VALUE for something that is not a local`);
   const val = node.findFirstExpression(Expressions.Value);
   const src = val?.getChildren().find((c) => !isTok(c));
   if (src === undefined) throw new Unsupported(`VALUE of ${name}`);
-  let v;
+  /** @type {import("./frontend-types.ts").ValueExpr} */ let v;
   if (isExpr(src, Expressions.Constant)) v = sourceOperand(src, ctx);
   else if (upper(src.concatTokens()) === "ABAP_TRUE") v = {e: "chars", value: "X", type: C(1)};
   else if (upper(src.concatTokens()) === "ABAP_FALSE") v = {e: "chars", value: "", type: C(1)};
@@ -3498,13 +3498,13 @@ function initialValue(node, ctx) {
  * everywhere else after the DELETE (the rest of that body, after the loop)
  * it is refused.
  */
-function fsCheck(n, ctx) {
+/** @param {string} n @param {import("./frontend-types.ts").VariableContext} ctx @returns {void} */ function fsCheck(n, ctx) {
   if (!ctx.fsGone?.has(n)) return;
   const fresh = ctx.fsFresh?.findLast((f) => f.name === n);
   if (!fresh || fresh.stale) throw new Unsupported(`${n} used after DELETE of its row inside the LOOP: not measured`);
 }
 
-function variable(name, ctx) {
+/** @param {string} name @param {import("./frontend-types.ts").VariableContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function variable(name, ctx) {
   const n = upper(name);
   // me as a value: the object itself (in Go its most-derived self)
   if (n === "ME") return {e: "me", type: {k: "ref", name: ctx.className}};
@@ -3524,7 +3524,7 @@ function variable(name, ctx) {
 /** whether a name resolves as a variable the way variable() resolves it
  * (field symbol, parameter, returning, local, attribute), without its side
  * effects */
-function isVariableName(name, ctx) {
+/** @param {string} name @param {import("./frontend-types.ts").MethodContext} ctx @returns {boolean} */ function isVariableName(name, ctx) {
   const n = upper(name);
   if (n === "ME" || ctx.fieldSymbols?.has(n)) return true;
   if (ctx.sig.params.some((x) => x.name === n) || ctx.sig.returning?.name === n || ctx.locals.has(n) || ctx.localConstants?.has(n)) return true;
@@ -3533,7 +3533,7 @@ function isVariableName(name, ctx) {
   return (impl?.getData().vars[n] ?? defs?.getData().vars[n]) !== undefined;
 }
 
-function findAttribute(ctx, n) {
+/** @param {import("./frontend-types.ts").VariableContext} ctx @param {string} n @returns {import("./frontend-types.ts").ValueExpr | undefined} */ function findAttribute(ctx, n) {
   if (n === "ME" || n === "SUPER") return undefined;
   const alias = aliasTarget(ctx.reg, ctx.className, n);
   if (alias?.includes("~") && ownInterfaceAttributes(ctx.program, alias.split("~")[0]).some((a) => a.name === alias)) {
@@ -3557,7 +3557,7 @@ function findAttribute(ctx, n) {
 }
 
 /** a Target (or InlineData) as an assignable place */
-function lvalue(target, ctx) {
+/** @param {import("./frontend-types.ts").SyntaxNode} target @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function lvalue(target, ctx) {
   const kids = target.getChildren();
   let place;
   let i = 0;
@@ -3613,7 +3613,7 @@ function lvalue(target, ctx) {
 }
 
 /** ref->attr: an instance attribute of the class a reference points to */
-function refAttribute(base, attrNode, ctx, write = false) {
+/** @param {import("./frontend-types.ts").ValueExpr} base @param {import("./frontend-types.ts").TokenText} attrNode @param {import("./frontend-types.ts").NamedContext} ctx @param {boolean} [write] @returns {import("./frontend-types.ts").ValueExpr} */ function refAttribute(base, attrNode, ctx, write = false) {
   if (base.type.k === "exc") {
     const name = upper(attrNode.concatTokens());
     if (write || name !== "PREVIOUS") throw new Unsupported(`exception attribute ${name}${write ? " write" : ""}`);
@@ -3640,7 +3640,7 @@ function refAttribute(base, attrNode, ctx, write = false) {
   return {e: "refattr", base, name, ...(kernelRtti ? {kernelRtti: true} : {}), type: typeOf(a.getType(), `${base.type.name}->${name}`, ctx.program)};
 }
 
-function dataRefField(base, attrNode, ctx) {
+/** @param {import("./frontend-types.ts").ValueExpr & {type: Extract<import("./ir.ts").Type, {k: "dref"}>}} base @param {import("./frontend-types.ts").TokenText} attrNode @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function dataRefField(base, attrNode, ctx) {
   const name = upper(attrNode.concatTokens());
   if (base.type.to?.k !== "struct") throw new Unsupported(`-> on a dref without a structured target`);
   const f = fieldOf(ctx, base.type.to, name, `${name} of data reference`);
@@ -3650,13 +3650,13 @@ function dataRefField(base, attrNode, ctx) {
 /** tab[ n ] or tab[ component = value ... ]: the addressed row; a missing
  * row raises CX_SY_ITAB_LINE_NOT_FOUND. Keyed expressions use the same
  * component/value subset as line_exists and READ TABLE WITH KEY. */
-function rowOf(place, te, ctx) {
+/** @param {import("./frontend-types.ts").ValueExpr} place @param {import("@abaplint/core").Nodes.ExpressionNode} te @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function rowOf(place, te, ctx) {
   if (place.type.k !== "table") throw new Unsupported(`a table expression on a ${place.type.k}`);
   const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
   if (inner.length === 1 && isExpr(inner[0], Expressions.Source)) {
     return {e: "row", base: place, index: convert(source(inner[0], ctx, I), I), type: place.type.row};
   }
-  const keys = [];
+  /** @type {import("./ir.ts").TableKey[]} */ const keys = [];
   for (let i = 0; i < inner.length; i += 3) {
     const comp = inner[i];
     if (!isExpr(comp, Expressions.ComponentChainSimple) || !isTok(inner[i + 1], "=") || !isExpr(inner[i + 2], Expressions.Source)) {
@@ -3695,19 +3695,19 @@ function rowOf(place, te, ctx) {
  */
 
 /** the DATA and CLASS-DATA of one interface (not of those it includes), cached */
-function ownInterfaceAttributes(program, intf) {
+/** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} intf @returns {readonly import("./frontend-types.ts").InterfaceAttribute[]} */ function ownInterfaceAttributes(program, intf) {
   if (program.intfOwnAttrs.has(intf)) return program.intfOwnAttrs.get(intf);
   const obj = program.reg.getObject("INTF", intf);
   const def = obj?.getDefinition();
-  const out = [];
+  /** @type {import("./frontend-types.ts").InterfaceAttribute[]} */ const out = [];
   program.intfOwnAttrs.set(intf, out);
   if (!def) return out;
   // READ-ONLY and VALUE are read off the statement: abaplint's attribute of
   // an interface carries neither (its meta is empty). Only the statements
   // that declare an attribute count: a DATA BEGIN OF block is its DataBegin,
   // and the components inside it are not attributes
-  const stmts = new Map();
-  const walk = (node) => {
+  /** @type {Map<string, import("@abaplint/core").Nodes.StatementNode>} */ const stmts = new Map();
+  /** @param {import("@abaplint/core").Nodes.StructureNode} node @returns {void} */ const walk = (node) => {
     for (const c of node.getChildren()) {
       if (isStmt(c, Statements.Data) || isStmt(c, Statements.DataBegin)) {
         const n = c.findDirectExpression(Expressions.DefinitionName) ?? c.findFirstExpression(Expressions.DefinitionName);
@@ -3721,14 +3721,14 @@ function ownInterfaceAttributes(program, intf) {
   };
   const top = obj.getMainABAPFile()?.getStructure();
   if (top) walk(top);
-  const readOnly = (st) => {
+  /** @param {import("@abaplint/core").Nodes.StatementNode | undefined} st @returns {boolean} */ const readOnly = (st) => {
     const t = st?.getTokens().map((x) => upper(x.getStr())) ?? [];
     return t.some((x, i) => x === "READ" && t[i + 1] === "-" && t[i + 2] === "ONLY");
   };
   for (const a of def.getAttributes().getInstance()) {
     const name = `${intf}~${upper(a.getName())}`;
     const st = stmts.get(upper(a.getName()));
-    const entry = {name, intf, readOnly: readOnly(st)};
+    /** @type {import("./frontend-types.ts").InterfaceAttribute} */ const entry = {name, intf, readOnly: readOnly(st)};
     if (st?.findFirstExpression(Expressions.Value)) entry.unsupported = `${name}: VALUE on an interface DATA does not activate on A4H`;
     else {
       // an anonymous structure (DATA BEGIN OF qname ...) is the interface's
@@ -3749,7 +3749,7 @@ function ownInterfaceAttributes(program, intf) {
 }
 
 /** the attributes of an interface and of every interface it includes */
-function interfaceAttributes(program, intf) {
+/** @param {import("./frontend-types.ts").FrontendProgram} program @param {string} intf @returns {readonly import("./frontend-types.ts").InterfaceAttribute[]} */ function interfaceAttributes(program, intf) {
   if (!program.interfaceAttrs.has(intf)) {
     program.interfaceAttrs.set(intf, [intf, ...componentInterfaces(program.reg, intf)].flatMap((i) => ownInterfaceAttributes(program, i)));
   }
@@ -3757,13 +3757,13 @@ function interfaceAttributes(program, intf) {
 }
 
 /** the fields a class gets for the interfaces it implements itself (a subclass inherits them) */
-function implementedAttributes(program, implemented) {
+/** @param {import("./frontend-types.ts").FrontendProgram} program @param {readonly string[]} implemented @returns {import("./frontend-types.ts").FrontendAttribute[]} */ function implementedAttributes(program, implemented) {
   return implemented.flatMap((i) => ownInterfaceAttributes(program, i)).filter((a) => !a.static)
     .map((a) => (a.unsupported ? {name: a.name, unsupported: a.unsupported} : {name: a.name, type: a.type, static: false, fromIntf: a.intf, readOnly: a.readOnly}));
 }
 
 /** INTF~ATTR inside a class that implements INTF (or inherits it) */
-function ownIntfAttribute(ctx, n) {
+/** @param {import("./frontend-types.ts").NamedContext} ctx @param {string} n @returns {import("./frontend-types.ts").ValueExpr} */ function ownIntfAttribute(ctx, n) {
   const intf = n.slice(0, n.lastIndexOf("~"));
   const a = ownInterfaceAttributes(ctx.program, intf).find((x) => x.name === n);
   if (a === undefined) throw new Unsupported(`${n}: not an attribute of ${intf} (an alias?)`);
@@ -3772,7 +3772,7 @@ function ownIntfAttribute(ctx, n) {
 }
 
 /** ref->attr and ref->comp~attr through a reference to an interface */
-function intfRefAttribute(base, name, ctx, write) {
+/** @param {import("./frontend-types.ts").ValueExpr} base @param {string} name @param {import("./frontend-types.ts").NamedContext} ctx @param {boolean} write @returns {import("./frontend-types.ts").ValueExpr} */ function intfRefAttribute(base, name, ctx, write) {
   const intf = base.type.name;
   if (name.includes("~")) {
     const pre = name.slice(0, name.lastIndexOf("~"));
@@ -3800,7 +3800,7 @@ function intfRefAttribute(base, name, ctx, write) {
 }
 
 /** ref->intf~attr through a reference to a class that implements intf */
-function classRefIntfAttribute(base, name, ctx, write) {
+/** @param {import("./frontend-types.ts").ValueExpr} base @param {string} name @param {import("./frontend-types.ts").NamedContext} ctx @param {boolean} write @returns {import("./frontend-types.ts").ValueExpr} */ function classRefIntfAttribute(base, name, ctx, write) {
   const pre = name.slice(0, name.lastIndexOf("~"));
   // the topmost class that implements it: the field is its, and a subclass
   // implementing the same interface again shares it
@@ -3833,9 +3833,9 @@ const CONSTRUCTORS = new Set(["VALUE", "CONV", "NEW", "REF", "COND", "SWITCH", "
  * inline in the same Source as the operator after it: `CONV f( w ) / 2` is
  * one Source of seven children.
  */
-function items(node) {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @returns {import("./frontend-types.ts").ExpressionItem[]} */ function items(node) {
   const kids = node.getChildren();
-  const out = [];
+  /** @type {import("./frontend-types.ts").ExpressionItem[]} */ const out = [];
   for (let i = 0; i < kids.length; i += 1) {
     const k = kids[i];
     if (isTok(k) && ["XSDBOOL", "BOOLC"].includes(upper(tokenStr(k))) && isTok(kids[i + 1], "(") && isExpr(kids[i + 2], Expressions.Cond)) {
@@ -3878,9 +3878,9 @@ function items(node) {
 }
 
 /** the leaves of one arithmetic expression: calls count as leaves, their arguments do not */
-function leafTypes(node, ctx) {
-  const out = [];
-  const walk = (n) => {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./ir.ts").Type[]} */ function leafTypes(node, ctx) {
+  /** @type {import("./ir.ts").Type[]} */ const out = [];
+  /** @param {import("./frontend-types.ts").SyntaxNode} n @returns {void} */ const walk = (n) => {
     for (const it of items(n)) {
       if (it.ctor) out.push(constructor(it.ctor, ctx).type);
       else if (it.bool) out.push(it.bool === "BOOLC" ? S : C(1));
@@ -3896,11 +3896,11 @@ function leafTypes(node, ctx) {
 }
 
 const BIT_OPS = new Set(["BIT-AND", "BIT-OR", "BIT-XOR"]);
-const hasBitOp = (node) => node.getChildren().some((c) => (isExpr(c, Expressions.ArithOperator) && BIT_OPS.has(upper(c.concatTokens())))
+/** @param {import("./frontend-types.ts").SyntaxNode} node @returns {boolean} */ const hasBitOp = (node) => node.getChildren().some((c) => (isExpr(c, Expressions.ArithOperator) && BIT_OPS.has(upper(c.concatTokens())))
   || (isExpr(c, Expressions.Source) && hasBitOp(c)));
-const hasPow = (node) => node.getChildren().some((c) => (isExpr(c, Expressions.ArithOperator) && c.concatTokens() === "**")
+/** @param {import("./frontend-types.ts").SyntaxNode} node @returns {boolean} */ const hasPow = (node) => node.getChildren().some((c) => (isExpr(c, Expressions.ArithOperator) && c.concatTokens() === "**")
   || (isExpr(c, Expressions.Source) && hasPow(c)));
-const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.ArithOperator)
+/** @param {import("./frontend-types.ts").SyntaxNode} node @returns {boolean} */ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.ArithOperator)
   || (isExpr(c, Expressions.Source) && hasArith(c)));
 
 /**
@@ -3915,7 +3915,7 @@ const hasArith = (node) => node.getChildren().some((c) => isExpr(c, Expressions.
  * c); no descriptor object is made. Any other attribute of a call's result
  * is refused.
  */
-function descrAttr(methodCall, attr, ctx) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} methodCall @param {import("./frontend-types.ts").TokenText} attr @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function descrAttr(methodCall, attr, ctx) {
   const a = upper(attr.concatTokens());
   if (!/^cl_abap_typedescr=>describe_by_data\($/i.test(methodCall.concatTokens().replace(/\(.*$/s, "(")) || !["TYPE_KIND", "LENGTH"].includes(a)) {
     const base = call(methodCall, ctx, false);
@@ -3928,7 +3928,7 @@ function descrAttr(methodCall, attr, ctx) {
   return a === "LENGTH" ? {e: "type_length", x, type: I} : {e: "type_kind", x, type: C(1)};
 }
 
-function source(node, ctx, outer, hint = outer) {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [outer] @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function source(node, ctx, outer, hint = outer) {
   const sk = node?.getChildren?.() ?? [];
   if (sk.length === 3 && isExpr(sk[0], Expressions.MethodCallChain) && isExpr(sk[1], Expressions.Arrow) && isExpr(sk[2], Expressions.AttributeChain)) return descrAttr(sk[0], sk[2], ctx);
   if (!hasArith(node)) return arith(node, ctx, undefined, hint);
@@ -4014,7 +4014,7 @@ function source(node, ctx, outer, hint = outer) {
  */
 let GEN_CALC = false;
 const CALC_CODE = {i: "I", int8: "8", f: "F", p: "P", c: "C", string: "g", n: "N", d: "D", t: "T", x: "X", xstring: "y"};
-function genericArith(node, ctx, outer) {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [outer] @returns {import("./frontend-types.ts").ValueExpr} */ function genericArith(node, ctx, outer) {
   const text = node.concatTokens();
   if (outer === undefined) throw new Unsupported(`arithmetic with a generic operand outside an assignment: ${text}`);
   if (hasBitOp(node)) throw new Unsupported(`bit operation with a generic operand: ${text}`);
@@ -4066,7 +4066,7 @@ function genericArith(node, ctx, outer) {
 }
 
 /** a ComponentChain (a-b-c) read off a structured value */
-function componentsOf(v, chain, ctx) {
+/** @param {import("./frontend-types.ts").ValueExpr} v @param {import("./frontend-types.ts").SyntaxNode} chain @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function componentsOf(v, chain, ctx) {
   for (const c of chain.getChildren()) {
     if (c.concatTokens() === "-") continue;
     if (isExpr(c, Expressions.ComponentChain) || isExpr(c, Expressions.ComponentChainSimple)) {
@@ -4080,13 +4080,13 @@ function componentsOf(v, chain, ctx) {
   return v;
 }
 
-function arith(node, ctx, calc, hint) {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [calc] @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function arith(node, ctx, calc, hint) {
   const its = items(node);
   let negate = false;
   while (its.length > 0 && its[0].sign !== undefined) {
     if (its.shift().sign === "-") negate = !negate;
   }
-  const value = (item, t) => {
+  /** @param {import("./frontend-types.ts").ExpressionItem} item @param {import("./ir.ts").Type} [t] @returns {import("./frontend-types.ts").ValueExpr} */ const value = (item, t) => {
     if (item.ctor) { const v = constructor(item.ctor, ctx, item.hint); return t === undefined ? v : convert(v, t); }
     if (item.bool) {
       // xsdbool: a c(1) 'X' or blank; boolc: a string 'X' or ' '
@@ -4103,7 +4103,7 @@ function arith(node, ctx, calc, hint) {
     if (t !== undefined && ["x", "xstring", "d", "t"].includes(v.type.k) && !["x", "xstring", "i"].includes(t.k)) v = convert(v, I);
     return t === undefined ? v : convert(v, t);
   };
-  let expr;
+  /** @type {import("./frontend-types.ts").ValueExpr} */ let expr;
   if (its.length === 3 && its[1].concat) {
     expr = {e: "concat", l: convert(value(its[0]), S), r: convert(value(its[2]), S), type: S};
   } else if (its.length === 3 && its[1].op !== undefined) {
@@ -4124,7 +4124,7 @@ function arith(node, ctx, calc, hint) {
 }
 
 /** one operand: a field chain, a literal, a call, a template, a constructor */
-function sourceOperand(n, ctx, hint) {
+/** @param {import("./frontend-types.ts").SyntaxNode} n @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function sourceOperand(n, ctx, hint) {
   if (isExpr(n, Expressions.Source)) return source(n, ctx);
   if (isExpr(n, Expressions.FieldChain) || isExpr(n, Expressions.SourceField)) return fieldChain(n, ctx);
   if (isExpr(n, Expressions.Constant)) {
@@ -4150,7 +4150,7 @@ function sourceOperand(n, ctx, hint) {
   throw new Unsupported(`operand ${n.get().constructor.name}: ${n.concatTokens()}`);
 }
 
-function fieldChain(n, ctx) {
+/** @param {import("./frontend-types.ts").FieldChain} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function fieldChain(n, ctx) {
   const kids = isExpr(n, Expressions.SourceField) ? [n] : n.getChildren();
   const text = upper(n.concatTokens());
   if (SY_MESSAGES[text]) return {e: "sy", ...SY_MESSAGES[text]};
@@ -4226,7 +4226,7 @@ function fieldChain(n, ctx) {
 }
 
 /** the number after + or inside ( ) of v+off(len); null for (*) */
-function offsetValue(node, ctx) {
+/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr | null} */ function offsetValue(node, ctx) {
   const v = node.getChildren()[1];
   if (isTok(v, "*")) return null;
   if (v instanceof Nodes.TokenNode) {
@@ -4241,7 +4241,7 @@ function offsetValue(node, ctx) {
  * range raises CX_SY_RANGE_OUT_OF_BOUNDS. A c field is read as its full
  * length (trailing blanks included) and the part is stored trimmed again.
  */
-function substring(base, off, len, node) {
+/** @param {import("./frontend-types.ts").ValueExpr} base @param {import("./frontend-types.ts").ValueExpr | null} off @param {import("./frontend-types.ts").ValueExpr | null} len @param {import("./frontend-types.ts").SyntaxNode} node @returns {import("./frontend-types.ts").ValueExpr} */ function substring(base, off, len, node) {
   // a d or t is read as the c of its length (measured on A4H: t '123456'
   // gives 12 and 34 for (2) and +2(2) into i)
   if (base.type.k === "d" || base.type.k === "t") base = {...base, type: C(base.type.len)};
@@ -4279,13 +4279,13 @@ function localInterfaceConstant(id, attr, local, reg) {
 }
 
 /** zif_x=>c_y or zcl_x=>attr */
-function resolveStatic(owner, attr, ctx, write = false) {
+/** @param {string} owner @param {string} attr @param {import("./frontend-types.ts").NamedContext} ctx @param {boolean} [write] @returns {import("./frontend-types.ts").ValueExpr} */ function resolveStatic(owner, attr, ctx, write = false) {
   return lowerStatic(owner, attr, ctx, {CHAR_UTILITIES, C, upper, clasDef, registerConst, localInterfaceConstant, Unsupported, ancestors, goName, typeOf, abaplint, notInProgram}, write);
 }
 
 /* ------------------------------------------------------------- constructors */
 
-function namedType(typeNode, ctx, inferred) {
+/** @param {import("./frontend-types.ts").SyntaxNode | undefined} typeNode @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [inferred] @returns {import("./ir.ts").Type} */ function namedType(typeNode, ctx, inferred) {
   if (typeNode === undefined) throw new Unsupported("a constructor without a type");
   const text = typeNode.concatTokens();
   if (text === "#") {
@@ -4315,7 +4315,7 @@ function namedType(typeNode, ctx, inferred) {
   throw new Unsupported(`type ${text}`);
 }
 
-function constructor(c, ctx, inferred) {
+/** @param {import("./frontend-types.ts").ConstructorItem} c @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./ir.ts").Type} [inferred] @returns {import("./frontend-types.ts").ValueExpr} */ function constructor(c, ctx, inferred) {
   if (c.kw === "CONV") {
     const to = namedType(c.typeNode, ctx, inferred);
     if (c.body === null || c.body.getChildren().length !== 1) throw new Unsupported(`CONV with LET or empty: ${c.text}`);
@@ -4436,17 +4436,17 @@ function constructor(c, ctx, inferred) {
  * owner and name ("M", or "I~M" for an interface method). Cached; an
  * untypeable signature is a named refusal at the call.
  */
-function methodSignature(ctx, owner, name) {
+/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {string} owner @param {string} name @returns {import("./frontend-types.ts").MethodSignature} */ function methodSignature(ctx, owner, name) {
   const key = `${owner}=>${name}`;
   if (ctx.program.sigs.has(key)) return suppliedSignature(ctx, owner, name, ctx.program.sigs.get(key));
   if (NATIVE_ME.has(key)) { ctx.program.sigs.set(key, nativeMeSig(ctx.program, key, name)); return ctx.program.sigs.get(key); }
-  let sig;
+  /** @type {import("./frontend-types.ts").MethodSignature} */ let sig;
   try {
     const [intf, meth] = name.includes("~") ? name.split("~") : [null, name];
     const defOwner = intf ?? owner;
     const def = ctx.reg.getObject("INTF", defOwner)?.getDefinition() ?? clasDef(ctx.reg, defOwner);
     if (def === undefined) throw new Unsupported(`${defOwner} is not in the program`);
-    const m = intf ? Array.from((() => { const all = def.getMethodDefinitions(); return Array.isArray(all) ? all : all.getAll(); })()).find((x) => upper(x.getName()) === meth)
+    /** @type {import("./frontend-types.ts").MethodDefinition | undefined} */ const m = intf ? Array.from((() => { const all = def.getMethodDefinitions(); return Array.isArray(all) ? all : all.getAll(); })()).find((x) => upper(x.getName()) === meth)
       : declaredMethod(ctx.reg, defOwner, meth);
     if (m === undefined) throw new Unsupported(`${defOwner} has no method ${meth}`);
     const p = m.getParameters();
@@ -4455,13 +4455,13 @@ function methodSignature(ctx, owner, name) {
     // a RANGE OF) is the interface's, named after it: typed while a caller
     // or an implementing class was compiled, each named it after itself and
     // the class no longer implemented the interface in Go
-    const typeIn = (t) => {
+    /** @param {import("@abaplint/core").AbstractType} t @returns {import("./ir.ts").Type} */ const typeIn = (t) => {
       if (!intf) return typeOf(t, key, ctx.program);
       const saved = ctx.program.currentClass;
       ctx.program.currentClass = goName(intf);
       try { return typeOf(t, key, ctx.program); } finally { ctx.program.currentClass = saved; }
     };
-    const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeIn(x.getType()), default: defaultOf(p, x),
+    /** @param {import("@abaplint/core").TypedIdentifier} x @param {NonNullable<import("./ir.ts").Param["dir"]>} dir @returns {import("./frontend-types.ts").FrontendParam} */ const param = (x, dir) => ({name: upper(x.getName()), dir, byValue: x.getMeta().includes("pass_by_value"), type: typeIn(x.getType()), default: defaultOf(p, x),
       optional: optional.has(upper(x.getName())), defaultOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner, defOwner: intf ?? declaringClass(ctx.reg, defOwner, meth, "method") ?? defOwner});
     const ret = p.getReturning();
     const own = [...p.getImporting().map((x) => param(x, "importing")), ...p.getExporting().map((x) => param(x, "exporting")),
@@ -4479,7 +4479,7 @@ function methodSignature(ctx, owner, name) {
 }
 
 /** the superclasses of a class, nearest first, as far as the registry has them */
-export function ancestors(reg, cls) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @returns {string[]} */ export function ancestors(reg, cls) {
   const out = [];
   for (let c = clasDef(reg, cls)?.getSuperClass(), g = 0; c && g < 30; g += 1) {
     out.push(upper(c));
@@ -4490,7 +4490,7 @@ export function ancestors(reg, cls) {
 
 /** the definition of a method as a class has it: its own, else the nearest
  * superclass's; a REDEFINITION declares no parameters, so its origin's */
-function declaredMethod(reg, cls, meth) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} meth @returns {import("./frontend-types.ts").MethodDefinition | undefined} */ function declaredMethod(reg, cls, meth) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const m = clasDef(reg, c)?.getMethodDefinitions().getAll().find((x) => upper(x.getName()) === meth);
     if (m && !m.isRedefinition()) return m;
@@ -4500,7 +4500,7 @@ function declaredMethod(reg, cls, meth) {
 
 /** the class in cls's chain, itself first, that declares a method or attribute */
 /** the class of cls and its ancestors that lists intf in its INTERFACES */
-function implementingClass(reg, cls, intf) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} intf @returns {string | undefined} */ function implementingClass(reg, cls, intf) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const def = clasDef(reg, c);
     if (!def) return undefined;
@@ -4509,7 +4509,7 @@ function implementingClass(reg, cls, intf) {
   return undefined;
 }
 
-function declaringClass(reg, cls, name, kind) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {string} cls @param {string} name @param {"method" | "attr"} kind @returns {string | undefined} */ function declaringClass(reg, cls, name, kind) {
   for (const c of [cls, ...ancestors(reg, cls)]) {
     const def = clasDef(reg, c);
     if (!def) return undefined;
@@ -5299,7 +5299,7 @@ function selectSum(sel, ctx, text) {
  * UPDATE TASK do not compile. COMMIT/ROLLBACK CONNECTION is another
  * database connection, which the host does not have.
  */
-function luwStatement(node, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function luwStatement(node, text) {
   if (!/^(COMMIT\s+WORK(\s+AND\s+WAIT)?|ROLLBACK\s+WORK)\s*\.?$/i.test(text)) throw new Unsupported(`LUW form: ${text}`);
   return {s: isStmt(node, Statements.Commit) ? "commit_work" : "rollback_work"};
 }
@@ -5510,7 +5510,7 @@ function selectSingle(sel, ctx, text) {
  * (sy-subrc 4 when there is none), what a data reference points to
  * (sy-subrc 4 when it is initial; not measured), or a value, bound.
  */
-function assignStatement(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function assignStatement(node, ctx, text) {
   const fsName = upper(node.findDirectExpression(Expressions.FSTarget)?.concatTokens() ?? "");
   const fsType = ctx.fieldSymbols?.get(fsName);
   if (!fsType) throw new Unsupported(`ASSIGN to ${fsName || "?"}`);
@@ -5557,7 +5557,7 @@ function assignStatement(node, ctx, text) {
  * value of that type. A type given by name at run time ((name)), LIKE, REF
  * TO, LENGTH / DECIMALS and HANDLE are other forms, not taken here.
  */
-function createDataStatic(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function createDataStatic(node, ctx, text) {
   // CREATE DATA ref LIKE LINE OF itab (ultra/json, /UI2/CL_JSON): a new
   // initial row of the table's line type, a generic table's at run time
   const likeLine = /^CREATE\s+DATA\s+\S+\s+LIKE\s+LINE\s+OF\s+([\w\/~<>-]+)\s*\.?$/i.exec(text);
@@ -5629,7 +5629,7 @@ function createDataStatic(node, ctx, text) {
  * does: CX_SY_CREATE_OBJECT_ERROR for an unknown class, CX_SY_MOVE_CAST_ERROR
  * for one that does not fit.
  */
-function createObject(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").FrontendStmt} */ function createObject(node, ctx) {
   const text = node.concatTokens();
   const target = lvalue(node.findDirectExpression(Expressions.Target), ctx);
   if (target.type.k !== "ref") throw new Unsupported(`CREATE OBJECT into a ${target.type.k}`);
@@ -5674,7 +5674,7 @@ function createObject(node, ctx) {
  * The class must be compiled in the program; RESUMABLE, SHORTDUMP and the
  * MESSAGE forms are refused.
  */
-function raiseException(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function raiseException(node, ctx, text) {
   if (/^RAISE\s+(RESUMABLE|SHORTDUMP)\b/i.test(text)) throw new Unsupported(`RAISE ${text.split(/\s+/)[1].toUpperCase()}: ${text.slice(0, 80)}`);
   if (/^RAISE\s+EXCEPTION\s+TYPE\s+\S+\s+(MESSAGE|USING\s+MESSAGE)\b/i.test(text)) throw new Unsupported(`RAISE EXCEPTION with MESSAGE: ${text.slice(0, 80)}`);
   const clsNode = node.findDirectExpression(Expressions.ClassName);
@@ -5760,7 +5760,7 @@ function eventInfo(ctx, owner, evName) {
  * parameters the event's (ev_arg) and SENDER (ev_sender). A handler on me
  * (bare name or me->m) is called as a call on me.
  */
-function setHandler(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function setHandler(node, ctx, text) {
   const forAll = /\bFOR\s+ALL\s+INSTANCES\b/i.test(text);
   const kids = node.getChildren();
   const forAt = kids.findIndex((k) => isTok(k, "FOR"));
@@ -5839,7 +5839,7 @@ function setHandler(node, ctx, text) {
  * event); every parameter's actual is evaluated anew for each handler, as
  * A4H does (val: in ZCL_GOGEN_T_EVENTS).
  */
-function raiseEvent(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function raiseEvent(node, ctx, text) {
   const ev = eventInfo(ctx, ctx.className, node.findDirectExpression(Expressions.EventName).concatTokens());
   if (!ev.static && ctx.sig.static) throw new Unsupported(`RAISE EVENT of an instance event in a static method: ${text}`);
   const given = new Map();
@@ -5857,7 +5857,7 @@ function raiseEvent(node, ctx, text) {
  * compiled or not), for a CATCH to walk at run time: the object raised is
  * told by its class, which a RAISE EXCEPTION obj only knows then.
  */
-function exceptionSupers(reg, program) {
+/** @param {import("@abaplint/core").IRegistry} reg @param {import("./frontend-types.ts").FrontendProgram} program @returns {Record<string, string>} */ function exceptionSupers(reg, program) {
   const out = {};
   for (const c of program.classes) {
     const chain = [c.name, ...ancestors(reg, c.name)];
@@ -5872,12 +5872,12 @@ function exceptionSupers(reg, program) {
  * that is one of the named classes or inherits from one (by the hierarchy
  * abaplint knows, so an ancestor outside the program still counts).
  */
-function caughtClasses(ctx, names) {
+/** @param {import("./frontend-types.ts").CompilationContext} ctx @param {readonly string[]} names @returns {string[]} */ function caughtClasses(ctx, names) {
   return caughtOnce(ctx.program, names, () => [...ctx.program.wanted].filter((w) => names.some((n) => isSubclass(ctx.reg, w, n))).sort());
 }
 
 /** the importing parameters of a class's constructor, read off its definition */
-function constructorSignature(ctx, clsName) {
+/** @param {import("./frontend-types.ts").NamedContext} ctx @param {string} clsName @returns {readonly import("./frontend-types.ts").FrontendParam[]} */ function constructorSignature(ctx, clsName) {
   // a class without a constructor of its own is created through the
   // nearest superclass's
   // a local class (LOCAL_CLASSES) has its definition by its compiled name
@@ -5888,16 +5888,16 @@ function constructorSignature(ctx, clsName) {
   if (p.getExporting().length + p.getChanging().length > 0) throw new Unsupported(`${clsName} constructor with EXPORTING/CHANGING`);
   const optional = new Set((p.getOptional?.() ?? []).map(upper));
   const defOwner = declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName;
-  const own = p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: x.getMeta().includes("pass_by_value"),
+  /** @type {import("./frontend-types.ts").FrontendParam[]} */ const own = p.getImporting().map((x) => ({name: upper(x.getName()), dir: "importing", byValue: x.getMeta().includes("pass_by_value"),
     type: typeOf(x.getType(), `${clsName}=>CONSTRUCTOR`, ctx.program), default: defaultOf(p, x), defaultOwner: defOwner, defOwner,
     optional: optional.has(upper(x.getName()))}));
   return withSupplied(ctx.program, `${declaringClass(ctx.reg, clsName, "CONSTRUCTOR", "method") ?? clsName}=>CONSTRUCTOR`, own);
 }
 
-function valueBody(body, to, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode | null} body @param {import("./ir.ts").Type} to @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").ValueExpr} */ function valueBody(body, to, ctx, text) {
   if (to.k === "table") {
     // VALUE #( ( ... ) ( ... ) ): one row per line, a structure or one value
-    const rows = [];
+    /** @type {import("./frontend-types.ts").ValueExpr[]} */ const rows = [];
     for (const line of body?.getChildren() ?? []) {
       if (!isExpr(line, Expressions.ValueBodyLine)) throw new Unsupported(`VALUE for a table with ${line.concatTokens().slice(0, 30)}`);
       const inner = line.getChildren().filter((c) => !isTok(c));
@@ -5907,7 +5907,7 @@ function valueBody(body, to, ctx, text) {
     }
     // ultra/events (fix round): VALUE for a SORTED table places the rows in
     // key order and raises on a duplicate; the literal keeps source order
-    const literal = {e: "table_lit", rows, type: to};
+    /** @type {Extract<import("./frontend-types.ts").ValueExpr, {e: "table_lit"}>} */ const literal = {e: "table_lit", rows, type: to};
     if (to.sorted && rows.length > 0) {
       const fields = ctx.program.structs.get(to.row.go)?.fields ?? [];
       if (to.row.k !== "struct" || to.sorted.some((name) => !fields.some((f) => f.name === name && ["string", "c", "n", "d", "t", "i", "int8"].includes(f.type.k)))) throw new Unsupported(`VALUE with rows for a SORTED table with an unsupported key`);
@@ -5917,7 +5917,7 @@ function valueBody(body, to, ctx, text) {
   }
   if (body === null && to.k !== "struct") return {e: "zero", type: to};
   if (to.k !== "struct") throw new Unsupported(`VALUE for a ${to.k}: ${text}`);
-  const fields = [];
+  /** @type {{name: string; value: import("./frontend-types.ts").ValueExpr}[]} */ const fields = [];
   for (const c of body?.getChildren() ?? []) {
     if (isTok(c)) continue;
     if (!isExpr(c, Expressions.FieldAssignment)) throw new Unsupported(`VALUE body: ${text}`);
@@ -5926,7 +5926,7 @@ function valueBody(body, to, ctx, text) {
     const f = fieldOf(ctx, to, name, text);
     const src = c.findDirectExpression(Expressions.Source);
     const its = items(src);
-    let v;
+    /** @type {import("./frontend-types.ts").ValueExpr} */ let v;
     if (its.length === 1 && its[0].ctor && its[0].ctor.typeNode.concatTokens() === "#") {
       v = constructor(its[0].ctor, ctx, f.type);
     } else {
@@ -5939,13 +5939,13 @@ function valueBody(body, to, ctx, text) {
 
 /* ------------------------------------------------------------------- templates */
 
-function templateText(raw) {
+/** @param {string} raw @returns {string} */ function templateText(raw) {
   const t = raw.replace(/^[|}]/, "").replace(/[{|]$/, "");
   return t.replace(/\\([{}|\\nrt])/g, (m, c) => ({n: "\n", r: "\r", t: "\t"})[c] ?? c);
 }
 
 /** the decimals a system prints for a p expression in a template, or null */
-function templateDecimals(v) {
+/** @param {import("./frontend-types.ts").ValueExpr} v @returns {number | null} */ function templateDecimals(v) {
   if (v.type.k === "p" && !v.type.calc) return v.type.dec ?? 0;
   if (v.fromP) return v.fromP.dec ?? 0;
   if (v.type.k === "i" || v.type.k === "int8") return 0;
@@ -5960,8 +5960,8 @@ function templateDecimals(v) {
   return null;
 }
 
-function template(n, ctx) {
-  const parts = [];
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} n @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function template(n, ctx) {
+  /** @type {import("./ir.ts").TemplatePart[]} */ const parts = [];
   for (const c of n.getChildren()) {
     if (c instanceof Nodes.TokenNode) {
       const txt = templateText(tokenStr(c));
@@ -5969,7 +5969,7 @@ function template(n, ctx) {
     } else if (isExpr(c, Expressions.StringTemplateSource)) {
       const v = source(c.findDirectExpression(Expressions.Source), ctx);
       const fmt = c.findDirectExpression(Expressions.StringTemplateFormatting);
-      const opts = {};
+      /** @type {import("./frontend-types.ts").Mutable<import("./ir.ts").TemplateOptions>} */ const opts = {};
       if (fmt) {
         // KEY = value pairs; a quoted value may itself be '=' (PAD = '=',
         // ultra/itab: zcl_stg_segw_gen's include name), which a split on
@@ -6024,14 +6024,14 @@ const FUNCTIONS = {
  * calls the HTML viewer so) as the method call chain the functional form
  * parses into, so call() reads it the same way; undefined for any other shape
  */
-function callMethodChain(node) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @returns {import("@abaplint/core").Nodes.ExpressionNode | undefined} */ function callMethodChain(node) {
   const ms = node.findDirectExpression(Expressions.MethodSource);
   const body = node.findDirectExpression(Expressions.MethodCallBody);
   if (!ms || ms.findDirectExpression(Expressions.Dynamic)) return undefined;
   const mk = ms.getChildren();
   const nameFrom = mk.length === 1 ? mk[0] : mk.length === 3 && isExpr(mk[2], Expressions.AttributeName) ? mk[2] : null;
   if (!nameFrom || (mk.length === 1 && !isExpr(mk[0], Expressions.SourceField))) return undefined;
-  const tokens = (n) => (n instanceof Nodes.TokenNode ? [n] : n.getChildren().flatMap(tokens));
+  /** @param {import("./frontend-types.ts").SyntaxNode} n @returns {import("@abaplint/core").Nodes.TokenNode[]} */ const tokens = (n) => (n instanceof Nodes.TokenNode ? [n] : n.getChildren().flatMap(tokens));
   const name = new Nodes.ExpressionNode(new Expressions.MethodName());
   name.setChildren(tokens(nameFrom));
   const kids = [name];
@@ -6051,7 +6051,7 @@ function callMethodChain(node) {
 
 /** x when it holds an exception value: a local caught INTO, or an attribute
  * (a report's global) a CATCH of runtime exceptions takes INTO */
-function excHolder(v, ctx) {
+/** @param {string} v @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./frontend-types.ts").ValueExpr | undefined} */ function excHolder(v, ctx) {
   const n = upper(v);
   if (ctx.locals?.get(n)?.k === "exc") return {e: "var", name: n, type: EXC};
   if (ctx.locals?.has(n) || ctx.sig?.params.some((x) => x.name === n) || ctx.sig?.returning?.name === n) return undefined;
@@ -6059,7 +6059,7 @@ function excHolder(v, ctx) {
   return findAttribute(ctx, n);
 }
 
-function call(chain, ctx, statement, hint) {
+/** @param {import("./frontend-types.ts").CallChain} chain @param {import("./frontend-types.ts").MethodContext} ctx @param {boolean} statement @param {import("./ir.ts").Type} [hint] @returns {import("./frontend-types.ts").ValueExpr} */ function call(chain, ctx, statement, hint) {
   const kids = chain.getChildren();
   // x->get_text( ) of an exception caught INTO x
   if (kids.length === 3 && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
@@ -6100,12 +6100,12 @@ function call(chain, ctx, statement, hint) {
     const body = ck.slice(3, -1).find((c) => isExpr(c, Expressions.Source));
     return constructor({kw: "CAST", typeNode: ck[1], body, text: chain.concatTokens()}, ctx, hint);
   }
-  let receiver = null;
-  let owner = null;
-  let sup = null;
-  let receiving = null;
-  let exceptions = null;
-  let mc;
+  /** @type {import("./frontend-types.ts").ValueExpr | null} */ let receiver = null;
+  /** @type {string | null} */ let owner = null;
+  /** @type {string | null} */ let sup = null;
+  /** @type {import("./frontend-types.ts").ValueExpr | null} */ let receiving = null;
+  /** @type {{map: Record<string, number>; others: number} | null} */ let exceptions = null;
+  /** @type {import("@abaplint/core").Nodes.ExpressionNode} */ let mc;
   if (kids.length === 3 && upper(kids[0].concatTokens()) === "SUPER" && isTok(kids[1], "->") && isExpr(kids[2], Expressions.MethodCall)) {
     // SUPER->m( ): the superclass's implementation, not a virtual call
     sup = ancestors(ctx.reg, ctx.className)[0];
@@ -6252,7 +6252,7 @@ function call(chain, ctx, statement, hint) {
   const alias = owner !== null && !name.includes("~") ? aliasTarget(ctx.reg, owner, name)
     : owner === null && !name.includes("~") && !ctx.signatures.has(name) ? aliasTarget(ctx.reg, ctx.className, name) : undefined;
   const qualified = alias ?? (owner !== null && receiver?.type.intf && !name.includes("~") ? `${owner}~${name}` : name);
-  let sig;
+  /** @type {import("./frontend-types.ts").MethodSignature | undefined} */ let sig;
   if (sup !== null && name === "CONSTRUCTOR") {
     const at = declaringClass(ctx.reg, sup, "CONSTRUCTOR", "method");
     sig = {name, static: false, params: at ? constructorSignature(ctx, at) : [], returning: null, none: !at};
@@ -6280,8 +6280,8 @@ function call(chain, ctx, statement, hint) {
   if (owner !== null && receiver === null && !sig.static) throw new Unsupported(`${owner}=>${name}: an instance method called statically`);
   if (owner !== null && receiver === null && !ctx.program.wanted.has(owner)) throw notInProgram(ctx, owner, `${owner}=>${name}: ${owner} is not compiled in this program`);
   const importing = sig.params.filter((p) => p.dir === "importing");
-  const given = new Map();
-  const targets = new Map();
+  /** @type {Map<string, import("@abaplint/core").Nodes.ExpressionNode | undefined>} */ const given = new Map();
+  /** @type {Map<string, import("./frontend-types.ts").ValueExpr>} */ const targets = new Map();
   if (direct !== undefined) {
     if (importing.length < 1) throw new Unsupported(`${name}: an argument for no parameter`);
     given.set(importing.filter((p) => p.default === undefined)[0]?.name ?? importing[0].name, direct);
@@ -6320,7 +6320,7 @@ function call(chain, ctx, statement, hint) {
     }
     void exp;
   }
-  const args = sig.params.map((p) => {
+  /** @type {import("./ir.ts").Argument[]} */ const args = sig.params.map((p) => {
     if (p.suppliedOf) {
       const yes = given.has(p.suppliedOf) || targets.has(p.suppliedOf);
       return {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: yes ? "X" : "", type: p.type}};
@@ -6363,14 +6363,14 @@ function call(chain, ctx, statement, hint) {
 }
 
 // Shared with an ordinary method call whose importing argument is omitted.
-function omittedArgument(p, ctx) {
+/** @param {import("./frontend-types.ts").FrontendParam} p @param {import("./frontend-types.ts").NamedContext} ctx @returns {import("./ir.ts").Argument} */ function omittedArgument(p, ctx) {
   return {dir: "importing", byValue: p.byValue, type: p.type,
     value: p.default !== undefined ? defaultValue(p, ctx) : {e: "zero", type: p.type}};
 }
 
 // Host exceptions use the ordinary call IR, including defaults, references,
 // output temporaries and IS SUPPLIED flags. No constructor shortcut is used.
-export function omittedFactoryCall(program, cls, method) {
+/** @param {import("./ir.ts").Program | import("./frontend-types.ts").FrontendProgram} program @param {{name: string}} cls @param {import("./frontend-types.ts").FactoryMethod} method @returns {Extract<import("./frontend-types.ts").ValueExpr, {e: "call"}>} */ export function omittedFactoryCall(program, cls, method) {
   const ctx = {program, reg: program.reg, className: cls.name};
   const args = method.params.map((p) => p.suppliedOf
     ? {dir: "importing", byValue: true, type: p.type, value: {e: "chars", value: "", type: p.type}}
@@ -6379,7 +6379,7 @@ export function omittedFactoryCall(program, cls, method) {
     type: method.returning.type, callee: method.name};
 }
 
-function defaultValue(p, ctx) {
+/** @param {import("./frontend-types.ts").FrontendParam & {default: string}} p @param {import("./frontend-types.ts").NamedContext} ctx @returns {import("./frontend-types.ts").ValueExpr} */ function defaultValue(p, ctx) {
   let t = p.default;
   // A system field in a signature default is read when the call is made.
   // ASSERT_SUBRC's ACT defaults to sy-subrc.
@@ -6429,7 +6429,7 @@ function defaultValue(p, ctx) {
  */
 /** CToP and PFit of go/abap packed.go at build time, for a literal: the
  * value as the field holds it, or null for no number or an overflow */
-export function packedLiteral(text, to) {
+/** @param {string | number} text @param {import("./frontend-types.ts").PackedType} to @returns {string | null} */ export function packedLiteral(text, to) {
   let t = String(text).replace(/^ +| +$/g, "");
   let neg = false;
   if (t.endsWith("-")) { neg = true; t = t.slice(0, -1).replace(/ +$/, ""); } else if (t.startsWith("-")) { neg = true; t = t.slice(1).replace(/^ +/, ""); } else if (t.startsWith("+")) t = t.slice(1).replace(/^ +/, "");
@@ -6460,7 +6460,7 @@ export function packedLiteral(text, to) {
  * transpiler's version (a variable lv_type is no TYPE addition) -- and an
  * addition the runtime does not do is refused by name.
  */
-function datasetStatement(node, ctx, text) {
+/** @param {import("@abaplint/core").Nodes.StatementNode} node @param {import("./frontend-types.ts").MethodContext} ctx @param {string} text @returns {import("./frontend-types.ts").FrontendStmt} */ function datasetStatement(node, ctx, text) {
   const operands = [];
   const words = [];
   let keywords = [];
@@ -6528,7 +6528,7 @@ function datasetStatement(node, ctx, text) {
   return {s: "dataset_set_position", name: source(operands[0].node, S), position: position ? number(position, INT8, "SET DATASET ... POSITION") : null};
 }
 
-export function convert(expr, to) {
+/** @param {import("./frontend-types.ts").ValueExpr} expr @param {import("./ir.ts").Type} to @returns {import("./frontend-types.ts").ValueExpr} */ export function convert(expr, to) {
   // a typed value where a generic one is expected is bound, not copied; a
   // generic one where a type is expected is read through its descriptor
   if (to.k === "data" && expr.type.k === "data") return expr;
@@ -6551,7 +6551,7 @@ export function convert(expr, to) {
     return {e: "exc_ref", x: expr, type: to};
   }
   if (sameType(from, to)) return expr;
-  const ok = (kind) => ({e: "conv", kind, from, to, x: expr, type: to});
+  /** @param {string} kind @returns {Extract<import("./frontend-types.ts").ValueExpr, {e: "conv"}>} */ const ok = (kind) => ({e: "conv", kind, from, to, x: expr, type: to});
   if (numeric(from) && numeric(to)) return ok("num");
   if (to.k === "string" && from.k === "c") return ok("c2s");
   if (to.k === "c" && charlike(from)) return ok("s2c");
@@ -6699,7 +6699,7 @@ export function convert(expr, to) {
   if (from.k === "struct" && to.k === "struct" && PROGRAM) {
     const ff = PROGRAM.structs.get(from.go)?.fields;
     const tf = PROGRAM.structs.get(to.go)?.fields;
-    const flat = (t) => !["struct", "table", "ref", "data", "dref", "exc"].includes(t.k);
+    /** @param {import("./ir.ts").Type} t @returns {boolean} */ const flat = (t) => !["struct", "table", "ref", "data", "dref", "exc"].includes(t.k);
     if (ff && tf && ff.length === tf.length && ff.every((f, i) => flat(f.type) && sameType(f.type, tf[i].type) && (f.type.len ?? null) === (tf[i].type.len ?? null))) {
       return {e: "conv", kind: "struct_layout", from, to, x: expr, type: to, pairs: tf.map((f, i) => [f.name, ff[i].name])};
     }
@@ -6724,15 +6724,15 @@ export function convert(expr, to) {
 
 /** a ?= b and CAST: to a class or interface reference, checked at run time
  * (CX_SY_MOVE_CAST_ERROR); an up-cast needs no check */
-function downCast(x, to, text) {
+/** @param {import("./frontend-types.ts").ValueExpr} x @param {import("./ir.ts").Type} to @param {string} text @returns {import("./frontend-types.ts").ValueExpr} */ function downCast(x, to, text) {
   if (x.type.k !== "ref" || to.k !== "ref") throw new Unsupported(`cast of a ${x.type.k} to a ${to.k}: ${text}`);
   try { return convert(x, to); } catch (e) { if (!(e instanceof Unsupported)) throw e; }
   return {e: "cast", x, type: to};
 }
 
-let REG = null;
-let PROGRAM = null;
-function implementsIntf(expr, cls, intf) {
+/** @type {import("@abaplint/core").IRegistry | null} */ let REG = null;
+/** @type {import("./frontend-types.ts").FrontendProgram | null} */ let PROGRAM = null;
+/** @param {import("./ir.ts").Expr} expr @param {string} cls @param {string} intf @returns {boolean} */ function implementsIntf(expr, cls, intf) {
   if (cls === intf) return true;
   for (const c of [cls, ...(REG ? ancestors(REG, cls) : [])]) {
     const def = REG?.getObject("CLAS", c)?.getDefinition() ?? REG?.getObject("INTF", c)?.getDefinition() ?? (PERSIST_LOWERING ? PROGRAM.localDefs : LOCAL_DEFS).get(c);
@@ -6743,14 +6743,14 @@ function implementsIntf(expr, cls, intf) {
 
 /* ---------------------------------------------------------------- conditions */
 
-function cond(node, ctx) {
-  const parts = [];
-  const ops = [];
+/** @param {import("./frontend-types.ts").SyntaxNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./ir.ts").Condition} */ function cond(node, ctx) {
+  /** @type {import("./frontend-types.ts").SyntaxNode[]} */ const parts = [];
+  /** @type {string[]} */ const ops = [];
   for (const k of node.getChildren()) {
     if (k instanceof Nodes.TokenNode) ops.push(upper(tokenStr(k)));
     else parts.push(k);
   }
-  const one = (n) => {
+  /** @param {import("./frontend-types.ts").SyntaxNode} n @returns {import("./ir.ts").Condition} */ const one = (n) => {
     if (isExpr(n, Expressions.Compare)) return compare(n, ctx);
     if (isExpr(n, Expressions.CondSub)) {
       const not = n.getChildren().some((c) => isTok(c, "NOT"));
@@ -6759,8 +6759,8 @@ function cond(node, ctx) {
     }
     throw new Unsupported(`condition part ${n.get().constructor.name}`);
   };
-  const orList = [];
-  let current = one(parts[0]);
+  /** @type {import("./ir.ts").Condition[]} */ const orList = [];
+  /** @type {import("./ir.ts").Condition} */ let current = one(parts[0]);
   for (let i = 0; i < ops.length; i += 1) {
     const next = one(parts[i + 1]);
     if (ops[i] === "AND") current = {c: "and", l: current, r: next};
@@ -6771,9 +6771,9 @@ function cond(node, ctx) {
   return orList.reduce((l, r) => ({c: "or", l, r}));
 }
 
-const OPS = {EQ: "=", NE: "<>", LT: "<", LE: "<=", GT: ">", GE: ">="};
+/** @type {Readonly<Record<string, string>>} */ const OPS = {EQ: "=", NE: "<>", LT: "<", LE: "<=", GT: ">", GE: ">="};
 
-function compare(node, ctx) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} node @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./ir.ts").Condition} */ function compare(node, ctx) {
   const kids = node.getChildren();
   // only a leading NOT negates the whole comparison; the NOT of IS NOT
   // INITIAL / IS NOT BOUND is read from the text below (counting both made
@@ -6787,39 +6787,39 @@ function compare(node, ctx) {
     if (value.type.k !== "ref") throw new Unsupported(`IS INSTANCE OF a ${value.type.k}`);
     const target = namedType(instanceClass, ctx);
     if (target.intf) ctx.program.interfaces.add(target.name);
-    const result = {c: "instance_of", x: value, type: target, initial: upcastable(ctx.reg, value.type, target)};
+    /** @type {import("./ir.ts").Condition} */ const result = {c: "instance_of", x: value, type: target, initial: upcastable(ctx.reg, value.type, target)};
     return /\bIS\s+NOT\s+INSTANCE\s+OF\b/.test(text) !== not ? {c: "not", x: result} : result;
   }
   if (/\bIS\s+(NOT\s+)?SUPPLIED\b/.test(text)) {
     const nm = upper(/^(?:NOT\s+)?(\S+)\s+IS\b/.exec(text)?.[1] ?? "");
     if (!ctx.sig.params.some((p) => p.suppliedOf === nm)) throw new Unsupported(`${nm} IS SUPPLIED: not a parameter this method's declaration tracks`);
-    const r = {c: "not", x: {c: "initial", x: {e: "var", name: `SUP_${nm}`, type: C(1)}}};
+    /** @type {import("./ir.ts").Condition} */ const r = {c: "not", x: {c: "initial", x: {e: "var", name: `SUP_${nm}`, type: C(1)}}};
     return /\bIS\s+NOT\s+SUPPLIED\b/.test(text) !== not ? {c: "not", x: r} : r;
   }
   if (/\bIS\s+(NOT\s+)?ASSIGNED\b/.test(text)) {
     const nm = /<[\w]+>/.exec(text)?.[0];
     if (!nm || !ctx.fieldSymbols.has(nm)) throw new Unsupported(`IS ASSIGNED: ${text}`);
     fsCheck(nm, ctx);
-    const r = {c: "assigned", fs: {e: "fs", name: nm, type: ctx.fieldSymbols.get(nm)}};
+    /** @type {import("./ir.ts").Condition} */ const r = {c: "assigned", fs: {e: "fs", name: nm, type: ctx.fieldSymbols.get(nm)}};
     return /\bIS\s+NOT\s+ASSIGNED\b/.test(text) !== not ? {c: "not", x: r} : r;
   }
   if (/\bIS\s+(NOT\s+)?BOUND\b/.test(text) && sources.length === 1) {
     const v = source(sources[0], ctx);
     if (v.type.k === "dref") {
-      const r = {c: "initial", x: v};
+      /** @type {import("./ir.ts").Condition} */ const r = {c: "initial", x: v};
       return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
     }
     if (v.type.k === "data") {
-      const r = {c: "data_bound", x: v};
+      /** @type {import("./ir.ts").Condition} */ const r = {c: "data_bound", x: v};
       return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? {c: "not", x: r} : r;
     }
     if (!["ref", "exc"].includes(v.type.k)) throw new Unsupported(`IS BOUND of a ${v.type.k}`);
-    const r = {c: "initial", x: v};
+    /** @type {import("./ir.ts").Condition} */ const r = {c: "initial", x: v};
     return /\bIS\s+NOT\s+BOUND\b/.test(text) !== not ? r : {c: "not", x: r};
   }
   if (/\bIS\s+(NOT\s+)?INITIAL\b/.test(text) && sources.length === 1) {
     const v = source(sources[0], ctx);
-    const r = {c: "initial", x: v};
+    /** @type {import("./ir.ts").Condition} */ const r = {c: "initial", x: v};
     return /\bIS\s+NOT\s+INITIAL\b/.test(text) !== not ? {c: "not", x: r} : r;
   }
   // line_exists( itab[ c = v ... ] ) (ultra/events, CL_GUI_CONTAINER=>ADD_CHILD
@@ -6827,7 +6827,7 @@ function compare(node, ctx) {
   // KEY with the same components would find a row, without sy-subrc
   const pf = node.findDirectExpression(Expressions.MethodCallChain);
   if (pf && sources.length === 0 && /^LINE_EXISTS$/i.test(pf.findDirectExpression(Expressions.MethodCall)?.findDirectExpression(Expressions.MethodName)?.concatTokens() ?? "")) {
-    const r = lineExists(pf, ctx);
+    /** @type {import("./ir.ts").Condition} */ const r = lineExists(pf, ctx);
     return not ? {c: "not", x: r} : r;
   }
   const opNode = node.findDirectExpression(Expressions.CompareOperator);
@@ -6842,14 +6842,14 @@ function compare(node, ctx) {
     const byName = new Map(fields.map((f) => [f.name, f]));
     if (value.type.k !== "i" || !["SIGN", "OPTION", "LOW", "HIGH"].every((n) => byName.has(n))
         || byName.get("LOW").type.k !== "i" || byName.get("HIGH").type.k !== "i") throw new Unsupported(`IN range outside the integer selection subset: ${node.concatTokens()}`);
-    const result = {c: "in_range", value, range};
+    /** @type {import("./ir.ts").Condition} */ const result = {c: "in_range", value, range};
     return not ? {c: "not", x: result} : result;
   }
   const stringCond = ["CP", "NP", "CA", "NA", "CS", "NS", "CO", "CN"].includes(op) ? stringComparison(op, source(sources[0], ctx), source(sources[1], ctx)) : null;
   if (stringCond) return not ? {c: "not", x: stringCond} : stringCond;
   if (!["=", "<>", "<", "<=", ">", ">="].includes(op)) throw new Unsupported(`comparison operator ${op}`);
   const types = [...leafTypes(sources[0], ctx), ...leafTypes(sources[1], ctx)];
-  let r;
+  /** @type {import("./ir.ts").Condition} */ let r;
   const arithL = hasArith(sources[0]);
   const arithR = hasArith(sources[1]);
   // an arithmetic expression compared with a character operand does not
@@ -6894,7 +6894,7 @@ function compare(node, ctx) {
 /** line_exists( itab[ c1 = v1 c2 = v2 ... ] ) and itab[ table_line = v ]: the
  * keys as READ TABLE ... WITH KEY builds them (each value converted to the
  * component's type) */
-function lineExists(chain, ctx) {
+/** @param {import("@abaplint/core").Nodes.ExpressionNode} chain @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./ir.ts").Condition} */ function lineExists(chain, ctx) {
   const src = chain.findFirstExpression(Expressions.MethodCallParam)?.findDirectExpression(Expressions.Source);
   const fc = src?.findDirectExpression(Expressions.FieldChain);
   const fk = fc?.getChildren() ?? [];
@@ -6905,7 +6905,7 @@ function lineExists(chain, ctx) {
   const table = fk.length === 2 ? sourceOperand(fk[0], ctx) : fieldChain(head, ctx);
   if (table.type.k !== "table") throw new Unsupported("line_exists of a non-table");
   const inner = te.getChildren().filter((c) => !isTok(c, "[") && !isTok(c, "]"));
-  const keys = [];
+  /** @type {import("./ir.ts").TableKey[]} */ const keys = [];
   for (let i = 0; i < inner.length; i += 3) {
     const comp = inner[i];
     if (!isExpr(comp, Expressions.ComponentChainSimple) || !isTok(inner[i + 1], "=") || !isExpr(inner[i + 2], Expressions.Source)) {
@@ -6940,21 +6940,21 @@ function lineExists(chain, ctx) {
  *   n retains the measured i rule.
  * Anything else with a byte operand (p, f, d, t, ...) is refused.
  * null when neither side is byte-like. */
-function compareBytes(op, l, r, node) {
-  const isB = (t) => t.k === "x" || t.k === "xstring";
+/** @param {string} op @param {import("./frontend-types.ts").ValueExpr} l @param {import("./frontend-types.ts").ValueExpr} r @param {import("./frontend-types.ts").TokenText} node @returns {import("./ir.ts").Condition | null} */ function compareBytes(op, l, r, node) {
+  /** @param {import("./ir.ts").Type} t @returns {t is Extract<import("./ir.ts").Type, {k: "x" | "xstring"}>} */ const isB = (t) => t.k === "x" || t.k === "xstring";
   if (!isB(l.type) && !isB(r.type)) return null;
-  const conv = (x, kind, to) => ({e: "conv", kind, from: x.type, to, x, type: to});
+  /** @param {import("./frontend-types.ts").ValueExpr} x @param {string} kind @param {import("./ir.ts").Type} to @returns {Extract<import("./frontend-types.ts").ValueExpr, {e: "conv"}>} */ const conv = (x, kind, to) => ({e: "conv", kind, from: x.type, to, x, type: to});
   if (isB(l.type) && isB(r.type)) {
     if (l.type.k === "x" && r.type.k === "x") {
       const len = Math.max(l.type.len, r.type.len);
-      const pad = (x) => (x.type.len === len ? x : conv(x, "xs2x", X(len)));
+      /** @param {import("./frontend-types.ts").ValueExpr} x @returns {import("./frontend-types.ts").ValueExpr} */ const pad = (x) => (x.type.len === len ? x : conv(x, "xs2x", X(len)));
       return {c: "cmp", op, l: pad(l), r: pad(r), type: X(len)};
     }
-    const xs = (x) => (x.type.k === "xstring" ? x : {...x, type: XS});
+    /** @param {import("./frontend-types.ts").ValueExpr} x @returns {import("./frontend-types.ts").ValueExpr} */ const xs = (x) => (x.type.k === "xstring" ? x : {...x, type: XS});
     return {c: "cmp", op, l: xs(l), r: xs(r), type: XS};
   }
   const [b, o] = isB(l.type) ? [l, r] : [r, l];
-  const side = (x) => (x === b ? null : x);
+  /** @param {import("./frontend-types.ts").ValueExpr} x @returns {import("./frontend-types.ts").ValueExpr | null} */ const side = (x) => (x === b ? null : x);
   if (charlike(o.type)) {
     const hex = conv(b, "x2s", S);
     const ch = convert(o, S);
@@ -6970,7 +6970,7 @@ function compareBytes(op, l, r, node) {
 }
 
 /** character comparisons: c ignores trailing blanks, which the stored form already has */
-function compareValues(op, l, r, ctx) {
+/** @param {string} op @param {import("./frontend-types.ts").ValueExpr} l @param {import("./frontend-types.ts").ValueExpr} r @param {import("./frontend-types.ts").MethodContext} ctx @returns {import("./ir.ts").Condition} */ function compareValues(op, l, r, ctx) {
   // CASE and table-row comparisons arrive here without the syntax-node path
   // in compare(), but use the same byte rules as IF comparisons.
   if ([l.type, r.type].some((t) => t.k === "x" || t.k === "xstring")) {
@@ -6988,11 +6988,11 @@ function compareValues(op, l, r, ctx) {
     // a hashed table's order after DELETE and INSERT is not measured
     if (l.type.hashed || r.type.hashed) throw new Unsupported("comparison of hashed tables");
     const rowType = l.type.row;
-    const a = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
-    const b = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
+    /** @type {import("./frontend-types.ts").ValueExpr} */ const a = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
+    /** @type {import("./frontend-types.ts").ValueExpr} */ const b = {e: "var", name: `TEQ_${ctx.temps++}`, type: rowType};
     ctx.locals.set(a.name, rowType);
     ctx.locals.set(b.name, rowType);
-    let rowEq;
+    /** @type {import("./ir.ts").Condition | undefined} */ let rowEq;
     if (rowType.k === "struct") {
       const st = structOf(ctx, rowType);
       if (!st) throw new Unsupported("comparison of tables: a row structure not in the program");
@@ -7034,12 +7034,12 @@ function compareValues(op, l, r, ctx) {
   // its trailing blanks (`AB ` <> 'AB', 'AB' = `AB`, '' = ``, ' ' <> ` `).
   // Holding anything else it dumps NOT_COMPILED (abap.DataChars): those
   // comparisons are numeric or by other rules, not measured here
-  const gen = (x) => x.type.k === "data" && !x.type.table;
+  /** @param {import("./frontend-types.ts").ValueExpr} x @returns {boolean} */ const gen = (x) => x.type.k === "data" && !x.type.table;
   if (gen(l) && gen(r) && l.type.numeric && r.type.numeric) {
     return {c: "num_data_cmp", op, l, r};
   }
   if ((gen(l) || gen(r)) && [l, r].every((x) => gen(x) || charlike(x.type))) {
-    const side = (x) => (gen(x) ? {e: "unwrap_chars", x, type: S} : convert(x, S));
+    /** @param {import("./frontend-types.ts").ValueExpr} x @returns {import("./frontend-types.ts").ValueExpr} */ const side = (x) => (gen(x) ? {e: "unwrap_chars", x, type: S} : convert(x, S));
     return {c: "cmp", op, l: side(l), r: side(r), type: S};
   }
   throw new Unsupported(`comparison of ${l.type.k} with ${r.type.k}`);
