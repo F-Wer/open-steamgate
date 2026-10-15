@@ -2,7 +2,7 @@ import {objectKey as cachedObjectKey} from "./frontend-inventory.mjs";
 import {relative, isAbsolute} from "node:path";
 import {fileURLToPath} from "node:url";
 const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
-function portableSite(line) {
+/** @param {string} line @returns {string} */ function portableSite(line) {
   return line.trim().replace(/(?:file:\/\/)?\/[^\s()]+:\d+:\d+/g, (location) => {
     const match = location.replace(/^file:\/\//, "").match(/^(.*)(:\d+:\d+)$/);
     const path = match[1], modules = path.lastIndexOf("/node_modules/");
@@ -14,7 +14,7 @@ function portableSite(line) {
 // Version-specific observation adapters for the pinned abaplint core. Unknown
 // registry iteration is always visible; adding a classification needs a test.
 const objectKey = (obj) => obj?.getType ? cachedObjectKey(obj) : undefined;
-const scalar = (v) => v === undefined ? null : typeof v === "string" ? v.toUpperCase() : v;
+/** @param {import("./frontend-session-types.ts").QueryScalar} v @returns {import("./frontend-session-types.ts").QueryScalar} */ const scalar = (v) => v === undefined ? null : typeof v === "string" ? v.toUpperCase() : v;
 
 export function installHooks(core, requireCore, r) {
   const undo = [], patched = new Map(), owners = new WeakMap();

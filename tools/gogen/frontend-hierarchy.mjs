@@ -4,10 +4,10 @@
 // still makes the reads a transcript and a cache key need, and later walks
 // would only repeat them. A chain is extended exactly as far as the loop it
 // replaces would have gone, 20 steps at most; step(c) names c's superclass.
-const CHAINS = new WeakMap(), CAUGHT = new WeakMap();
-const memo = (map, owner) => map.get(owner) ?? map.set(owner, new Map()).get(owner);
+/** @type {WeakMap<object, Map<string, import("./frontend-cache-types.ts").ChainEntry>>} */ const CHAINS = new WeakMap(), /** @type {WeakMap<object, Map<string, import("./frontend-cache-types.ts").CaughtEntry>>} */ CAUGHT = new WeakMap();
+/** @template T @param {WeakMap<object, Map<string, T>>} map @param {object} owner @returns {Map<string, T>} */ const memo = (map, owner) => map.get(owner) ?? map.set(owner, new Map()).get(owner);
 
-export function chainHas(owner, reg, cls, ancestor, step) {
+/** @param {object} owner @param {import("./frontend-session-types.ts").Registry} reg @param {string | null | undefined} cls @param {string} ancestor @param {(name: string) => string | null | undefined} step @returns {boolean} */ export function chainHas(owner, reg, cls, ancestor, step) {
   if (!cls) return false;
   const chains = memo(CHAINS, owner);
   if (!chains.has(cls)) chains.set(cls, {reg, chain: [cls], done: false});
@@ -34,7 +34,7 @@ export function chainHas(owner, reg, cls, ancestor, step) {
 // Iterating wanted is a whole-collection read (encoded in full while a
 // lowering is recorded), once per CATCH. wanted only ever grows, so its size
 // tells whether a previous answer for the same names still holds.
-export function caughtOnce(program, names, compute) {
+/** @param {{wanted: ReadonlySet<string>}} program @param {readonly string[]} names @param {() => string[]} compute @returns {string[]} */ export function caughtOnce(program, names, compute) {
   const known = memo(CAUGHT, program), key = names.join(","), size = program.wanted.size;
   if (known.get(key)?.size !== size) known.set(key, {size, own: compute()});
   return [...known.get(key).own];
