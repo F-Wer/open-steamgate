@@ -1,4 +1,5 @@
 // Observational tracing only: no cache key, parser invalidation or replay decisions.
+import {createHash} from "node:crypto";
 import {createRequire} from "node:module";
 import {pathToFileURL} from "node:url";
 import {installHooks} from "./frontend-provenance-hooks.mjs";
@@ -10,6 +11,11 @@ const registries = new WeakMap(), results = new WeakMap();
 let active;
 const keyOf = (obj) => obj?.getType ? `${obj.getType()} ${obj.getName().toUpperCase()}` : undefined;
 const empty = () => ({queries: new Map(), edges: new Set()});
+// Identity snapshots of core's cached artifacts: no getter calls or graph walks.
+const artifactFields = ["syntaxResult", "parsedType", "def", "definition", "parsed", "modules", "includes"];
+const artifacts = (obj) => artifactFields.map((name) => obj[name]);
+const fileSnapshot = (obj) => obj.getFiles().map((f) => [f.getFilename(),
+  createHash("sha256").update(f.getRaw()).digest("hex")]);
 
 class Recorder {
   constructor() {
@@ -21,7 +27,7 @@ class Recorder {
   state(reg) {
     let state = registries.get(reg);
     if (!state) {
-      state = {reg, config: reg.getConfig(), entries: new Map(), global: empty(), files: new Map()};
+      state = {reg, config: reg.getConfig(), entries: new Map(), global: empty(), files: new Map(), artifacts: new Map()};
       registries.set(reg, state);
     }
     this.states.add(state);
@@ -51,9 +57,21 @@ class Recorder {
     }
     return key;
   }
+  checkArtifact(state, obj, key) {
+    if (this.checked?.has(obj)) return;
+    this.checked ??= new WeakSet();
+    this.checked.add(obj);
+    const previous = state.artifacts.get(obj);
+    if (previous && artifacts(obj).some((value, i) => value !== previous[i])) {
+      this.query(state, {kind: "unknown-scan", args: ["untraced-artifact"], result: []}, key);
+    } else if (!previous && (obj.syntaxResult || obj.parsedType || obj.def || obj.definition || obj.isDirty?.() === false)) {
+      this.query(state, {kind: "unknown-scan", args: ["artifact-built-before-recording"], result: []}, key);
+    }
+  }
   artifact(reg, obj, phase, run) {
     const state = this.state(reg), key = this.link(state, obj);
     if (!key) return run();
+    this.checkArtifact(state, obj, key);
     this.stack.push({state, key, phase});
     try { return run(); } finally { this.stack.pop(); }
   }
@@ -66,23 +84,31 @@ class Recorder {
   // complete. Keep an explicit fail-closed marker instead of guessing its reads.
   inventory(reg, objects) {
     const state = this.state(reg);
-    if (state.config && state.config !== reg.getConfig()) {
-      this.query(state, {kind: "unknown-scan", args: ["retained-registry-config-edit"], result: []});
+    const configEdited = state.config && state.config !== reg.getConfig();
+    const snapshots = new Map(objects.map((obj) => [keyOf(obj), fileSnapshot(obj)]));
+    const changed = [...snapshots].filter(([key, files]) => state.files.has(key)
+      && JSON.stringify(files) !== JSON.stringify(state.files.get(key))).map(([key]) => key);
+    const removed = [...state.files.keys()].filter((key) => !snapshots.has(key));
+    const added = [...snapshots.keys()].some((key) => !state.files.has(key));
+    const edited = changed.length || removed.length || (state.files.size && added);
+    if (configEdited || edited) {
+      // Old resolutions (including misses and global scans) must not survive an
+      // inventory/config change. Core may still serve stale artifacts: fail closed.
+      state.entries.clear();
+      state.global = empty();
+      this.query(state, {kind: "unknown-scan", args: [configEdited
+        ? "retained-registry-config-edit" : "retained-registry-edit"], result: []});
+      for (const key of changed) this.query(state, {kind: "unknown-scan",
+        args: ["retained-registry-edit"], result: []}, key);
     }
     state.config = reg.getConfig();
     for (const obj of objects) {
-      const key = keyOf(obj), files = obj.getFiles();
-      const previous = state.files.get(key);
-      if (previous && (files.length !== previous.length || files.some((f, i) => f !== previous[i]))) {
-        state.entries.set(key, empty());
-        state.global = empty();
-        this.query(state, {kind: "unknown-scan", args: ["retained-registry-edit"], result: []}, key);
-      } else if (!previous && (obj.syntaxResult || obj.parsedType || obj.definition || (obj.isDirty?.() === false))) {
-        this.query(state, {kind: "unknown-scan", args: ["artifact-built-before-recording"], result: []}, key);
-      }
-      state.files.set(key, files);
+      const key = keyOf(obj);
+      this.checkArtifact(state, obj, key);
       this.entry(state, key);
     }
+    state.files = snapshots;
+    for (const obj of state.artifacts.keys()) if (!snapshots.has(keyOf(obj))) state.artifacts.delete(obj);
     return state;
   }
 }
@@ -97,13 +123,17 @@ export function recordProvenance(run) {
     const value = run();
     if (value && typeof value === "object") results.set(value, recorder.states);
     return value;
-  } finally { active = undefined; restore(); }
+  } finally {
+    for (const state of recorder.states) for (const obj of registryObjects.call(state.reg)) {
+      if (recorder.checked?.has(obj)) state.artifacts.set(obj, artifacts(obj));
+    }
+    active = undefined; restore();
+  }
 }
 
-/** Compile option: provenance:true, or automatically with cacheDir. False is a
- * diagnostic opt-out, and does not disable or weaken the existing cache guard. */
+/** Recording is opt-in until step 4 consumes it; cache guards are unchanged. */
 export function withProvenance(compile) {
-  return (options) => options.provenance ?? !!options.cacheDir
+  return (options) => options.provenance ?? (process.env.GOGEN_PROVENANCE === "1")
     ? recordProvenance(() => {
       // A supplied session may bypass findIssues(), including our inventory
       // hook. Inspect it before any cached scope/IR can be served.
@@ -124,29 +154,33 @@ export function artifactLowering(lower) {
 // transcript too, without using it to validate or change any cache key.
 export function storedProvenance(reg, obj) {
   if (!active) return;
-  const state = active.state(reg), seen = new Set(), rows = new Map();
-  const visit = (key) => {
-    if (seen.has(key)) return;
-    seen.add(key);
-    const entry = state.entries.get(key);
-    for (const [id, row] of entry?.queries ?? []) rows.set(id, row);
-    for (const edge of entry?.edges ?? []) visit(edge);
-  };
-  visit(keyOf(obj.obj ?? obj));
-  return [...rows.values()];
+  const state = active.state(reg), entry = active.entry(state, keyOf(obj.obj ?? obj));
+  return {rows: [...entry.queries.values()], edges: [...entry.edges]};
 }
 
-export function inheritStoredProvenance(reg, obj, rows) {
+export function inheritStoredProvenance(reg, obj, stored) {
   if (!active) return;
   const state = active.state(reg), key = keyOf(obj.obj ?? obj);
-  if (!Array.isArray(rows)) {
+  if (!stored || !Array.isArray(stored.rows) || !Array.isArray(stored.edges)) {
     active.query(state, {kind: "unknown-scan", args: ["lowering-built-before-recording"], result: []}, key);
     return;
   }
-  for (const row of rows) {
-    active.query(state, row, row.artifact === "<registry>" ? undefined : row.artifact);
-    if (row.artifact !== key && row.artifact !== "<registry>") active.entry(state, key).edges.add(row.artifact);
+  const entry = active.entry(state, key);
+  for (const row of stored.rows) active.query(state, row, key);
+  for (const edge of stored.edges) entry.edges.add(edge);
+}
+
+// Expanded macros bypass the raw-source selection scan. Observe the actual
+// lowering lookup, including the signature owner's cached DDIC provenance.
+export function resolvedFunctionModule(ctx, name) {
+  const value = ctx.program.functionModules.get(name);
+  if (active) {
+    const state = active.state(ctx.reg);
+    if (value) active.link(state, value.group);
+    active.query(state, {kind: "function-module-owner", args: [name],
+      result: value ? [keyOf(value.group)] : []});
   }
+  return value;
 }
 
 // Same selection order and lookup precedence as the frontend. Keep the named

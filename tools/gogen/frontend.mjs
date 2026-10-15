@@ -1,4 +1,4 @@
-import {withProvenance, expandProgramSelection, withArtifact} from "./frontend-provenance.mjs";
+import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
 import {isSourceIdentity} from "../osd-source-identity.mjs";
 import {append} from "./append.mjs";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
@@ -1161,7 +1161,7 @@ function lockArguments(node, ctx, name, params) {
  * values, a TABLES table keeps what the module appended). Without
  * EXCEPTIONS sy-subrc is 0 afterwards and a RAISE dumps. */
 function compiledFunctionCall(node, ctx, text, name) {
-  const {owner, sig} = ctx.program.functionModules.get(name);
+  const {owner, sig} = resolvedFunctionModule(ctx, name);
   if (/\b(IN\s+UPDATE\s+TASK|STARTING\s+NEW\s+TASK|IN\s+BACKGROUND|DESTINATION|PARAMETER-TABLE|EXCEPTION-TABLE)\b/i.test(text)) throw new Unsupported(`CALL FUNCTION '${name}' form: ${text}`);
   if (sig.unsupported) throw new Unsupported(`CALL FUNCTION '${name}': ${sig.unsupported}`);
   const fp = node.findDirectExpression(Expressions.FunctionParameters);

@@ -1,3 +1,15 @@
+import {relative, isAbsolute} from "node:path";
+import {fileURLToPath} from "node:url";
+const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+function portableSite(line) {
+  return line.trim().replace(/(?:file:\/\/)?\/[^\s()]+:\d+:\d+/g, (location) => {
+    const match = location.replace(/^file:\/\//, "").match(/^(.*)(:\d+:\d+)$/);
+    const path = match[1], modules = path.lastIndexOf("/node_modules/");
+    if (modules >= 0) return path.slice(modules + 1) + match[2];
+    const local = relative(repoRoot, path);
+    return (!local.startsWith("../") && !isAbsolute(local) ? local : `<external>/${path.split("/").at(-1)}`) + match[2];
+  });
+}
 // Version-specific observation adapters for the pinned abaplint core. Unknown
 // registry iteration is always visible; adding a classification needs a test.
 const objectKey = (obj) => obj?.getType ? `${obj.getType()} ${obj.getName().toUpperCase()}` : undefined;
@@ -49,16 +61,16 @@ export function installHooks(core, requireCore, r) {
     patch(regProto, method, (fn) => function(...args) {
       const reg = this, state = r.state(reg), context = r.contexts.at(-1);
       const owner = r.current(state)?.key, phase = r.current(state)?.phase ?? "registry";
-      const site = new Error().stack.split("\n").slice(2, 5).map((s) => s.trim().replaceAll(process.cwd() + "/", ""));
+      const site = String(new Error().stack ?? "").split("\n").slice(2, 5).map(portableSite);
       // Classify the direct iteration site, not an outer syntax/run context:
       // an unexpected sweep nested inside a known pass must still fail closed.
-      const direct = site[0];
+      const direct = site[0] ?? "";
       let kind;
       if (/\/registry\.js:/.test(direct)) kind = context?.kind ?? "registry-inventory";
       else if (/\/find_global_definitions\.js:/.test(direct)) kind = "global-definitions";
       else if (/\/(cross_include_macros|include_graph)\.js:/.test(direct)) kind = "include-macro-context";
       else if (/\/(_current_scope|_procedural|ddic)\.js:/.test(direct)) kind = context?.kind;
-      else if (direct.includes("/frontend-provenance.mjs:") && context?.kind === "function-module-index") kind = context.kind;
+      else if (direct.includes("frontend-provenance.mjs:") && context?.kind === "function-module-index") kind = context.kind;
       const query = {kind: kind ?? "unknown-scan", scan: method,
         args: args.map(scalar), result: [], complete: false, phase};
       if (kind && context?.kind === kind) query.queryArgs = context.args.map((a) => typeof a === "string" ? a : null);

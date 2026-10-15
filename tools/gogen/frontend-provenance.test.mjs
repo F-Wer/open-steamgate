@@ -213,7 +213,7 @@ test("disk replay retains lowering provenance and does not leave registry hooks 
   const dir = mkdtempSync(join(tmpdir(), "gogen-provenance-replay-"));
   try {
     const c = corpus(); for (const [name, raw] of Object.entries(c.files)) writeFileSync(join(dir, name), raw);
-    const args = {folders: [dir], objects: ["ZCL_POOL_IMPLICIT", "ZCL_DDIC"], cacheDir: join(dir, "cache")};
+    const args = {folders: [dir], objects: ["ZCL_POOL_IMPLICIT", "ZCL_DDIC"], cacheDir: join(dir, "cache"), provenance: true};
     const first = compileProgram(args), warm = compileProgram(args);
     assert.deepEqual(warm.frontendCounts.reusedClasses, ["ZCL_DDIC", "ZCL_POOL_IMPLICIT"]);
     const m = provenanceOf(warm).get("CLAS ZCL_DDIC");

@@ -37,7 +37,9 @@ Neither source words nor lowering-time reads cover every semantic dependency.
 
 `compileProgram({provenance: true, ...})` records semantic resolution before
 `reg.parse()`, through global definition passes, syntax checking and lowering.
-`cacheDir` enables it automatically; `provenance: false` is a diagnostic opt-out.
+Recording is **off by default**, including with `cacheDir`. Enable it with
+`provenance: true` or `GOGEN_PROVENANCE=1`; explicit `provenance: false`
+overrides the environment. This stays opt-in until step 4 consumes the data.
 This is observation only: cache keys, source hashes, replay validation and the
 whole-registry version guard are unchanged. Resolved-artifact digests and
 selective per-entry keys remain steps 3 and 4.
@@ -91,12 +93,33 @@ Artifact reads add edges even when an abaplint getter or `SyntaxLogic.run()`
 returns a cached result. Manifests expand these stored edges at inspection
 time, inheriting the provider's queries with their original owner/phase.
 A second cached TABL consumer therefore still shows the DTEL's DOMA lookup.
-Disk IR entries also carry an observational provenance transcript, restored
-on replay without participating in validation. Artifacts built before tracing
-receive an `artifact-built-before-recording` unknown marker; replay without a
-stored transcript receives `lowering-built-before-recording`. Observed retained
-file/config edits are marked incomplete; this does not repair abaplint's caches
-or implement incremental parser invalidation.
+Disk IR and memory-session entries carry only the owner's own rows and edges:
+`{rows: [...], edges: ["TYPE NAME", ...]}`. They never persist a transitive
+closure. Replay restores these rows/edges, and `provenanceOf()` expands them
+against the current registry's provider artifacts on demand. The transcript
+still does not participate in cache validation.
+
+Artifact identities (syntax result, parsed type, definition, parsed files and
+FM/include metadata) are snapshotted at the end of each recording session.
+An artifact subsequently built with recording off gets an `untraced-artifact`
+marker on its owner, even when a retained syntax session bypasses checking.
+Artifacts first encountered after they were built receive
+`artifact-built-before-recording`. Memory/disk replay without an own-row
+transcript receives `lowering-built-before-recording`.
+
+Inventory snapshots copy filenames and SHA-256 content hashes; they do not
+retain core's mutable file array. Replacing, adding or removing a file, or
+changing registry configuration, prunes old query/edge rows and marks retained
+artifacts incomplete (`retained-registry-edit` / `retained-registry-config-edit`).
+This does not repair abaplint's caches or implement parser invalidation.
+
+Actual lowering reads of `program.functionModules` add a named
+`function-module-owner` query and provider edge, including CALL FUNCTION
+expanded from a macro. Unknown scan sites use repo-relative or module-relative
+paths (external frames use `<external>/basename`); absent/unrecognised stack
+frames remain unknown scans. Folder mode reads `.asddls` for gogen's CDS
+metadata but does not register it in core. CDS alias provenance therefore
+requires supplied registries containing DDLS files; this limitation is unchanged.
 
 Registry orchestration has no single object owner. Such rows use
 `artifact: "<registry>"` and are conservatively included in every object's
@@ -129,45 +152,104 @@ unknown scans and exception-safe restoration. On/off comparisons include Go,
 JS or its refusal, class IR, diagnostics/refusals/missing members and all final
 metadata compared by the cache oracle.
 
-The combined sequential run passes all 187 frontend/oracle tests (281.8 s),
-including 13 provenance cases. The CI oracle validates 56 mutations across
-58 observations in both line modes, with zero mismatches; its deliberate
-no-version fault still produces both required mismatches. The changed-file
-size budget, explicit-path leak scan and suite-registration checks pass.
-One existing private-static assertion was corrected to check core's earlier
-syntax rejection, reproduced on `origin/main`, and now verifies on/off parity
-without changing compiler behavior.
+### Fix-round validation and recording cost
 
-### Recording cost and remaining unclassified scans
+The focused regression gates cover opt-in/environment precedence, own-row disk
+storage/replay, recording gaps in syntax/DDIC/memory/disk lowering, immutable
+replace/add/remove snapshots and stale-row pruning, configuration edits, empty
+stack frames in a child process, portable sites, macro-expanded FM signatures,
+and owner isolation for sibling INCLUDE macros. The hook sweep runs one adapter
+mutation at a time in a disposable copy and verifies a passing baseline first:
 
-Measured locally with fresh Node 26.9.0 children, three alternating on/off
-pairs, seed 719. Times are median wall time for source loading, normalization,
-parse, syntax and cold lowering; emission and diagnostic manifest expansion
-are outside the timed region. No disk cache is used. All paired output hashes
-match exactly.
+```sh
+GOCACHE=/mnt/ssd-510/osg/go-build TMPDIR=/mnt/ram/stoker \
+  OSD_HEAVY_RANGE=50-59 tools/osd-heavy.sh \
+  node tools/gogen/frontend-provenance-mutations.mjs \
+  --report .local/provfix-mutations.json
+```
 
-| Corpus | Registry objects / lowered classes | Recording off | Recording on | Overhead |
+The 48-mutation sweep kills 42 mutations. It kills every specifically requested
+hook: query/link edges (separately and together), selection artifact context,
+all artifact reads, owners-map lookup, getModule/getInclude adapters and their
+named queries, pool constants, procedural includes and cross-include consumer
+attribution. The combined edge mutation fails the subclass DDIC and implicit
+pool interface fixture too. Every fail-closed marker mutation is killed.
+The six survivors preserve dependency linkage through another wrapped method
+in this pinned core (they are redundant observations, not uncovered leaf reads):
+
+| Surviving removed getter hook | Remaining path to the same provider owner |
+| --- | --- |
+| `getClassDefinition` | Calls wrapped `getMainABAPFile`, which calls wrapped `getABAPFiles`. |
+| `getMainABAPFile` | Calls wrapped `getABAPFiles`. |
+| `getIncludeFiles` | Calls wrapped `getIncludes` and `getABAPFiles`. |
+| `getSequencedFiles` | Calls wrapped `getABAPFiles` for classes; wrapped `getMainABAPFile`/`getModules`/`getABAPFiles` for groups. |
+| `getSQLViewName` | Calls wrapped DDLS `parse`, including for cached data. |
+| `getDefinitionName` | Calls wrapped DDLS `parse`, including for cached data. |
+
+Isolated cached `getDefinition`, `getIncludes`, `getModules` and
+`listBadiDefinitions` reads each kill their own getter-hook mutation. A survivor
+without an explicit redundancy explanation makes the sweep exit nonzero.
+Scratch is removed in `finally`. The local JSON report names the failing tests
+for every killed hook.
+
+| Review item | Regression / red evidence |
+| --- | --- |
+| 1. Opt-in and storage | Default/env/explicit-false test; decode persisted binary entries to check own rows plus edges and warm DDIC inheritance. Both fail on the original implementation. |
+| 2. Untraced artifacts | Parse while recording, compile with recording off, reuse syntax/session with recording on; also rebuild cached DDIC off. Both fail on the original implementation; marker-removal mutations fail too. |
+| 3. Retained edits | Replace/add/remove files, remove an object, and change config; assert markers and prune obsolete queries. All fail before the fix. |
+| 4. Empty stack | Child with `--stack-trace-limit=0`, including iteration without owner context; originally throws. Stack-fallback/unknown-scan mutations fail. |
+| 5. FM lowering | Macro-expanded CALL FUNCTION, DDIC signature chain, DOMA INT4→INT8 changes Go; original manifest lacks the lowering ownership row. Removing the new lowering query fails. |
+| 6. Hook sensitivity | Consumer-owned selection, cached reads, superclass DDIC, implicit pool interface, group getters, constants/includes and unrelated-object isolation; all requested hook-removal mutations fail. |
+| 7. Portable sites/CDS | External absolute frame and cwd/module paths must be scrubbed; original code and site-normalization removal fail. Folder-mode DDLS limitation documented above. |
+
+The final combined sequential frontend/CI-oracle run passes **211 tests** in
+280.6 s, including 37 provenance tests. The separately recording-enabled
+CI oracle passes all six tests in 111.8 s. In each oracle run: 58 observations,
+56 validated mutations, zero mismatches; the no-version negative control
+still produces the required mismatches in both line modes. The changed-file
+size budget, explicit-path leak scan and suite registration all exit zero.
+`frontend.mjs` has zero net added lines in this fix round (the branch remains
+20 lines smaller than the step-1 base). The sole default-off scalar-entry
+shape failure discovered during validation was fixed and its 52-test targeted
+recheck and final combined run both pass.
+
+Three fresh-process runs per scenario, median frontend milliseconds,
+Node 26.9.0, pinned libraries from `libs.lock.json`:
+
+| Corpus | Scenario | Recording off | Recording on | Overhead |
 | --- | --- | --- | --- | --- |
-| Oracle 300 controls plus feature fixtures | 332 / 326 | 312.0 ms | 371.1 ms | +18.9% |
-| Complete pinned open-abap-core + ajson | 651 / 272 | 1,483.3 ms | 1,799.3 ms | +21.3% |
+| open-abap-core + ajson | No cache | 1,448.1 ms | 1,748.4 ms | +20.7% |
+| open-abap-core + ajson | cacheDir cold | 1,697.1 ms | 2,096.2 ms | +23.5% |
+| open-abap-core + ajson | cacheDir warm | 1,513.0 ms | 1,859.1 ms | +22.9% |
+| Oracle 300 + fixtures | No cache | 301.4 ms | 367.3 ms | +21.8% |
+| Oracle 300 + fixtures | cacheDir cold | 494.3 ms | 553.4 ms | +11.9% |
+| Oracle 300 + fixtures | cacheDir warm | 359.8 ms | 414.8 ms | +15.3% |
 
-The real run uses the pins in `libs.lock.json`, has zero syntax diagnostics,
-and exposes 651 manifests. It finds eight unclassified iteration sites
-(nine unique query rows, because lock enumeration runs twice):
+| Corpus | Cache bytes off | Cache bytes on | Growth |
+| --- | --- | --- | --- |
+| open-abap-core + ajson | 526,812 | 694,009 | +31.7% |
+| Oracle 300 + fixtures | 265,987 | 301,662 | +13.4% |
 
-- Supplied-parameter discovery (`suppliedParams`).
-- Local class/interface collection (`compileProgram`'s local-definition loop).
-- Selected function-group enumeration (`compileProgram`'s groups filter).
-- Selected class dispatch (`compileProgram`'s lowering loop).
-- Lock-object registry construction (`lockObjectRegistry`, before and after lowering).
-- RTTI collection (`rttiTable`).
-- Table metadata collection (`tableRegistry`).
-- Source ownership analysis (`sourceOwnershipSafety`).
+All 18 runs per corpus have identical artifact/class-IR digests across recording
+and cache modes. The real registry has 651 objects / 272 lowered classes with
+zero diagnostics; every warm run reuses 251 classes and lowers 21. The synthetic
+warm runs reuse 325 and lower one. Warm cache still costs more than no-cache
+compilation on these corpora; recording remains opt-in until its consumers
+and performance gates are implemented. Reports remain local as
+`.local/provfix-perf-real-final.json`, `.local/provfix-perf-300-final.json`, and
+`.local/provfix-mutations.json`. Benchmark cache sizes count actual file bytes, not allocated blocks;
+timing covers source loading, normalization, parse, syntax and lowering, and
+excludes emission and diagnostic closure expansion. Warm children follow cold
+primes in a separate process. Each mode's on/off emitted artifacts and class IR
+must have the same SHA-256 digest. No library checkout is edited.
 
-These are registry-wide orchestration scans. Their rows are global, so all
-651 real entries conservatively inherit them. No claim of complete per-entry
-provenance or selective invalidation is made. Reports are local under `.local/`;
-benchmark scratch is removed in `finally`.
+The real corpus still exposes unknown registry orchestration scans: supplied
+parameter discovery, local class/interface collection, selected groups and
+class dispatch, lock construction (twice), RTTI, table metadata and source
+ownership. With cacheDir, disk-session preparation, cache inventory and session
+finalization add three further unclassified sites. These rows remain global
+and conservatively appear in all manifests. No claim of selective invalidation
+or permission to remove the global guard follows from these results.
 
 ## Oracle
 

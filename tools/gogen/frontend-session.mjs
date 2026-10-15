@@ -1,4 +1,4 @@
-import {artifactLowering} from "./frontend-provenance.mjs";
+import {artifactLowering, storedProvenance, inheritStoredProvenance} from "./frontend-provenance.mjs";
 import {append} from "./append.mjs";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // A unit closure keeps one immutable registry. Reuse lowering only for
@@ -67,6 +67,7 @@ export const compileClass = artifactLowering(function compileClass(ctx, obj, low
   const key = obj.getName().toUpperCase();
   const cached = session?.classes.get(key);
   if (cached && cached.file === file && cached.structure === file.getStructure() && cached.supplied === suppliedKey(program, key) && (!cached.replay || replayLowering(program, cached.replay))) {
+    inheritStoredProvenance(program.reg, obj, cached.provenance);
     Object.assign(program, cached.current);
     for (const [k, sig] of cached.sigs ?? []) program.sigs.set(k, sig);
     if (!cached.replay) {
@@ -98,6 +99,9 @@ export const compileClass = artifactLowering(function compileClass(ctx, obj, low
   if (recorded?.replay) session.classes.set(key, {file, structure: file.getStructure(), ir,
     replay: recorded.replay, supplied: suppliedKey(program, key),
     current: Object.fromEntries([...current].map((k) => [k, program[k]]))});
+  const entry = session?.classes.get(key);
+  const provenance = entry && storedProvenance(program.reg, obj);
+  if (provenance) entry.provenance = provenance;
   return ir;
 });
 
