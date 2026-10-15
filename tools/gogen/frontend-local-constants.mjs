@@ -1,4 +1,4 @@
-import * as abap from "./js/abap.mjs";
+import * as abap from "./fold-scalars.ts";
 
 // Refuse unknown conversions; only literal, exception-free values leave entry.
 function fold(e) {
