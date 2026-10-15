@@ -22,7 +22,10 @@ export type CallExpr = RuntimeFields<Omit<RawCall, 'owner' | 'static' | 'callee'
 };
 export type Expr = RuntimeFields<Exclude<IR.Expr, {e: 'call' | 'int'}>> | CallExpr
   | {readonly e: 'int' | 'float'; readonly value: number; readonly type?: IR.Type};
-type StatementFields<T> = T extends {s: 'call_dyn_static'} ? Omit<T, 'cls'> & {readonly cls: string | Expr}
+type StatementFields<T> = T extends {s: 'concat'} ? Omit<T, 'sep'> & {readonly sep: Expr | null}
+  : T extends {s: 'select_dyn'} ? Omit<T, 'fields' | 'where'> & {readonly fields: Expr | null; readonly where: Expr | null}
+  : T extends {s: 'stub' | 'kernel_loop'} ? Omit<T, 'pos'> & {readonly pos?: IR.Position}
+  : T extends {s: 'call_dyn_static'} ? Omit<T, 'cls'> & {readonly cls: string | Expr}
   : T extends {s: 'loop'} ? Omit<T, 'key' | 'dynamicKeys'> & {
     readonly key?: IR.ResolvedKey | null;
     readonly dynamicKeys?: {readonly value: Expr; readonly options: readonly IR.ResolvedKey[]} | null;
@@ -123,8 +126,12 @@ export interface AmcChannel {
   readonly type: string;
   readonly authorities?: readonly {readonly path?: string; readonly program?: string; readonly activity?: string}[];
 }
-export interface Program extends Omit<IR.Program, 'classes' | 'consts' | 'tables' | 'exceptionSupers' | 'reg' | 'structs' | 'interfaceAttrs' | 'intfOwnAttrs' | 'interfaceMethods' | 'sigs'> {
+export interface FunctionModule extends Omit<IR.FunctionModule, 'sig'> {
+  readonly sig: Method | UnsupportedMethod;
+}
+export interface Program extends Omit<IR.Program, 'functionModules' | 'classes' | 'consts' | 'tables' | 'exceptionSupers' | 'reg' | 'structs' | 'interfaceAttrs' | 'intfOwnAttrs' | 'interfaceMethods' | 'sigs'> {
   readonly classes: readonly Class[];
+  readonly functionModules?: Map<string, FunctionModule>;
   readonly reg?: IR.Program['reg'];
   readonly structs: StructDefinitions;
   readonly interfaceAttrs?: ReadonlyMap<string, readonly Attribute[]>;
