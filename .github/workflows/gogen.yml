@@ -29,6 +29,7 @@ on:
       - 'libs.lock.json'
       - 'src/**'
       - 'test/unit/**'
+      - 'test/gogen-typing-proof.mjs'
       - 'test/osgo-unit.mjs'
       - 'test/osgjs-unit.mjs'
       - 'test/fixtures/osgjs-unit-m1/**'
@@ -51,6 +52,7 @@ on:
       - 'libs.lock.json'
       - 'src/**'
       - 'test/unit/**'
+      - 'test/gogen-typing-proof.mjs'
       - 'test/osgo-unit.mjs'
       - 'test/osgjs-unit.mjs'
       - 'test/fixtures/osgjs-unit-m1/**'
@@ -94,8 +96,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Types (pilot, non-gating)
-        continue-on-error: true
+      - name: Types
         run: npx tsc -p tsconfig.gogen.json
       - uses: actions/setup-go@v5
         with:

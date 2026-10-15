@@ -1,6 +1,6 @@
 import {append} from "./append.mjs";
-import {typeName, funcName} from "./symbols.ts";
-export {typeName, funcName} from "./symbols.ts";
+import {typeName, funcName} from "./go-symbols.ts";
+export {typeName, funcName} from "./go-symbols.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {constructorFactories} from "./emit-constructors.ts";
 import {analyzeTableMoves} from "./emit-table-move.mjs";

@@ -64,6 +64,7 @@
   ],
   "groups": {
     "gogen": [
+      "test/gogen-typing-proof.mjs",
       "test/osgo-unit.mjs",
       "test/osgo-exc-previous.mjs",
       "test/kernel-compat.mjs",
