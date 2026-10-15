@@ -1,4 +1,4 @@
-import {append} from "./append.mjs";
+import {append} from "./append.ts";
 import {typeName, funcName} from "./go-symbols.ts";
 export {typeName, funcName} from "./go-symbols.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";

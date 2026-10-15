@@ -1,4 +1,4 @@
-import {append} from "./append.mjs";
+import {append} from "./append.ts";
 import {objectRttiJs, exceptionClass} from "./emit-exception.mjs";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.mjs";
 import {constructorFactories} from "./emit-constructors.ts";
