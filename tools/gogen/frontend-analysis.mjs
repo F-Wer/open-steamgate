@@ -1,6 +1,5 @@
 // Source-only analyses, keyed by the immutable parsed/rearranged node.
-import {readFileSync, readdirSync} from "node:fs";
-import {join} from "node:path";
+import {readText, listEntries, join} from "./host-io.ts";
 import {parseSamc} from "../osd-samc.ts";
 
 const trees = new WeakMap();
@@ -26,14 +25,14 @@ export function samcOf(folders) {
   const byName = new Map();
   const walk = (dir) => {
     let entries;
-    try { entries = readdirSync(dir, {withFileTypes: true}); } catch { return; }
-    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
-      if (e.isDirectory()) walk(join(dir, e.name));
-      else if (e.name.toLowerCase().endsWith(".samc.xml")) byName.set(e.name.toUpperCase(), join(dir, e.name));
+    try { entries = listEntries(dir); } catch { return; }
+    for (const [name, directory] of entries.sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (directory) walk(join(dir, name));
+      else if (name.toLowerCase().endsWith(".samc.xml")) byName.set(name.toUpperCase(), join(dir, name));
     }
   };
   for (const f of folders) walk(f);
-  const rows = [...byName.values()].flatMap((file) => parseSamc(readFileSync(file, "utf8"), file));
+  const rows = [...byName.values()].flatMap((file) => parseSamc(readText(file), file));
   return [...new Map(rows.map((r) => [`${r.applicationId}|${r.path}`, r])).values()];
 }
 

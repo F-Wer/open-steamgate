@@ -1,3 +1,4 @@
+import {env} from "./host-io.ts";
 import {append} from "./append.ts";
 import {typeName, funcName} from "./go-symbols.ts";
 export {typeName, funcName} from "./go-symbols.ts";
@@ -1301,7 +1302,7 @@ function hostPreds(preds, ctx) {
 
 const RESET = "\u0000reset-position";
 // GOGEN_NOLINE=1 leaves the directives out, for debugging the emitter itself
-const LINES = !process.env.GOGEN_NOLINE;
+const LINES = !env("GOGEN_NOLINE");
 
 function localDeclaration(l, d) {
   const z = OWNERSHIP.declarations.has(l) && l.type.k === "x" ? `${ownedType(l)}{}` : zero(l.type);

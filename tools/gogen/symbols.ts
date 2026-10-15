@@ -1,17 +1,13 @@
 import type {Program, Class, Method} from './ir.ts';
 // Names and provenance are recorded at the emitter's routine signatures.
-import {execFileSync} from "node:child_process";
-import {readFileSync, readdirSync, writeFileSync} from "node:fs";
-import {dirname, join} from "node:path";
+import {readText, listEntries, writeText, dirname, join, gitHead} from "./host-io.ts";
 import {emitGo} from "./emit-go.mjs";
 
 // Compatibility exports for callers that also collect symbol provenance.
 export {typeName, funcName} from "./go-symbols.ts";
 
 export function buildCommit(): string {
-  try {
-    return execFileSync("git", ["rev-parse", "HEAD"], {cwd: import.meta.dirname, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"]}).trim();
-  } catch { return "unknown"; }
+  return gitHead(import.meta.dirname) ?? "unknown";
 }
 
 export function symbolCollector(program: Program, pkg: string = "main", symbols: Map<string, SymbolEntry> = new Map()): SymbolCollector {
@@ -31,7 +27,7 @@ export function symbolCollector(program: Program, pkg: string = "main", symbols:
 }
 
 export function writeSymbols(dir: string, symbols: ReadonlyMap<string, SymbolEntry>, build: string = buildCommit()): void {
-  writeFileSync(join(dir, "symbols.json"), JSON.stringify({schema: "gogen-symbols/1", build,
+  writeText(join(dir, "symbols.json"), JSON.stringify({schema: "gogen-symbols/1", build,
     symbols: Object.fromEntries([...symbols.keys()].sort().map((key) => [key, symbols.get(key)]))}, null, 2) + "\n");
 }
 
@@ -40,7 +36,7 @@ export function writeGo(file: string, program: Program, pkg: string = "main", la
   // The untyped emitter infers null-only defaults; this boundary states its actual contract.
   const emit = emitGo as unknown as (program: Program, pkg: string, layers: Layers | null, unitBuild: boolean, symbols: SymbolCollector) => string;
   const source = emit(program, pkg, layers, unitBuild, symbolCollector(program, importPath, symbols));
-  writeFileSync(file, source);
+  writeText(file, source);
   writeSymbols(dirname(file), symbols);
   return source;
 }
@@ -88,10 +84,10 @@ export function reportSymbols(program: Program, converted: ConvertedReport, owne
 
 // Cached Go is still part of this build; refresh provenance after restoring it.
 export function refreshSymbolBuild(dir: string, build: string = buildCommit()): void {
-  for (const entry of readdirSync(dir, {withFileTypes: true})) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) refreshSymbolBuild(path, build);
-    else if (entry.name === "symbols.json") writeSymbols(dir, new Map(Object.entries((JSON.parse(readFileSync(path, "utf8")) as SymbolFile).symbols)), build);
+  for (const [name, directory] of listEntries(dir)) {
+    const path = join(dir, name);
+    if (directory) refreshSymbolBuild(path, build);
+    else if (name === "symbols.json") writeSymbols(dir, new Map(Object.entries((JSON.parse(readText(path)) as SymbolFile).symbols)), build);
   }
 }
 

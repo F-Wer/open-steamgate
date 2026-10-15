@@ -1,6 +1,6 @@
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
-import {isSourceIdentity} from "../osd-source-identity.mjs";
+import {isSourceIdentity, readdirSync} from "./host-io-compat.mjs";
 import {append} from "./append.ts";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
@@ -32,8 +32,7 @@ import * as WIR from "../ir-writes.mjs";
 import {samcOf, cdsSqlViews, rearrangedClass, inlineTableLocals} from "./frontend-analysis.mjs";
 import {lowerNarrowSubmit} from "../osd-narrow-submit.mjs";
 import {createRequire} from "node:module";
-import {readFileSync, readdirSync, existsSync} from "node:fs";
-import {join} from "node:path";
+import {readText as readFileSync, join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
 
 const require = createRequire(import.meta.url);
