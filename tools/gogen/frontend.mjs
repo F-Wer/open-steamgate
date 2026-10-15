@@ -4,7 +4,7 @@ import {require, abaplint, Rearranger, Nodes, Statements, Structures, Expression
   Unsupported, notInProgram, I, F, INT8, P31, S, C, X, XS, EXC, isExpr, isStmt, isStruct, isTok,
   tokenStr, upper, goName, refuseSorted, sameSort, sameType, composite, byRef, numeric, charlike} from "./frontend-base.mjs";
 export {Unsupported, I, F, INT8, S, sameType, composite, byRef} from "./frontend-base.mjs";
-import {inputOrigin} from "./frontend-inventory.mjs";
+import {inputOrigin, rttiClassInventory, rttiLocalSupers} from "./frontend-inventory.mjs";
 import {suppliedIndex, suppliedAnswer, suppliedSignature, localDiscovery, lockAnswer, finalOutput, rttiProjection} from "./frontend-queries.mjs";
 import {enumerateObjects, auditedBookkeeping, withRole, beginProvenanceCompile} from "./frontend-provenance.mjs";
 import {prepareArtifactDigests} from "./frontend-artifact-digests.mjs";
@@ -37,7 +37,7 @@ import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
-import {samcOf, cdsSqlViews, cdsMappingError, rearrangedClass, inlineTableLocals} from "./frontend-analysis.mjs";
+import {samcOf, cdsSqlViews, cdsMappingError, rearrangedClass, inlineTableLocals, nativeMethodBody} from "./frontend-analysis.mjs";
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
 import {typeKindOf, typeOf, rttiNamed, structOf, fieldOf, namedType} from "./frontend-types-signatures.mjs";
@@ -368,8 +368,8 @@ export function whereColumns(t) {
     if (!(t instanceof BasicTypes.StructureType)) return;
     structs.set(name, t.getComponents().map((c) => ({name: upper(c.name), kind: typeKindOf(c.type)})));
   };
-  /** @type {Set<string>} */ const known = new Set();
-  for (const obj of enumerateObjects(reg, "rtti-inventory", [], "final-output")) {
+  const known = /** @type {Set<string>} */ (new Set()), classSupers = /** @type {Map<string, string | null>} */ (new Map());
+  for (const obj of rttiClassInventory(enumerateObjects(reg, "rtti-inventory", [], "final-output"), classSupers)) {
     const n = upper(obj.getName());
     if (["TABL", "DTEL", "TTYP", "DOMA", "CLAS", "INTF", "VIEW", "DDLS"].includes(obj.getType())) known.add(n);
     try {
@@ -386,7 +386,7 @@ export function whereColumns(t) {
     } catch { /* a type abaplint cannot resolve is simply not described */ }
     rttiProjection(reg, obj, () => [[...known].filter((k) => k === n || k.startsWith(`${n}=>`)), [...structs].filter(([k]) => k === n || k.startsWith(`${n}=>`))]);
   }
-  return {structs, known};
+  return {structs, known, classSupers: rttiLocalSupers(classSupers, program)};
 }
 
 
@@ -1091,8 +1091,8 @@ function compiledFunctionCall(node, ctx, text, name) {
     }
     // a kernel service the host implements: the ABAP body (the transpiler's
     // @KERNEL code) is replaced by a call into the host
-    if (NATIVE_ME.has(`${className}=>${name}`)) {
-      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: NATIVE_ME.get(`${className}=>${name}`).fn, me: true}],
+    if (nativeMethodBody(NATIVE_ME, className, name)) {
+      cls.methods.push({...sig, locals: [], fieldSymbols: [], calls: [], body: [{s: "native", fn: nativeMethodBody(NATIVE_ME, className, name), me: true}],
         pos: {file: file.getFilename().split("/").pop(), row: node.getFirstToken().getStart().getRow()}});
       continue;
     }
@@ -5177,7 +5177,7 @@ const FUNCTIONS = {
     throw new Unsupported(`call chain ${chain.concatTokens()}`);
   }
   const name = upper(mc.findDirectExpression(Expressions.MethodName).concatTokens());
-  if (receiver && isSubclass(ctx.reg, receiver.type.name, "CL_ABAP_OBJECTDESCR") && ["GET_ATTRIBUTE_TYPE", "GET_METHOD_PARAMETER_TYPE", "GET_INTERFACE_TYPE", "GET_SUPER_CLASS_TYPE"].includes(name)) throw new Unsupported(`object RTTI method ${name}: member descriptions are not implemented`);
+  if (receiver && isSubclass(ctx.reg, receiver.type.name, "CL_ABAP_OBJECTDESCR") && ["GET_ATTRIBUTE_TYPE", "GET_METHOD_PARAMETER_TYPE", "GET_INTERFACE_TYPE"].includes(name)) throw new Unsupported(`object RTTI method ${name}: member descriptions are not implemented`);
   const param = mc.findDirectExpression(Expressions.MethodCallParam);
   const direct = param?.findDirectExpression(Expressions.Source);
   const named = param?.findDirectExpression(Expressions.ParameterListS);

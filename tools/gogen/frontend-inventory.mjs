@@ -89,3 +89,17 @@ export function finishInputs(reg) {
   parsed.set(reg, snapshot);
   return snapshot;
 }
+
+// Collect superclass descriptions in the existing RTTI inventory traversal.
+export function* rttiClassInventory(objects, classSupers) {
+  for (const obj of objects) {
+    if (obj instanceof core.Objects.Class) classSupers.set(obj.getName().toUpperCase(), obj.getDefinition()?.getSuperClass()?.toUpperCase() ?? null);
+    yield obj;
+  }
+}
+
+export function rttiLocalSupers(classSupers, program) {
+  // Compiled local classes use the same POOL:LOCAL internal name as object RTTI.
+  for (const cls of program.classes) if (cls.name.includes(":")) classSupers.set(cls.name, cls.super);
+  return classSupers;
+}

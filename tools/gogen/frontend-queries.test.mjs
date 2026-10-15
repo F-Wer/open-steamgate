@@ -103,6 +103,19 @@ test("locks have named misses and ENQU to TABL to DDIC edges; final inventories 
   assert.ok(rows(unreadable, "CLAS ZLOCKER").some((q) => q.kind === "getObject" && q.args.join() === "TABL,ZABSENT_TABLE" && q.result.length === 0));
 });
 
+test("RTTI preserves explicit superclass names and rebuilds them independently of compiled classes", () => {
+  const files = {
+    "zparent.clas.abap": classSource("zparent", "rv = 1."),
+    "zchild.clas.abap": classSource("zchild", "rv = 2.").replace("DEFINITION PUBLIC", "DEFINITION PUBLIC INHERITING FROM zparent"),
+  };
+  const first = build(files, ["ZPARENT"]);
+  assert.equal(first.rtti.classSupers.get("ZCHILD"), "ZPARENT");
+  assert.equal(first.rtti.classSupers.get("ZPARENT"), null);
+  assert.ok(!first.rtti.classSupers.has("OBJECT"));
+  files["zchild.clas.abap"] = files["zchild.clas.abap"].replace(" INHERITING FROM zparent", "");
+  assert.equal(build(files, ["ZPARENT"]).rtti.classSupers.get("ZCHILD"), null);
+});
+
 test("RTTI and table projections are final-output and rebuild when inventories change", () => {
   const c = syntheticCorpus({classes: 4});
   const first = build(c.files, ["ZCL_CONTROL_0001"]);
@@ -335,4 +348,110 @@ test("first observed reparse cannot certify artifacts built before the frontend 
     assert.notEqual(p.reg, reg);
   `;
   execFileSync(process.execPath, ["--input-type=module", "-e", code], {stdio: "pipe"});
+});
+
+// Exercise the emitted native bodies against the real host runtimes. The small
+// descriptor shell keeps registry inventory and compiled selection independent.
+const rttiHelpers = {goType: () => '*descriptor', ident: n => n.toLowerCase()};
+const rttiPairs = [['ZCHILD', 'ZPARENT'], ['ZPARENT', null], ['/ABC/CHILD', '/ABC/PARENT'], ['/ABC/PARENT', null]];
+function superProgram(pairs = rttiPairs, names = ['CL_ABAP_TYPEDESCR', 'CL_ABAP_CLASSDESCR', 'ZPARENT', '/ABC/PARENT']) {
+  return {rtti: {classSupers: new Map(pairs)}, classes: names.map(name => ({name, constructor: null, attributes: [], methods: []})), structs: new Map(), consts: new Map()};
+}
+async function superJs(program) {
+  const {emitJs} = await import('./emit-js.mjs');
+  const cls = program.classes.find(c => c.name === 'CL_ABAP_CLASSDESCR');
+  cls.methods = [{name: 'GET_SUPER_CLASS_TYPE', params: [], locals: [], returning: {name: 'P_DESCR_REF', type: {k: 'ref', name: cls.name}}, body: [{s: 'native', fn: 'Native_GET_SUPER_CLASS_TYPE'}]}];
+  const runtime = new URL('./js/abap.mjs', import.meta.url).href;
+  const source = emitJs(program, runtime);
+  return {source, module: await import('data:text/javascript;base64,' + Buffer.from(source).toString('base64'))};
+}
+const superCases = [
+  {id: 'compiled', name: 'ZCHILD', parent: '\\CLASS=ZPARENT', subrc: 0},
+  {id: 'fallback', name: '   ', relative: 'zchild', parent: '\\CLASS=ZPARENT', subrc: 0},
+  {id: 'namespace', name: '/ABC/CHILD', parent: '\\CLASS=/ABC/PARENT', subrc: 0},
+  {id: 'kernel', name: 'ZCHILD', kernel: true, error: 'object RTTI member ATTRIBUTES'},
+  {id: 'empty', name: '', error: 'SUPER_CLASS_NOT_FOUND'},
+  {id: 'unknown', name: 'ZUNKNOWN', error: 'class RTTI is unavailable: ZUNKNOWN'},
+  {id: 'root', name: 'ZPARENT', error: 'SUPER_CLASS_NOT_FOUND'},
+  {id: 'uncompiled', name: 'ZINVENTORY', error: 'superclass ZOMITTED is not compiled'},
+];
+
+test('superclass native bodies preserve descriptor guards, selection, names and subrc on Go and JS', async () => {
+  const {superClassGo, objectRttiGo} = await import('./emit-exception.ts');
+  const program = superProgram([...rttiPairs, ['ZINVENTORY', 'ZOMITTED'], ['ZOMITTED', null]]);
+  const {module} = await superJs(program);
+  const abap = await import('./js/abap.mjs');
+  const jsRows = superCases.map(c => {
+    const d = new module.CL_ABAP_CLASSDESCR();
+    Object.assign(d, {mv_object_name: c.name, relative_name: c.relative ?? '', $kernelRtti: !!c.kernel});
+    const s = {sy: {subrc: 7}};
+    try {
+      const p = d.GET_SUPER_CLASS_TYPE(s);
+      abap.objectRttiRead(p, 'ATTRIBUTES');
+      return {id: c.id, parent: p.absolute_name, subrc: s.sy.subrc};
+    } catch (e) { return {id: c.id, error: String(e)}; }
+  });
+  const dir = mkdtempSync(join(process.cwd(), 'tools/gogen/go/rtti-probe-'));
+  let goRows;
+  try {
+    writeFileSync(join(dir, 'main.go'), `package main
+import ("encoding/json"; "fmt"; "os"; "strings"; "osg/gogen/abap")
+type descriptor struct { mv_object_name, relative_name, absolute_name, mv_object_type, type_kind, kind string; KernelRtti bool }
+func (d *descriptor) IsKernelRtti() bool { return d.KernelRtti }
+func Alloc_CL_ABAP_CLASSDESCR() *descriptor { return &descriptor{} }
+${objectRttiGo(program, rttiHelpers).join('\n')}
+${superClassGo(program, rttiHelpers).join('\n')}
+func main() {
+rows := []map[string]any{}
+${superCases.map(c => `func() {
+row := map[string]any{"id": ${JSON.stringify(c.id)}}
+defer func() { if e := recover(); e != nil { row["error"] = fmt.Sprint(e) }; rows = append(rows, row) }()
+s := &abap.Session{}; s.Sy.Subrc = 7
+p := Native_GET_SUPER_CLASS_TYPE(s, &descriptor{mv_object_name: ${JSON.stringify(c.name)}, relative_name: ${JSON.stringify(c.relative ?? '')}, KernelRtti: ${!!c.kernel}})
+abap.ObjectRttiRead(p, "ATTRIBUTES")
+row["parent"] = p.absolute_name; row["subrc"] = s.Sy.Subrc
+}()`).join('\n')}
+json.NewEncoder(os.Stdout).Encode(rows)
+}`);
+    goRows = JSON.parse(execFileSync('go', ['run', '.'], {cwd: dir, encoding: 'utf8'}));
+  } finally { rmSync(dir, {recursive: true, force: true}); }
+  // Collect all mismatches, so a pre-fix run demonstrates every defect.
+  const mismatches = [];
+  for (const [host, rows] of [['Go', goRows], ['JS', jsRows]]) for (const c of superCases) {
+    const row = rows.find(r => r.id === c.id);
+    try {
+      if (c.error) assert.ok(row.error?.includes(c.error), JSON.stringify(row));
+      else assert.deepEqual(row, {id: c.id, parent: c.parent, subrc: c.subrc});
+    } catch (e) { mismatches.push(`${host} ${c.id}: ${e.message}`); }
+  }
+  assert.deepEqual(mismatches, []);
+});
+
+test('JS superclass inventory is emitted once at module scope in sorted order', async () => {
+  const a = await superJs(superProgram());
+  const b = await superJs(superProgram([...rttiPairs].reverse()));
+  assert.equal(a.source, b.source);
+  const lines = a.source.split('\n');
+  const declarations = lines.filter(l => l.includes('const rttiClassSupers = new Map('));
+  assert.equal(declarations.length, 1);
+  assert.ok(declarations[0].startsWith('const '));
+});
+
+test('Go superclass native body compiles with either RTTI prerequisite omitted', async () => {
+  const {superClassGo} = await import('./emit-exception.ts');
+  const dir = mkdtempSync(join(process.cwd(), 'tools/gogen/go/rtti-missing-'));
+  try {
+    for (const missing of ['CL_ABAP_TYPEDESCR', 'CL_ABAP_CLASSDESCR']) {
+      const program = superProgram(rttiPairs, ['CL_ABAP_TYPEDESCR', 'CL_ABAP_CLASSDESCR'].filter(n => n !== missing));
+      writeFileSync(join(dir, 'main.go'), `package main
+import ("fmt"; "strings"; "osg/gogen/abap")
+var _ = strings.ToUpper
+type descriptor struct { mv_object_name, relative_name string }
+${superClassGo(program, rttiHelpers).join('\n')}
+func main() { defer func() { fmt.Print(recover()) }(); Native_GET_SUPER_CLASS_TYPE(&abap.Session{}, &descriptor{}) }
+`);
+      const out = execFileSync('go', ['run', '.'], {cwd: dir, encoding: 'utf8'});
+      assert.ok(out.includes('NOT_COMPILED'), out);
+    }
+  } finally { rmSync(dir, {recursive: true, force: true}); }
 });

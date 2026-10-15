@@ -12,8 +12,17 @@ describe('caught exceptions widen and retain PREVIOUS on both hosts', function (
     const dir = mkdtempSync(join(tmpdir(), 'exc-previous-'));
     const input = join(dir, 'input'); mkdirSync(input);
     try {
-      for (const name of ['zcl_gogen_t_excprev.clas.abap', 'zcl_gogen_t_excprev.clas.testclasses.abap', 'zcx_gogen_t_previous.clas.abap'])
+      for (const name of ['zcl_gogen_t_excprev.clas.abap', 'zcl_gogen_t_excprev.clas.testclasses.abap', 'zcx_gogen_t_previous.clas.abap', 'zcl_gogen_t_supera.clas.abap', 'zcl_gogen_t_superb.clas.abap', 'zcl_gogen_t_superc.clas.abap'])
         copyFileSync(join('tools/gogen/testdata', name), join(input, name));
+      writeFileSync(join(input, 'zcl_gogen_t_descr.clas.abap'), `
+CLASS zcl_gogen_t_descr DEFINITION PUBLIC INHERITING FROM cl_abap_classdescr.
+  PUBLIC SECTION. CLASS-METHODS named IMPORTING mv TYPE string rel TYPE string RETURNING VALUE(d) TYPE REF TO zcl_gogen_t_descr.
+ENDCLASS.
+CLASS zcl_gogen_t_descr IMPLEMENTATION. METHOD named.
+  CREATE OBJECT d. d->mv_object_name = mv. d->relative_name = rel.
+ENDMETHOD. ENDCLASS.`);
+      for (const [name, parent] of [['/abc/cl_parent', ''], ['/abc/cl_child', ' INHERITING FROM /abc/cl_parent']])
+        writeFileSync(join(input, name.replaceAll('/', '#') + '.clas.abap'), `CLASS ${name} DEFINITION PUBLIC${parent}. ENDCLASS. CLASS ${name} IMPLEMENTATION. ENDCLASS.`);
       // The generic testdata runner requires SUCCESS; stage negative cases
       // only here, where both hosts have explicit refusal/dump expectations.
       const negative = {
@@ -118,6 +127,35 @@ describe('caught exceptions widen and retain PREVIOUS on both hosts', function (
 `,
         rtti_super: `
     DATA d TYPE REF TO cl_abap_classdescr. DATA t TYPE REF TO cl_abap_classdescr. d ?= cl_abap_typedescr=>describe_by_object_ref( zcl_gogen_t_excprev=>widen( ) ). t = d->get_super_class_type( ).
+    cl_abap_unit_assert=>assert_equals( act = t->absolute_name exp = '\\CLASS=CX_SY_ARITHMETIC_ERROR' ).
+`,
+        rtti_empty: `
+    DATA d TYPE REF TO cl_abap_classdescr. DATA p TYPE REF TO cl_abap_classdescr. CREATE OBJECT d.
+    CALL METHOD d->get_super_class_type RECEIVING p_descr_ref = p EXCEPTIONS super_class_not_found = 1.
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 1 ).
+`,
+        rtti_fallback: `
+    DATA d TYPE REF TO zcl_gogen_t_descr. DATA p TYPE REF TO cl_abap_classdescr.
+    d = zcl_gogen_t_descr=>named( mv = |   | rel = 'zcl_gogen_t_superc' ).
+    sy-subrc = 7. p = d->get_super_class_type( ).
+    cl_abap_unit_assert=>assert_equals( act = sy-subrc exp = 0 ).
+    cl_abap_unit_assert=>assert_equals( act = p->absolute_name exp = '\\CLASS=ZCL_GOGEN_T_SUPERB' ).
+`,
+        rtti_namespace: `
+    DATA r TYPE REF TO /abc/cl_child. DATA d TYPE REF TO cl_abap_classdescr. DATA p TYPE REF TO cl_abap_classdescr.
+    CREATE OBJECT r. d ?= cl_abap_typedescr=>describe_by_object_ref( r ). p = d->get_super_class_type( ).
+    cl_abap_unit_assert=>assert_equals( act = p->absolute_name exp = '\\CLASS=/ABC/CL_PARENT' ).
+`,
+        rtti_parent_members: `
+    DATA d TYPE REF TO cl_abap_classdescr. DATA p TYPE REF TO cl_abap_classdescr.
+    d ?= cl_abap_typedescr=>describe_by_object_ref( zcl_gogen_t_excprev=>widen( ) ).
+    p = d->get_super_class_type( ). IF p->attributes IS INITIAL. ENDIF.
+`,
+        rtti_root_functional: `
+    DATA r TYPE REF TO zcl_gogen_t_excprev. DATA d TYPE REF TO cl_abap_classdescr. DATA p TYPE REF TO cl_abap_classdescr.
+    CREATE OBJECT r. d ?= cl_abap_typedescr=>describe_by_object_ref( r ).
+    TRY. p = d->get_super_class_type( ).
+    CATCH cx_root. cl_abap_unit_assert=>fail( 'classic dump became catchable' ). ENDTRY.
 `,
         json_object: `
     DATA r TYPE REF TO cx_root. DATA text TYPE string. r = zcl_gogen_t_excprev=>widen( ). text = /ui2/cl_json=>serialize( r ).
@@ -134,7 +172,7 @@ describe('caught exceptions widen and retain PREVIOUS on both hosts', function (
         assert.equal(run.error, undefined, run.stderr);
         assert.equal(run.status, 1, run.stderr + run.stdout);
         const result = host === 'unit' ? JSON.parse(run.stdout).rows : JSON.parse(readFileSync(join(out, 'results.json'), 'utf8'));
-        const success = ['ORDINARY_INTERFACES', 'CHAIN', 'RETHROW_LAZY', 'RETHROW_WIDENED', 'RETHROW_TWICE', 'POPULATED_TEXTID', 'HELPER_TEXT', 'INTERFACE_TEXT', 'HELPER_VARS', 'HELPER_PREVIOUS'];
+        const success = ['ORDINARY_INTERFACES', 'CHAIN', 'RETHROW_LAZY', 'RETHROW_WIDENED', 'RETHROW_TWICE', 'POPULATED_TEXTID', 'HELPER_TEXT', 'INTERFACE_TEXT', 'HELPER_VARS', 'HELPER_PREVIOUS', 'RTTI_SUPER', 'RTTI_EMPTY', 'RTTI_FALLBACK', 'RTTI_NAMESPACE'];
         const refusals = {
           KERNEL_METADATA: /exception attribute TEXTID/, KERNEL_ERRID: /exception attribute KERNEL_ERRID/,
           KERNEL_BYREF: /exception attribute TEXTID/, INTERFACE_LONGTEXT: /exception method GET_LONGTEXT/,
@@ -145,10 +183,10 @@ describe('caught exceptions widen and retain PREVIOUS on both hosts', function (
           RTTI_METHODS: /object RTTI member METHODS/, RTTI_INTERFACES: /object RTTI member INTERFACES/,
           RTTI_TYPES: /object RTTI member TYPES/, RTTI_EVENTS: /object RTTI member EVENTS/,
           RTTI_PARAMETER: /object RTTI method GET_METHOD_PARAMETER_TYPE/, RTTI_INTERFACE: /object RTTI method GET_INTERFACE_TYPE/,
-          RTTI_SUPER: /object RTTI method GET_SUPER_CLASS_TYPE/, JSON_OBJECT: host === 'unit' ? /CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA: an unmeasured object reference: CX_ROOT/ : /Native_DESCRIBE_BY_DATA/,
+          RTTI_PARENT_MEMBERS: /object RTTI member ATTRIBUTES/, JSON_OBJECT: host === 'unit' ? /CL_ABAP_TYPEDESCR=>DESCRIBE_BY_DATA: an unmeasured object reference: CX_ROOT/ : /Native_DESCRIBE_BY_DATA/,
 
         };
-        assert.equal(result.length, 34);
+        assert.equal(result.length, 39);
         for (const row of result) {
           if (success.includes(row.method)) assert.equal(row.status, 'SUCCESS', JSON.stringify(row));
           else if (refusals[row.method]) {
@@ -156,7 +194,7 @@ describe('caught exceptions widen and retain PREVIOUS on both hosts', function (
             assert.match(row.message, refusals[row.method]);
           } else {
             assert.equal(row.status, 'FAILED', JSON.stringify(row));
-            assert.match(row.message, /OBJECTS_OBJREF_NOT_ASSIGNED/);
+            assert.match(row.message, row.method === 'RTTI_ROOT_FUNCTIONAL' ? /SUPER_CLASS_NOT_FOUND/ : /OBJECTS_OBJREF_NOT_ASSIGNED/);
             assert.doesNotMatch(row.message, /nil pointer|Cannot read properties/);
           }
         }

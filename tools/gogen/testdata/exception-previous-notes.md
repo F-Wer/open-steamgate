@@ -53,7 +53,8 @@ Critic round 2 audit (Go and IR-JS; the loaded open-abap-core shims):
 | CX_ROOT=>GET_SOURCE_POSITION | Core's EXTRA_CX @KERNEL reads are already refused with the owning method name; SOURCE_POSITION pins this. |
 | Object-reference RTTI and class-name lookup | Registered class identity/kind/name only; no CX field inspection. CHAIN covers DESCRIBE_BY_OBJECT_REF and GET_CLASS_NAME before/after widening, for kernel and compiled exceptions. |
 | Object RTTI enumeration | ATTRIBUTES, METHODS, INTERFACES, TYPES and EVENTS are refused by member name at runtime only on descriptors of widened kernel exceptions. ORDINARY_INTERFACES checks an ordinary class descriptor on both hosts. RTTI_MEMBERS/METHODS/INTERFACES/TYPES/EVENTS cover each. |
-| Object RTTI member-type lookup | GET_ATTRIBUTE_TYPE, GET_METHOD_PARAMETER_TYPE, GET_INTERFACE_TYPE and GET_SUPER_CLASS_TYPE remain refused by method name. RTTI_ATTRIBUTE_TYPE/PARAMETER/INTERFACE/SUPER cover each. |
+| Class RTTI superclass lookup | RTTI_SUPER asserts the parent name; RTTI_PARENT_MEMBERS pins the inherited kernel guard. RTTI_EMPTY maps the classic exception; RTTI_FALLBACK checks trailing blanks and success subrc; RTTI_NAMESPACE checks /ABC/ names; RTTI_ROOT_FUNCTIONAL pins an uncaught classic dump through CATCH cx_root. |
+| Object RTTI member-type lookup | GET_ATTRIBUTE_TYPE, GET_METHOD_PARAMETER_TYPE and GET_INTERFACE_TYPE remain refused by method name. RTTI_ATTRIBUTE_TYPE/PARAMETER/INTERFACE cover each. |
 | /UI2/CL_JSON=>SERIALIZE over a CX object | Its object branch uses object RTTI/member enumeration and dynamic ASSIGN, which cannot expose CX metadata on these hosts; JSON_OBJECT pins named refusal on both. |
 | IS_RESUMABLE | Absent from the loaded CX_ROOT declaration; there is no reachable read. The frontend test pins its named syntax refusal. No value is invented. |
 

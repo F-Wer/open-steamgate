@@ -11,7 +11,7 @@ import {analyzeOwnership} from "./frontend-owned.ts";
 import {ownedExpression, ownedStatement, emitByteConcat} from "./emit-owned.ts";
 import {emitBuiltinGo} from "./emit-builtins.ts";
 import {I8_OPS, emitPackedInt8, emitPackedComparison} from "./emit-int8.ts";
-import {objectRttiGo, exceptionClass, nativeMessageText} from "./emit-exception.ts";
+import {superClassGo, objectRttiGo, exceptionClass, nativeMessageText} from "./emit-exception.ts";
 import {emitByteStatement} from "./emit-bytes.ts";
 // IR -> Go source, for the Go backend spike.
 //
@@ -448,7 +448,8 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     out.push(`func init() {`, `\tabap.RegisterClass(${JSON.stringify(cls.name)}, (*${typeName(cls.name)})(nil), func(s *abap.Session) any { ${make} })`, "}", "");
   }
   append(out, exceptionSupers(program));
-  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
+  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, superClassGo(program, {goType, ident}));
+  if (classes.some(c => c.methods.some(m => m.body?.[0]?.fn === "Native_DESCRIBE_BY_OBJECT_REF" || m.body?.[0]?.fn === "Native_GET_SUPER_CLASS_TYPE"))) append(out, (/** @type {import("./emit-go-types.ts").ObjectRttiGo} */ (objectRttiGo))(program, {goType, ident}));
   append(out, hostRaiseGlue(program, classes, layers));
   if (!layers) append(out, dispatcher(classes));
   append(out, staticRegistry(program, classes));
