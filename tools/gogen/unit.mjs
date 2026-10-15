@@ -1,4 +1,4 @@
-import {append} from "./append.mjs";
+import {append} from "./append.ts";
 import {funcName, writeGo, writeSymbols, refreshSymbolBuild} from "./symbols.ts";
 // ABAP Unit on gogen. Test includes are compiled only for selected owners.
 // Results are JSON rows: {class, testclass, method, status, message}.

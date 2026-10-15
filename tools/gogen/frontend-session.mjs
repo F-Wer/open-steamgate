@@ -1,5 +1,5 @@
 import {artifactLowering, storedProvenance, inheritStoredProvenance} from "./frontend-provenance.mjs";
-import {append} from "./append.mjs";
+import {append} from "./append.ts";
 import {recordLowering, replayLowering} from "./frontend-replay.mjs";
 // A unit closure keeps one immutable registry. Reuse lowering only for
 // elementary classes directly. Dependency-sensitive classes record their

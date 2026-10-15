@@ -1,4 +1,4 @@
-import {append} from "./append.mjs";
+import {append} from "./append.ts";
 // Process scheduling and crash recovery for the ABAP Unit runner.
 import {spawn, spawnSync} from "node:child_process";
 import {existsSync, mkdirSync, readFileSync, renameSync, rmSync, rmdirSync, unlinkSync, writeFileSync} from "node:fs";

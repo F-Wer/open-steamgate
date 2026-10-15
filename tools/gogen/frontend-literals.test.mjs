@@ -38,7 +38,7 @@ test("DATA(x) = 'ab' & 'cd' takes the joined length, not the first literal's", (
 });
 
 test("a DEFAULT joined by & is one literal", async () => {
-  const {literalText} = await import("./frontend-literals.mjs");
+  const {literalText} = await import("./frontend-literals.ts");
   assert.deepEqual(literalText("`ab` & `c``d`"), {quote: "`", value: "abc`d"});
   assert.deepEqual(literalText("'it''s' &\n 'x'"), {quote: "'", value: "it'sx"});
   assert.equal(literalText("`ab` & 'cd'"), null);

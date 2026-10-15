@@ -1,4 +1,4 @@
-import {append} from "./append.mjs";
+import {append} from "./append.ts";
 // Parity: OSG's own HTTP-level suites, run against OSG on Node and against
 // OSGo, the same test files, each suite file on a fresh server of each kind.
 //

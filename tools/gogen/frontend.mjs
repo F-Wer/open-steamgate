@@ -1,6 +1,6 @@
 import {withProvenance, expandProgramSelection, withArtifact, resolvedFunctionModule} from "./frontend-provenance.mjs";
 import {isSourceIdentity} from "../osd-source-identity.mjs";
-import {append} from "./append.mjs";
+import {append} from "./append.ts";
 import {lowerFindResults, inlineFindResultTypes} from "./frontend-find-results.ts";
 import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // ABAP -> IR, for the Go backend spike (tools/gogen/README.md).
@@ -18,11 +18,11 @@ import {hoistLocalConstants} from "./frontend-local-constants.mjs";
 // why; a method that calls a skipped one is refused in turn.
 import {resolveStatic as lowerStatic, staticSlot} from "./frontend-static.mjs";
 import {prepareSession, finishSession, compileClass} from "./frontend-session.mjs";
-import {syntaxDiagnostics} from "./frontend-diagnostics.mjs";
+import {syntaxDiagnostics} from "./frontend-diagnostics.ts";
 import {sourceOwnershipSafety} from "./frontend-owned.mjs";
-import {lowerBoolx} from "./frontend-boolx.mjs";
+import {lowerBoolx} from "./frontend-boolx.ts";
 import {builtin} from "./frontend-builtins.mjs";
-import {literalText, textLiteral} from "./frontend-literals.mjs";
+import {literalText, textLiteral} from "./frontend-literals.ts";
 import {replaceStatement, lowerByteFind} from "./frontend-bytes.mjs";
 import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
