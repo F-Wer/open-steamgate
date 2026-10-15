@@ -1,5 +1,6 @@
 import {Nodes, Statements, isStmt, Unsupported, upper, S, XS, I} from "./frontend-base.mjs";
-import {variable, refAttribute, fieldOf, constructorSignature, convert, defaultValue, withSupplied} from "./frontend.mjs";
+import {variable, refAttribute, constructorSignature, convert, defaultValue, withSupplied} from "./frontend.mjs";
+import {fieldOf} from "./frontend-types-signatures.mjs";
 
 /*
  * Statements A4H does not activate, which abaplint takes and the transpiler
