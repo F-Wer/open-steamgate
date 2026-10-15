@@ -220,7 +220,9 @@ export interface StatementHelpers extends ExprHelpers { readonly rowValue: (tabl
 export type OwnedExpression = (e: Expr, ctx: Context, helpers: ExprHelpers) => string | null;
 export type OwnedStatement = (st: Stmt, ctx: Context, indent: string, helpers: StatementHelpers) => string[] | null;
 export type EmitByteConcat = (st: Extract<Stmt, {s: 'concat_bytes'}>, ctx: Context, indent: string, helpers: Pick<StatementHelpers, 'expr' | 'place' | 'rowValue'>) => string[];
-export type EmitByteStatement = (st: Stmt, ctx: Context, indent: string, helpers: Pick<ExprHelpers, 'expr' | 'place'>) => string[];
+export type ByteStatement = Extract<Stmt, {s: 'replace_bytes' | 'replace_chars' | 'find_bytes_all' | 'find_bytes'}>;
+export interface ByteContext extends Context { loop: number }
+export type EmitByteStatement = (st: ByteStatement, ctx: ByteContext, indent: string, helpers: Pick<ExprHelpers, 'expr' | 'place'>) => string[];
 export type EmitBuiltinGo = (e: Builtin, args: readonly string[], names: ReadonlyMap<string, string>, imports: Set<string>) => string;
 export type EmitPackedInt8 = (e: Conversion, render: (e: Expr) => string, helper: RenderName) => string | null;
 export type EmitPackedComparison = (c: Condition, render: (e: Expr) => string) => string | null;
