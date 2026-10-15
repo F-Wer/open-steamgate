@@ -20,7 +20,7 @@ const exceptions = {
   // This is not a filesystem API with a primitive-valued contract.
   "tools/gogen/frontend.mjs": {"node:module": ["createRequire"]},
   // Pure deep comparison of IR, with no host I/O. Keep its exact semantics.
-  "tools/gogen/emit-table-move.mjs": {"node:util": ["isDeepStrictEqual"]},
+  "tools/gogen/emit-table-move.ts": {"node:util": ["isDeepStrictEqual"]},
   // Not a host-io gap: the object cache (and its provenance/digest files) is an
   // optional HOST module injected through session/cacheDir, outside the compiler
   // closure that compileProgram loads without a cacheDir. abapiti/Go builds run
