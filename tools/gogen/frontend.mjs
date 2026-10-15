@@ -33,7 +33,7 @@ import * as RIR from "../sqlscript-ir.mjs";
 import {lower as lowerRelation} from "../sqlscript-lower.mjs";
 import {hostPred as rangeHostPred} from "../ir-ranges.mjs";
 import * as WIR from "../ir-writes.mjs";
-import {samcOf, cdsSqlViews, rearrangedClass, inlineTableLocals} from "./frontend-analysis.mjs";
+import {samcOf, cdsSqlViews, cdsMappingError, rearrangedClass, inlineTableLocals} from "./frontend-analysis.mjs";
 import {createRequire} from "node:module";
 import {join} from "./host-io.ts";
 import {caughtOnce, chainHas} from "./frontend-hierarchy.mjs";
@@ -4527,6 +4527,9 @@ function localInterfaceConstant(id, attr, local, reg) {
 
 /** a table of the dictionary: its columns (typed on demand), its key, whether it has a client */
 function dbTable(ctx, tableName, verb) {
+  const mappings = cdsViewsByRegistry.get(ctx.reg) ?? cdsViewsByRegistry.get(inputOrigin(ctx.reg));
+  const mappingError = cdsMappingError(mappings, tableName);
+  if (mappingError) throw new Unsupported(mappingError);
   // a DDIC view (the SQL views of OSG's CDS entities, created as SQLite views
   // by the transpiler's DatabaseSetup) is read like a table: its fields are
   // its columns, MANDT among them when it has one (ultra/sadl). It is never

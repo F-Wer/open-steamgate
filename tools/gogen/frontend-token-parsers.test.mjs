@@ -215,9 +215,65 @@ test("round 2 CDS BOM mapping", () => {
   assert.deepEqual(cdsSqlViews(["\uFEFF" + cds]), {ZTEST: "ZGOOD"});
 });
 
-test("round 2 unreadable DDLS mapping names the source", () => {
-  assert.throws(() => compile("rv = 1.", {"zbroken.ddls.asddls": cds + " invalid syntax!!"}),
-    /zbroken.ddls.asddls.*view mapping could not be read/);
-  assert.throws(() => cdsSqlViews([{filename: "zbroken.ddls.asddls", source: cds + " invalid syntax!!"}]),
-    /zbroken.ddls.asddls.*view mapping could not be read/);
+test("round 3 keyed table READ-ONLY refuses assignment and CLEAR", async (t) => {
+  for (const type of ["STANDARD TABLE OF i WITH DEFAULT KEY", "SORTED TABLE OF i WITH UNIQUE KEY table_line"]) {
+    for (const body of [`DATA l TYPE ${type}. zcl_owner=>t = l.`, "CLEAR zcl_owner=>t."]) {
+      await t.test(`${type}: ${body}`, () => {
+        const owner = `CLASS zcl_owner DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION. CLASS-DATA t TYPE ${type} READ-ONLY.
+ENDCLASS. CLASS zcl_owner IMPLEMENTATION. ENDCLASS.`;
+        const p = compile(body, {"zcl_owner.clas.abap": owner});
+        assert.deepEqual(p.skipped, []);
+        assert.equal(p.partial.length, 1);
+        assert.match(p.partial[0], /write to a READ-ONLY attribute/);
+        clean(compile(body, {"zcl_owner.clas.abap": owner.replace(" READ-ONLY", "")}));
+      });
+    }
+  }
+});
+
+test("round 3 LOB handle READ-ONLY is direct in DataDefinition", () => {
+  const tree = parsedBody("CLASS zcl_owner DEFINITION. PUBLIC SECTION. CLASS-DATA t TYPE string READ-ONLY LOB HANDLE FOR ALL COLUMNS. ENDCLASS.");
+  const def = tree.findFirstExpression(core.Expressions.DataDefinition);
+  const tokens = def.getChildren().filter(c => c instanceof core.Nodes.TokenNode).map(c => c.getFirstToken().getStr());
+  assert.deepEqual(tokens.slice(1, 4), ["READ", "-", "ONLY"]);
+  const p = compile("CLEAR zcl_owner=>t.", {"zcl_owner.clas.abap": `CLASS zcl_owner DEFINITION PUBLIC FINAL CREATE PUBLIC.
+PUBLIC SECTION. CLASS-DATA t TYPE string READ-ONLY LOB HANDLE FOR ALL COLUMNS.
+ENDCLASS. CLASS zcl_owner IMPLEMENTATION. ENDCLASS.`});
+  assert.deepEqual(p.skipped, []);
+  assert.match(JSON.stringify(p.partial), /write to a READ-ONLY attribute/);
+});
+
+const viewFixture = () => Object.fromEntries(["zgogen_t_dbw.tabl.xml", "zgogen_t_dbwc.view.xml", "zgogen_t_dbwv.view.xml"]
+  .map(name => [name, readFileSync(new URL(`./testdata/${name}`, import.meta.url), "utf8")]));
+const viewCds = "@AbapCatalog.sqlViewName: 'ZGOGEN_T_DBWV'\ndefine view ZGOGEN_T_DBWC as select from zgogen_t_dbw { key id, val as amount }";
+test("round 3 uppercase DDLS filename compiles and maps", () => {
+  const p = compile("SELECT id FROM zgogen_t_dbwv INTO TABLE @DATA(rows). rv = lines( rows ).", {
+    ...viewFixture(), "ZV.DDLS.ASDDLS": viewCds,
+  });
+  clean(p);
+  assert.deepEqual(p.cdsViews, {ZGOGEN_T_DBWC: "ZGOGEN_T_DBWV"});
+  assert.equal(p.tables.find(t => t.name === "ZGOGEN_T_DBWC").sqlView, "ZGOGEN_T_DBWV");
+});
+
+test("round 3 unreadable unused DDLS does not abort compileProgram", () => {
+  const p = compile("rv = 1.", {...viewFixture(), "zbroken.ddls.asddls": viewCds + " invalid syntax!!"});
+  clean(p);
+  assert.deepEqual(p.cdsViews, {});
+  const reused = compileProgram({registry: p.reg, folders: [], objects: ["ZCL_TOKENS"], tolerant: true});
+  clean(reused);
+});
+
+test("round 3 unreadable used DDLS reports its original filename", async (t) => {
+  for (const name of ["zgogen_t_dbwc", "zgogen_t_dbwv"]) await t.test(name, () => {
+    const p = compile(`SELECT id FROM ${name} INTO TABLE @DATA(rows).`, {
+      ...viewFixture(), "ZBROKEN.DDLS.ASDDLS": "// define view ZFAKE\n@View: 'VIEW'\n" + viewCds + " invalid syntax!!",
+    });
+    assert.deepEqual(p.skipped, []);
+    assert.match(JSON.stringify(p.partial), /ZBROKEN\.DDLS\.ASDDLS.*view mapping could not be read/);
+    const reused = compileProgram({registry: p.reg, folders: [], objects: ["ZCL_TOKENS"], tolerant: true});
+    assert.match(JSON.stringify(reused.partial), /ZBROKEN\.DDLS\.ASDDLS.*view mapping could not be read/);
+    const strict = compileProgram({registry: p.reg, folders: [], objects: ["ZCL_TOKENS"]});
+    assert.match(JSON.stringify(strict.partial), /ZBROKEN\.DDLS\.ASDDLS.*view mapping could not be read/);
+  });
 });

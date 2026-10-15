@@ -5,7 +5,11 @@ import {parseSamc} from "../osd-samc.ts";
 // Match frontend.mjs: AST instanceof checks must use the transpiler's core.
 import {createRequire} from "node:module";
 const require = createRequire(import.meta.url);
-const abaplint = createRequire(require.resolve("@abaplint/transpiler/package.json"))("@abaplint/core");
+const transpilerRequire = createRequire(require.resolve("@abaplint/transpiler/package.json"));
+const abaplint = transpilerRequire("@abaplint/core");
+const {CDSLexer} = transpilerRequire("@abaplint/core/build/src/cds/cds_lexer");
+const {seq, star, opt} = transpilerRequire("@abaplint/core/build/src/abap/2_statements/combi");
+const {Result} = transpilerRequire("@abaplint/core/build/src/abap/2_statements/result");
 const {Expressions, ExpressionsCDS, Nodes} = abaplint;
 
 const trees = new WeakMap();
@@ -48,33 +52,59 @@ export function samcOf(folders) {
   return [...new Map(rows.map((r) => [`${r.applicationId}|${r.path}`, r])).values()];
 }
 
+// Keep failures out of the serializable map and defer them until SQL uses a
+// view. The map belongs to the registry, including reused registry compiles.
+const cdsFailures = new WeakMap();
+export const cdsMappingError = (views, name) => cdsFailures.get(views)?.get(name);
+// Let core parse the header even when the SELECT body cannot be parsed. This
+// preserves the definition name when the abapGit object has a different name.
+const cdsHeader = seq(star(ExpressionsCDS.CDSAnnotation), opt("DEFINE"), opt("ROOT"),
+  opt("WRITABLE"), "VIEW", opt("ENTITY"), ExpressionsCDS.CDSName);
+function sqlViewName(annotations) {
+  for (const annotation of annotations) {
+    const key = annotation.getChildren().filter(c => c instanceof Nodes.TokenNode)
+      .map(c => c.getFirstToken().getStr()).join("").toUpperCase();
+    if (key !== "@ABAPCATALOG.SQLVIEWNAME:") continue;
+    const value = annotation.findFirstExpression(ExpressionsCDS.CDSString)?.getFirstToken().getStr();
+    if (value) return value.slice(1, -1).toUpperCase();
+  }
+}
+
 // A CDS view entity has no SQL view name and is left out.
 export function cdsSqlViews(sources) {
   const out = {};
+  const failures = new Map();
+  cdsFailures.set(out, failures);
   for (const [index, input] of sources.entries()) {
     const {filename, source} = typeof input === "string"
       ? {filename: `gogen_${index}.ddls.asddls`, source: input} : input;
     const src = source.startsWith("\uFEFF") ? source.slice(1) : source;
-    // Give abaplint a DDLS object with its source filename for diagnostics, without
-    // adding the CDS sources to the ABAP registry used for type checking.
+    // Core recognizes only lowercase extensions. Keep the original for messages.
+    // Do not add CDS sources to the ABAP registry used for type checking.
     const reg = new abaplint.Registry();
-    reg.addFile(new abaplint.MemoryFile(filename, src));
+    const file = new abaplint.MemoryFile(filename.toLowerCase(), src);
+    reg.addFile(file);
     reg.parse();
     const obj = reg.getFirstObject();
     // Pinned core's getSQLViewName() searches raw text and includes comments.
     // Its parsed CDS annotations exclude comments and expose the string token.
     const tree = obj?.getTree();
-    if (!tree) throw new Error(`${filename}: DDLS view mapping could not be read`);
+    if (!tree) {
+      const message = `${filename}: DDLS view mapping could not be read`;
+      if (obj) failures.set(obj.getName().toUpperCase(), message);
+      const tokens = CDSLexer.run(file).filter(t => !(t instanceof abaplint.Tokens.Comment));
+      const header = cdsHeader.run([new Result(tokens, 0)])[0]?.getNodes() ?? [];
+      const name = header.find(n => n.get() instanceof ExpressionsCDS.CDSName)?.concatTokens().toUpperCase();
+      if (name) failures.set(name, message);
+      const sql = sqlViewName(header.filter(n => n.get() instanceof ExpressionsCDS.CDSAnnotation));
+      if (sql) failures.set(sql, message);
+      continue;
+    }
     if (!(tree.get() instanceof ExpressionsCDS.CDSDefineView)) continue;
     const cds = obj.getDefinitionName();
     if (tree.getChildren().some((c) => c instanceof Nodes.TokenNode && c.getFirstToken().getStr().toUpperCase() === "ENTITY")) continue;
-    for (const annotation of tree.findDirectExpressions(ExpressionsCDS.CDSAnnotation)) {
-      const key = annotation.getChildren().filter((c) => c instanceof Nodes.TokenNode)
-        .map((c) => c.getFirstToken().getStr()).join("").toUpperCase();
-      if (key !== "@ABAPCATALOG.SQLVIEWNAME:") continue;
-      const value = annotation.findFirstExpression(ExpressionsCDS.CDSString)?.getFirstToken().getStr();
-      if (value && cds) out[cds.toUpperCase()] = value.slice(1, -1).toUpperCase();
-    }
+    const sql = sqlViewName(tree.findDirectExpressions(ExpressionsCDS.CDSAnnotation));
+    if (sql && cds) out[cds.toUpperCase()] = sql;
   }
   return out;
 }
