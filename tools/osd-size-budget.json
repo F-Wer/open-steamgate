@@ -51,8 +51,8 @@
       "reason": "byte REPLACE/FIND section spans; independent of go/abap"
     },
     "go:charsearch": {
-      "lines": 85,
-      "reason": "osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (round 5 finding 1): CS preserves the initial fixed-character subject rule alongside padding and fdpos."
+      "lines": 112,
+      "reason": "Baseline correction, not growth: main 4da99036 already has 112 physical lines in charsearch while the ceiling said 85; this stack does not change the package. Agreed with stoker (owner) on the frontend split PR B. Carving charsearch out into its own package is stoker's (docs/backlog/gogen-osgo.md, \"modules\"); the ceiling drops back after that. osgo 026/029 (#658, #659, 2026-10-08): UTF-16 units with the surrogate-half invariant and class statics per Session; carving utf16/statics out of go/abap is queued (stoker QUEUE #33); ADT batch 1 (round 5 finding 1): CS preserves the initial fixed-character subject rule alongside padding and fdpos."
     },
     "go:classname": {
       "lines": 31,
@@ -218,9 +218,13 @@
       "lines": 1231,
       "reason": "baseline 2026-10-01 abapiti 042: READ and DELETE TABLE by a hashed secondary key. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor."
     },
+    "tools/gogen/frontend-base.mjs": {
+      "lines": 66,
+      "reason": "Frontend split step 1 B: shared abaplint binding, error class and primitive helpers moved from frontend.mjs."
+    },
     "tools/gogen/frontend.mjs": {
-      "lines": 7081,
-      "reason": "#34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds. abapiti 042: READ and DELETE TABLE by a hashed secondary key. abapiti 043: WHERE compares in int8. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor. Inbox 046: carry PCRE through the existing FIND statement and count IR with the REGEX form restrictions."
+      "lines": 6980,
+      "reason": "Frontend split (docs/frontend-split-plan.md): step 1 moved the base bindings to frontend-base.mjs (7,032 -> 6,974); the ceiling only shrinks with each move. Before: #34/#36: packed DEC comparisons and the host-replaced class signature registry on top of the merged frontend baseline. #36 round 2: shared omitted-argument lowering for host exception factories, including OPTIONAL, DEFAULT and IS SUPPLIED; no second emitter call path. #36 critic r2: a host-replaced method whose signature does not compile, or is untyped, is refused instead of dropped. abapiti 037: cl_http_utility=>decode_base64 beside its encode_base64 sibling (the @KERNEL text decode). #38/#39 add numeric-text/string calculation targets and the ENQUEUE/DEQUEUE lock-object registry; round 2: size all supported lock key kinds as Node request() does and refuse unsized keys by table and field. #43: read UPDATE_TASK presence per module from function group XML and mark compiled calls before execution. #43: update-task modules from the function group XML mark the LUW on module entry. ADT 10-08: DELETE TABLE itab FROM wa on a HASHED or SORTED table by its primary key fields, refused inside a LOOP over the same table (#688 critic). abapiti scale 10-09: the IS SUPPLIED scan cached per parsed file across closure rounds. abapiti 042: READ and DELETE TABLE by a hashed secondary key. abapiti 043: WHERE compares in int8. Generic loop fix round: retain concrete caller storage for untyped TABLES and adjust loop tokens after DELETE INDEX at or before the cursor. Inbox 046: carry PCRE through the existing FIND statement and count IR with the REGEX form restrictions."
     },
     "tools/gogen/go/abap/abap.go": {
       "lines": 285,
