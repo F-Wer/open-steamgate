@@ -78,7 +78,7 @@ export interface SessionEntry {
   structure: ReturnType<Core.ABAPFile['getStructure']>;
   ir: ClassIR;
   supplied: string;
-  current: Record<string, unknown>;
+  current: Pick<SessionProgram, 'currentClass' | 'currentOwner' | 'currentTypes'>;
   sigs?: SignatureChanges;
   skipped?: string[];
   partial?: string[];
