@@ -2,17 +2,27 @@ import {expect} from "chai";
 import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf} from "../tools/osd-packs.mjs";
+import {SOURCE, isSourceIdentity, BadPack, contentFoldersOf, dataDirsOf, ddicDirsOf, generatorFoldersOf, inputFoldersOf, packAt, packRootsOf, packsOf, webappsOf} from "../tools/osd-packs.mjs";
 import {ObjectStore, rootsOf} from "../tools/osd-store.mjs";
 import {loadConfig} from "../tools/osd-build.mjs";
 import {generate as generateBsp, packApplications, packApps} from "../tools/osd-bsp-registry.mjs";
 import {packNodes} from "../tools/osd-nodes.mjs";
+import {SOURCE as leafSource, isSourceIdentity as leafIdentity} from "../tools/osd-source-identity.mjs";
 
 // A pack is a directory, not a rebuild (backlog E.2): ABAP, seed rows, a
 // page and a manifest naming it, found at start and layered after the tree's
 // own folders. Nothing here is compiled in, so these tests build packs on
 // disk and ask what OSD makes of them.
 describe("tools/osd-packs: a pack is a directory", () => {
+  it("shares the pure source identity predicate with the frontend", () => {
+    expect(SOURCE).to.equal(leafSource).and.to.equal(".osd-source.json");
+    expect(isSourceIdentity).to.equal(leafIdentity);
+    for (const [file, expected] of [[SOURCE, true], [join("folder", SOURCE), true],
+      [".OSD-SOURCE.JSON", false], ["object.clas.xml", false], [SOURCE + ".bak", false]]) {
+      expect(leafIdentity(file), file).to.equal(expected);
+    }
+  });
+
   let root;
   let outside;
   const write = (file, text = "") => {

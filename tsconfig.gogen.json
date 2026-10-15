@@ -19,6 +19,7 @@
     "tools/gogen/symbols.ts",
     "tools/gogen/go-symbols.ts",
     "tools/gogen/emit-constructors.ts",
-    "tools/gogen/frontend-find-results.ts"
+    "tools/gogen/frontend-find-results.ts",
+    "tools/osd-samc.ts"
   ]
 }
