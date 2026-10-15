@@ -1,5 +1,5 @@
 import {append} from "./append.ts";
-import {superClassJs, objectRttiJs, exceptionClass} from "./emit-exception.ts";
+import {superClassJsDeclarations, superClassJs, objectRttiJs, exceptionClass} from "./emit-exception.ts";
 import {localConstant, localConstantDeclarations} from "./emit-local-constants.ts";
 import {constructorFactories} from "./emit-constructors.ts";
 import {emitCondition} from "./emit-js-condition.mjs";
@@ -175,7 +175,7 @@ export function emitJs(program, runtimeUrl = "./abap.mjs") {
     out.push(`export function new_${st.go}() {`, `  return {${st.fields.map((f) => `${ident(f.name)}: ${zero(f.type)}`).join(", ")}};`, "}");
   }
   out.push("");
-  append(out, localConstantDeclarations(program.consts, {js: true, zero, literal}));
+  append(out, superClassJsDeclarations(program), localConstantDeclarations(program.consts, {js: true, zero, literal}));
   out.push("");
   const compiledNames = new Set(program.classes.map((c) => c.name));
   for (const name of referencedClasses(program)) if (!compiledNames.has(name)) out.push(`export class ${typeName(name)} {}`);
@@ -620,7 +620,7 @@ function stmtLines(st, ctx, d) {
           `${t}  ${place(st.args[2].value, ctx)} = hx; ${place(st.args[3].value, ctx)} = hx;`,
           `${t}  ${place(st.args[4].value, ctx)} = Buffer.from(hx, "hex").toString("base64"); }`];
       }
-      if (st.fn === "Native_GET_SUPER_CLASS_TYPE") return superClassJs(ctx, t, ident);
+      if (st.fn === "Native_GET_SUPER_CLASS_TYPE") return superClassJs(t, ident);
       if (st.fn === "Native_DESCRIBE_BY_OBJECT_REF") return objectRttiJs(t, ident(ctx.method.params[0].name), ident);
       if (st.fn === "classname.Internal") {
         const [x, out] = st.args.map(a => a.value);
