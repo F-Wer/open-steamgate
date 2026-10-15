@@ -3,7 +3,7 @@
 import {createRequire} from "node:module";
 import {core, inputSnapshot, objectKey} from "./frontend-inventory.mjs";
 import {currentQueryAnswer} from "./frontend-queries.mjs";
-import {sourceOwnershipSafety} from "./frontend-owned.mjs";
+import {sourceOwnershipSafety} from "./frontend-owned.ts";
 const require = createRequire(createRequire(import.meta.url).resolve("@abaplint/transpiler/package.json"));
 const {CurrentScope} = require("@abaplint/core/build/src/abap/5_syntax/_current_scope");
 const {DDIC} = require("@abaplint/core/build/src/ddic");
