@@ -714,8 +714,11 @@ const OLD_HOME_NAME_PATTERN = /^(?:osd-home-(?:[0-9a-f]{64}|previous(?:-(?:[0-9a
 
 /** Stable SHA-256 of a seed tree's paths and file contents. Root-level
  * launcher metadata (ID, marker, original-file list and serving locks) is
- * excluded. */
-function seedContentId(seedDir) {
+ * excluded. `modes` (relative "/"-path -> mode, unpackTar's result) stands
+ * in for the file system's own permission bits: Windows reports 0o666/0o777
+ * where the archive recorded 0o644/0o755, so a freshly unpacked seed would
+ * never match its packaged ID there. */
+function seedContentId(seedDir, modes = undefined) {
   const hash = createHash("sha256");
   const record = (kind, rel, content = Buffer.alloc(0), mode = 0) => {
     const name = Buffer.from(rel.replaceAll(path.sep, "/"), "utf8");
@@ -730,9 +733,10 @@ function seedContentId(seedDir) {
     hash.update(modeBytes);
     hash.update(content);
   };
+  const modeOf = (rel, stat) => modes?.get(rel.replaceAll(path.sep, "/")) ?? stat.mode;
   const visit = (dir, rel = "") => {
     const entries = fs.readdirSync(dir).sort();
-    if (rel !== "") record(0x44, rel, Buffer.alloc(0), fs.lstatSync(dir).mode);
+    if (rel !== "") record(0x44, rel, Buffer.alloc(0), modeOf(rel, fs.lstatSync(dir)));
     for (const name of entries) {
       if (rel === "" && (name === SEED_ID_FILE || name === MATERIALIZED_MARKER ||
         name === SEED_FILES_FILE || SERVING_LOCK_PATTERN.test(name))) continue;
@@ -744,7 +748,7 @@ function seedContentId(seedDir) {
       } else if (stat.isSymbolicLink()) {
         record(0x4c, childRel, Buffer.from(fs.readlinkSync(file), "utf8"));
       } else if (stat.isFile()) {
-        record(0x46, childRel, fs.readFileSync(file), stat.mode);
+        record(0x46, childRel, fs.readFileSync(file), modeOf(childRel, stat));
       } else {
         throw new Error(`Unsupported file in working copy: ${file}`);
       }
@@ -1076,9 +1080,9 @@ function ensureMaterializedHome(seedDir, globalStorageDir, options = {}) {
         const compressed = fs.createReadStream(archive);
         const decompressed = createBrotliDecompress();
         compressed.on("error", (error) => decompressed.destroy(error));
-        await unpackTar(compressed.pipe(decompressed), pending);
+        const modes = await unpackTar(compressed.pipe(decompressed), pending);
         fs.writeFileSync(path.join(pending, SEED_ID_FILE), `${seedId}\n`);
-        if (seedContentId(pending) !== seedId) throw new Error("Packaged seed content does not match its ID");
+        if (seedContentId(pending, modes) !== seedId) throw new Error("Packaged seed content does not match its ID");
         fs.writeFileSync(path.join(pending, MATERIALIZED_MARKER), `${seedId}\n`);
         fs.writeFileSync(path.join(pending, SEED_FILES_FILE), JSON.stringify({seedId, files: seedFiles(pending)}) + "\n");
         try {
@@ -1703,15 +1707,19 @@ function number(h, start, length) {
   if (!/^[0-7]*$/.test(raw)) throw new Error("invalid tar number");
   return raw ? parseInt(raw, 8) : 0;
 }
-function safePath(dest, name) {
+function safeParts(name) {
   if (!name || name.startsWith("/") || name.includes("\\") || /^[A-Za-z]:/.test(name)) throw new Error(`unsafe tar path: ${name}`);
   const parts = name.split("/").filter(Boolean);
   if (parts.some((part) => part === "." || part === "..")) throw new Error(`unsafe tar path: ${name}`);
-  return path.join(dest, ...parts);
+  return parts;
 }
 
+/** Unpacks a tar stream into `dest` and resolves to the archive's own modes
+ *  (relative "/"-path -> mode), which seedContentId takes on a file system
+ *  that cannot keep POSIX permission bits. */
 async function unpackTar(chunks, dest) {
   let pending = Buffer.alloc(0), entry, remaining = 0, padding = 0, pax, paxData = [];
+  const modes = new Map();
   const consume = (buffer) => {
     while (buffer.length) {
       if (remaining) {
@@ -1753,7 +1761,9 @@ async function unpackTar(chunks, dest) {
       if (type !== "x") pax = undefined;
       entry = {type};
       if (type === "0" || type === "5") {
-        const target = safePath(dest, name);
+        const parts = safeParts(name);
+        const target = path.join(dest, ...parts);
+        modes.set(parts.join("/"), mode);
         if (type === "5") { fs.mkdirSync(target, {recursive: true, mode}); fs.chmodSync(target, mode); }
         else {
           fs.mkdirSync(path.dirname(target), {recursive: true});
@@ -1775,6 +1785,7 @@ async function unpackTar(chunks, dest) {
   } finally {
     if (entry?.fd !== undefined && remaining) fs.closeSync(entry.fd);
   }
+  return modes;
 }
 
 

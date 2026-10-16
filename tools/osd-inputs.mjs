@@ -49,7 +49,9 @@ const treeRoot = () => {
     // decodeURIComponent, not fileURLToPath: node:url in the preview bundle
     // has no fileURLToPath, and a tree under "Application Support" arrives
     // as "%20" in a URL.
-    ROOT = decodeURIComponent(new URL("../", import.meta.url).pathname);
+    // On Windows the pathname is "/C:/...", which path.resolve would turn
+    // into "C:\C:\..."; drop the slash in front of a drive letter.
+    ROOT = decodeURIComponent(new URL("../", import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, "$1");
   }
   return ROOT;
 };

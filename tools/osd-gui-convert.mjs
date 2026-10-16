@@ -622,7 +622,11 @@ export function tranXml({wrapperClassName, tcode, title}) {
 
 export async function generate(folders, out = DEFAULT_OUT, options = {}) {
   const root = options.root ?? process.cwd();
-  const {convertProgram} = hostModules()?.guiConverter ?? await import(resolve(libraryPath(root, "open-abap-gui"), CONVERTER));
+  // import() needs a file:// URL for an absolute path: a bare "C:\..." is
+  // read as a URL with the scheme "c:" on Windows. node:url is loaded here,
+  // not at module scope, so a bundle with its own guiConverter never needs it.
+  const {convertProgram} = hostModules()?.guiConverter ?? await import(
+    (await import(/* webpackIgnore: true */ "node:url")).pathToFileURL(resolve(libraryPath(root, "open-abap-gui"), CONVERTER)).href);
   const reports = [];
   const files = winningByLayer(folders, (folder) => reportFiles([folder]),
     (file) => basename(file).replace(/\.prog\.abap$/i, "").toUpperCase());
