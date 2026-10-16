@@ -29,9 +29,9 @@ export const T = {
   // bind and the output boundary (docs/sqlscript-hana-observed.md)
   int2: {abap: "I", bits: 16},
   int8: {abap: "INT8"},
-  dec: (len, dec) => ({abap: "P", len, dec}),
-  char: (len) => ({abap: "C", len}),
-  bytes: (len) => len === undefined ? ({abap: "XSTRING"}) : ({abap: "X", len}),
+  /** @param {number} len @param {number} dec @returns {{abap: "P", len: number, dec: number}} */ dec: (len, dec) => ({abap: "P", len, dec}),
+  /** @param {number} len @returns {{abap: "C", len: number}} */ char: (len) => ({abap: "C", len}),
+  /** @param {number} [len] @returns {{abap: "XSTRING"} | {abap: "X", len: number}} */ bytes: (len) => len === undefined ? ({abap: "XSTRING"}) : ({abap: "X", len}),
   str: {abap: "STRING"},
   date: {abap: "D"},
   bool: {abap: "BOOL"},
@@ -39,6 +39,7 @@ export const T = {
 
 // ---------------------------------------------------------------- expressions
 
+/** @param {string} [source] */
 export const col = (name, type, source) => source === undefined
   ? ({node: "col", name, type}) : ({node: "col", name, type, source});
 export const lit = (value, type) => ({node: "lit", value, type});
@@ -147,8 +148,9 @@ export const limit = (input, n) => ({rel: "limit", input,
  * own engines - so a caller that cares must materialise deliberately and say
  * why (the seam's `materialise` reason).
  */
+/** @typedef {{mayThrow: boolean, nonDeterministic: boolean, reads: string[], writes: string[]}} RelationEffects */
 export function effects(rel) {
-  const out = {mayThrow: false, nonDeterministic: false, reads: [], writes: []};
+  /** @type {RelationEffects} */ const out = {mayThrow: false, nonDeterministic: false, reads: [], writes: []};
   const walkExpr = (e) => {
     if (e === undefined || e === null) return;
     if (e.node === "cast") out.mayThrow = true;

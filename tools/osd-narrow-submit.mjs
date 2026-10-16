@@ -109,10 +109,12 @@ function withComments(lowered, comments, startRow, lineCount, indent) {
   return lines.join("\n");
 }
 
+/** @param {string} source @param {string} filename @param {typeof import("@abaplint/core")} core */
 export function lowerNarrowSubmit(source, filename, core) {
   if (!/\.abap$/i.test(filename) || !/\bSUBMIT\b/i.test(source)) return source;
   const registry = new core.Registry().addFile(new core.MemoryFile(filename, source)).parse();
-  const file = registry.getFirstObject()?.getABAPFiles().find((entry) => entry.getFilename() === filename);
+  /** @type {readonly import("@abaplint/core").ABAPFile[] | undefined} */ const files = registry.getFirstObject()?.getABAPFiles();
+  const file = files?.find((entry) => entry.getFilename() === filename);
   if (file === undefined) return source;
   const changes = [];
   for (const statement of file.getStatements()) {

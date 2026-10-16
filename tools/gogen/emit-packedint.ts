@@ -1,5 +1,5 @@
 import type {Expr, Type} from './ir.ts';
-import type {OwnershipContext, PackedRenderers} from './emit-ownership.ts';
+import type {OwnershipContext, PackedRenderers, AttributeProbe} from './emit-ownership.ts';
 import {someExpression} from './ir-children.ts';
 
 interface PackedConversion extends Extract<Expr, {e: 'conv'}> {
@@ -14,7 +14,11 @@ function isPackedConversion(node: Expr): node is PackedConversion {
 // Keep the measured checksum optimization in classes with owned memory.
 // Packed fields and method signatures retain their ordinary string ABI.
 export function packedChecksum(e: Expr, ctx: OwnershipContext, {ownership, expr, helper}: PackedRenderers): string | null {
-  if (!ctx.cls.attributes?.some((a) => a.type?.k === "xstring" && ownership.has({e: "attr", name: a.name}, ctx))) return null;
+  if (!ctx.cls.attributes?.some((a) => {
+    if (a.type?.k !== "xstring") return false;
+    const probe: AttributeProbe = {e: "attr", name: a.name};
+    return ownership.has(probe, ctx);
+  })) return null;
   if (!isPackedConversion(e) || !e.arith || e.to.dec || e.x?.e !== "bin" || e.x.op !== "+") return null;
   const {l, r} = e.x;
   if (l.e !== "var" || l.ref || l.type.k !== "p" || l.type.dec || r.e !== "conv" || r.kind !== "i2pc") return null;

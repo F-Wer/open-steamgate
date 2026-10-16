@@ -32,7 +32,7 @@ import {T, lit} from "./sqlscript-ir.mjs";
 export class WriteError extends Error {}
 
 const upper = (v) => String(v ?? "").toUpperCase();
-const names = (columns) => columns.map(upper);
+/** @param {readonly string[]} columns @returns {string[]} */ const names = (columns) => columns.map(upper);
 
 /** ABAP's initial value of a column type: what a work-area field holds untouched */
 export function initialValue(type) {
@@ -205,34 +205,35 @@ const checkDuplicates = (onDuplicate) => {
 };
 
 /** INSERT dbtab FROM wa ("error") / FROM TABLE itab ("raise") / ACCEPTING DUPLICATE KEYS ("ignore") */
-export const insertRows = (table, columns, rows, {onDuplicate = "error"} = {}) => {
+/** @param {readonly string[]} columns @param {readonly (readonly import("./sqlscript-types.ts").SqlExpr[])[]} rows */ export const insertRows = (table, columns, rows, {onDuplicate = "error"} = {}) => {
   checkDuplicates(onDuplicate);
   if (rows.length === 0) throw new WriteError("an INSERT with no rows");
   if (rows.some((row) => row.length !== columns.length)) throw new WriteError("a row does not have one value per column");
   checkWritten(rows);
-  return {write: "insert", table: upper(table), columns: names(columns), rows, onDuplicate,
-    ...(onDuplicate === "raise" ? {expected: rows.length} : {})};
+  /** @type {import("./sqlscript-types.ts").SqlInsert} */ const write = {write: "insert", table: upper(table), columns: names(columns), rows, onDuplicate,
+    ...(onDuplicate === "raise" ? {expected: rows.length} : {})}; return write;
 };
 /** INSERT dbtab FROM ( SELECT ... ): a relation whose columns are the table's, in order */
-export const insertFrom = (table, columns, rel, {onDuplicate = "error"} = {}) => {
+/** @param {readonly string[]} columns @param {import("./sqlscript-types.ts").SqlRelation} rel */ export const insertFrom = (table, columns, rel, {onDuplicate = "error"} = {}) => {
   checkDuplicates(onDuplicate);
   if (rel?.rel === "project") checkWritten((rel.items ?? []).map((item) => item.expr));
   return {write: "insert", table: upper(table), columns: names(columns), from: rel, onDuplicate};
 };
 /** UPDATE dbtab [AS alias] SET ... WHERE ...; `pred` undefined updates every
  *  row. The alias is the name a correlated subquery in the condition uses. */
-export const update = (table, set, pred, alias) => {
+/** @param {readonly import("./sqlscript-types.ts").SqlSet[]} set */ export const update = (table, set, pred, alias) => {
   if (set.length === 0) throw new WriteError("an UPDATE that sets nothing");
   checkWritten(set.map((one) => one.expr));
-  return {write: "update", table: upper(table), ...(alias === undefined ? {} : {alias: upper(alias)}),
-    set: set.map((one) => ({col: upper(one.col), expr: one.expr})), ...(pred === undefined ? {} : {pred})};
+  /** @type {import("./sqlscript-types.ts").SqlUpdate} */ const write = {write: "update", table: upper(table), ...(alias === undefined ? {} : {alias: upper(alias)}),
+    set: set.map((one) => {
+      /** @type {import("./sqlscript-types.ts").SqlSet} */ const assignment = {col: upper(one.col), expr: one.expr}; return assignment; }), ...(pred === undefined ? {} : {pred})}; return write;
 };
 /** DELETE FROM dbtab [AS alias] WHERE ...; `pred` undefined deletes every row */
 export const remove = (table, pred, alias) => ({write: "delete", table: upper(table),
   ...(alias === undefined ? {} : {alias: upper(alias)}), ...(pred === undefined ? {} : {pred})});
 /** UPSERT dbtab [(cols)] SELECT ...: by the primary key, the keys the query
  *  brings updated and the others inserted (measured on HXE) */
-export const upsertFrom = (table, columns, rel, key, fill = []) => {
+/** @param {readonly string[]} columns @param {readonly string[]} key */ export const upsertFrom = (table, columns, rel, key, fill = []) => {
   const cols = names(columns);
   const keys = names(key);
   if (keys.length === 0) throw new WriteError("an UPSERT ... SELECT needs the table's key columns");
@@ -247,7 +248,7 @@ export const upsertFrom = (table, columns, rel, key, fill = []) => {
  *  value when the row is updated and takes its default when it is inserted
  *  (a DDIC table's default is the initial value, which the transpiler's
  *  tables do not declare, so it is written; HANA's own UPSERT needs none) */
-export const upsert = (table, columns, rows, key, fill = []) => {
+/** @param {readonly string[]} columns @param {readonly string[]} key @param {readonly (readonly import("./sqlscript-types.ts").SqlExpr[])[]} rows */ export const upsert = (table, columns, rows, key, fill = []) => {
   const cols = names(columns);
   const keys = names(key);
   if (keys.length === 0) throw new WriteError("a MODIFY needs the table's key columns");
@@ -269,6 +270,6 @@ export const upsert = (table, columns, rows, key, fill = []) => {
   const last = rows.length === 1 ? undefined : new Map(rows.map((row, i) => [keyOf(row), i]));
   const kept = rows.length === 1 ? rows : rows.filter((row, i) => last.get(keyOf(row)) === i);
   checkWritten(fill.map((one) => one.expr));
-  return {write: "upsert", table: upper(table), columns: cols, rows: kept, key: keys,
-    ...(fill.length === 0 ? {} : {fill: fill.map((one) => ({col: upper(one.col), expr: one.expr}))})};
+  /** @type {import("./sqlscript-types.ts").SqlUpsert} */ const write = {write: "upsert", table: upper(table), columns: cols, rows: kept, key: keys,
+    ...(fill.length === 0 ? {} : {fill: fill.map((one) => ({col: upper(one.col), expr: one.expr}))})}; return write;
 };

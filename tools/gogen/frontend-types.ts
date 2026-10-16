@@ -1,6 +1,6 @@
 // Mutable construction state for frontend.mjs; the public IR stays in ir.ts.
 import type * as abaplint from "@abaplint/core";
-import type {Attribute, Class, DatabaseTable, Diagnostic, Event, Expr, Method, Param, Program, SqlPredicate, Stmt, Type, TypedExpr, WriteType} from "./ir.ts";
+import type {Attribute, Catch, Class, DatabaseTable, Diagnostic, Event, Expr, Method, Param, Program, SqlPredicate, Stmt, Type, TypedExpr, WriteType} from "./ir.ts";
 
 export type Mutable<T> = {-readonly [K in keyof T]: T[K]};
 export type StructType = Mutable<Extract<Type, {k: "struct"}>>;
@@ -10,14 +10,16 @@ export type PackedType = Extract<Type, {k: "p"}>;
 export type ValueExpr = (TypedExpr | {readonly e: "nop_call"; readonly type: Extract<Type, {k: "void"}>}) & {readonly arith?: boolean; readonly fromP?: PackedType};
 // Shapes still emitted by the JavaScript frontend, including explicit absence values.
 export interface FrontendSqlPredicate extends Omit<SqlPredicate, "type" | "kind"> { readonly type: WriteType; readonly kind?: string }
-type StatementShape<T> = T extends {readonly s: "concat"} ? Omit<T, "sep"> & {readonly sep: Expr | null}
+type StatementShape<T> = T extends {readonly s: "call_enq"} ? Omit<T, "fields"> & {readonly fields?: readonly LockObject["fields"][number][]}
+  : T extends {readonly s: "concat"} ? Omit<T, "sep"> & {readonly sep: Expr | null}
   : T extends {readonly s: "select_dyn"} ? Omit<T, "fields" | "where"> & {readonly fields: Expr | null; readonly where: Expr | null}
   : T extends {readonly s: "select_single" | "select_loop" | "select_aggregate"} ? Omit<T, "target"> & {readonly target: Expr | null}
   : T extends {readonly s: "call_dyn_static"} ? Omit<T, "cls"> & {readonly cls: Expr | string} : T;
 type FrontendIR<T> = T extends SqlPredicate ? FrontendSqlPredicate
   : T extends readonly (infer Item)[] ? readonly FrontendIR<Item>[]
   : T extends object ? {readonly [K in keyof StatementShape<T>]: FrontendIR<StatementShape<T>[K]>} : T;
-export type FrontendStmt = FrontendIR<Stmt>;
+export type FrontendStmt = FrontendIR<Stmt> & {readonly pos?: import("./ir.ts").Position};
+export type FrontendCatch = FrontendIR<Catch>;
 export interface FrontendMethod extends Omit<Method, "body"> { readonly body?: readonly FrontendStmt[] }
 export interface FrontendConstant { go: string; type: Type; value?: string | Record<string, string | undefined>; init?: ConstantInitializer; fieldInits?: Record<string, ConstantInitializer | undefined> }
 export type FrontendAttribute = (Omit<Attribute, "value"> & {readonly value?: string; readonly unsupported?: undefined})
@@ -29,7 +31,7 @@ export type ScopeKind = `${ReturnType<Scope["getIdentifier"]>["stype"]}`;
 export type MethodDefinition = abaplint.IMethodDefinition;
 export type MethodParameters = ReturnType<MethodDefinition["getParameters"]>;
 export interface FrontendParam extends Param { readonly defaultOwner?: string; readonly defOwner?: string }
-export type Signature = Omit<FrontendMethod, "params" | "unsupported"> & {readonly params: readonly FrontendParam[]; readonly unsupported?: undefined; readonly none?: boolean};
+export type Signature = Omit<FrontendMethod, "params" | "unsupported"> & {readonly params: readonly FrontendParam[]; readonly static: boolean; readonly unsupported?: undefined; readonly none?: boolean};
 export type RefusedSignature = {readonly name: string; readonly unsupported: string};
 export type MethodSignature = Signature | RefusedSignature;
 export interface SuppliedMethod { name: string; found: string[] }
@@ -87,7 +89,7 @@ export interface InterfaceAttribute { name: string; intf: string; readOnly?: boo
 export type FieldChain = Pick<abaplint.Nodes.ExpressionNode, "getChildren" | "concatTokens">;
 export type CallChain = Pick<abaplint.Nodes.ExpressionNode, "getChildren" | "concatTokens" | "findFirstExpression">;
 export type TokenText = Pick<abaplint.Nodes.ExpressionNode, "concatTokens">;
-export interface ConstructorItem { kw: string; typeNode: SyntaxNode; body: SyntaxNode | null | undefined; text: string }
+export interface ConstructorItem { kw: string; typeNode: SyntaxNode; body: abaplint.Nodes.ExpressionNode | null | undefined; text: string }
 export interface ExpressionItem {
   ctor?: ConstructorItem; bool?: string; cond?: SyntaxNode; group?: SyntaxNode;
   descr?: {call: abaplint.Nodes.ExpressionNode; attr: SyntaxNode};
@@ -100,7 +102,30 @@ export type ConstantIdentifier = Pick<abaplint.TypedIdentifier, "getType" | "get
 
 export type ConstantInitializer = ValueExpr | {readonly e: "float"; readonly value: number; readonly type: Type};
 
+export type LocalConstantHelpers = Pick<typeof import("./frontend-base.mjs"),
+  "Nodes" | "Structures" | "Statements" | "Expressions" | "isTok" | "isExpr" | "isStruct" | "isStmt" | "upper" | "goName" | "Unsupported"> & {
+  initialValue(node: abaplint.Nodes.StatementNode, ctx: MethodContext): Extract<FrontendStmt, {s: "assign"}>;
+};
 // Shared source-analysis contracts; parser implementations stay in abaplint.
 export interface OwnershipSource extends abaplint.IObject, Partial<Pick<abaplint.ABAPObject, 'getABAPFiles'>> {}
 export interface OwnershipSafety { readonly names: ReadonlySet<string>; readonly dynamic: boolean }
 export type OwnershipSafetyMap = ReadonlyMap<string, OwnershipSafety>;
+
+// Objects built incrementally before the frontend returns the completed IR.
+export interface FindState extends Omit<Mutable<Extract<FrontendStmt, {s: "find"}>>, "subs"> {
+  subs: {target: Expr; value: Expr}[];
+}
+export interface MethodName { getName: () => string }
+export interface ComparisonText { concatTokens: () => string }
+export interface LineExistsHead {
+  getChildren: () => readonly (abaplint.Nodes.ExpressionNode | abaplint.Nodes.TokenNode)[];
+  concatTokens: () => string;
+  findFirstExpression: (type: NodeClass) => abaplint.Nodes.ExpressionNode | undefined;
+  get: () => ReturnType<abaplint.Nodes.ExpressionNode["get"]>;
+}
+
+export interface NativeContext extends VariableContext { signatures: Map<string, MethodSignature> }
+export interface MethodContextState extends Omit<MethodContext, "fieldSymbols" | "inits"> {
+  fieldSymbols?: Map<string, Type>;
+  inits?: FrontendStmt[];
+}

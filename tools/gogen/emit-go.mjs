@@ -1324,7 +1324,7 @@ const LINES = !env("GOGEN_NOLINE");
     if (movePair(st, next, ctx, body[i - 1])) {
       // BumpTable keys on the address of the slice HEADER, not its backing
       // array. Preserve both bumps; clearing the source cannot invalidate a.
-      append(lines, stmt({...st, moveTable: true}, ctx, d), stmt(next, ctx, d));
+      /** @type {Extract<import("./emit-go-types.ts").Stmt, {s: "assign"}>} */ const assign = st; append(lines, stmt({...assign, moveTable: true}, ctx, d), stmt(next, ctx, d));
       i++;
     } else append(lines, stmt(st, ctx, d));
   }
@@ -1635,7 +1635,7 @@ const LINES = !env("GOGEN_NOLINE");
     }, [st.cond]);
     case "loop": return withBuilders(st.body, ctx, t, () => {
       if (st.dynamicKeys) {
-        const branches = [{name: "PRIMARY_KEY", key: null}, ...st.dynamicKeys.options.map((key) => ({name: key.name, key}))];
+        /** @type {import("./emit-go-types.ts").DynamicLoopBranch[]} */ const branches = [{name: "PRIMARY_KEY", key: null}, ...st.dynamicKeys.options.map((key) => ({name: key.name, key}))];
         return [`${t}switch strings.ToUpper(${expr(st.dynamicKeys.value, ctx)}) {`, ...branches.flatMap((b) => [
           `${t}case ${JSON.stringify(b.name)}:`, ...stmt({...st, dynamicKeys: null, key: b.key, token: {}}, ctx, d + 1),
         ]), `${t}default:`, `${t}\tpanic(abap.NotCompiled("LOOP USING KEY", "dynamic key is not a declared sorted key"))`, `${t}}`];
@@ -1858,7 +1858,7 @@ ${t}	}`));
     case "delete_index_data": {
       const n = `idx${ctx.loop++}`;
       return [`${t}if ${n} := ${expr(st.index, ctx)}; abap.DeleteIndex(${expr(st.table, ctx)}, ${n}) {`,
-        ...(st.tokens ?? []).map((token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
+        ...(st.tokens ?? []).map(/** @param {import("./emit-go-types.ts").LoopCursor} token */ (token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
         `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "read_index_data": {
@@ -1892,7 +1892,7 @@ ${t}	}`));
         /** @type {import("./emit-go-types.ts").TableType} */ const ty = st.target.type;
         const saved = ctx.lrow;
         ctx.lrow = "r";
-        const value = {e: "lrow", type: ty.row};
+        /** @type {import("./emit-go-types.ts").Expr} */ const value = {e: "lrow", type: ty.row};
         const lines = ty.sorted
           ? stmt({s: "insert_sorted", table: st.target, value,
             keys: ty.sorted.map((name) => ({name})), unique: ty.unique}, ctx, d + 1)
@@ -2146,7 +2146,7 @@ ${t}	}`));
     // the loop index steps back, so the next pass reads the row after it
     case "delete_current": {
       const tb = place(st.table, ctx);
-      const i = st.token.idxVar;
+      /** @type {import("./emit-go-types.ts").LoopCursor} */ const token = st.token; const i = token.idxVar;
       return [`${t}${tb} = append(${tb}[:${i}], ${tb}[${i}+1:]...)`, `${t}clear(${tb}[len(${tb}):len(${tb})+1])`, `${t}abap.BumpTable(&${tb})`, `${t}${i}--`, `${t}s.Sy.Subrc = 0`];
     }
     case "delete_index": {
@@ -2154,7 +2154,7 @@ ${t}	}`));
       const tb = place(st.table, ctx);
       return [`${t}if ${n} := ${expr(st.index, ctx)}; ${n} >= 1 && int(${n}) <= len(${tb}) {`,
         `${t}\t${tb} = append(${tb}[:${n}-1], ${tb}[${n}:]...)`, `${t}\tclear(${tb}[len(${tb}):len(${tb})+1])`, `${t}\tabap.BumpTable(&${tb})`,
-        ...(st.tokens ?? []).map((token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
+        ...(st.tokens ?? []).map(/** @param {import("./emit-go-types.ts").LoopCursor} token */ (token) => `${t}\tif int(${n}) <= ${token.idxVar}+1 { ${token.idxVar}-- }`),
         `${t}\ts.Sy.Subrc = 0`, `${t}} else {`, `${t}\ts.Sy.Subrc = 4`, `${t}}`];
     }
     case "delete_range": {
@@ -2275,8 +2275,9 @@ ${t}	}`));
     case "substr": {
       const off = e.off ? expr(e.off, ctx) : "0";
       const len = e.len ? expr(e.len, ctx) : "-1";
-      if (e.base.k === "x" || e.base.k === "xstring") return `abap.SubX(${expr(e.x, ctx)}, ${off}, ${len})`;
-      if (e.base.k === "c") return `abap.SubC(${expr(e.x, ctx)}, ${e.base.len}, ${off}, ${len})`;
+      /** @type {import("./emit-go-types.ts").Type} */ const base = e.base;
+      if (base.k === "x" || base.k === "xstring") return `abap.SubX(${expr(e.x, ctx)}, ${off}, ${len})`;
+      if (base.k === "c") return `abap.SubC(${expr(e.x, ctx)}, ${base.len}, ${off}, ${len})`;
       return `abap.SubS(${expr(e.x, ctx)}, ${off}, ${len})`;
     }
     case "new": return `New_${typeName(e.cls)}(${["s", ...e.args.map((a) => importingArg(a, ctx))].join(", ")})`;
@@ -2320,9 +2321,12 @@ ${t}	}`));
     }
     case "gen_arith": {
       const sel = `abap.CalcKind(${JSON.stringify(e.statics)}, ${e.charTarget}, ${e.target ? expr(e.target, ctx) : "abap.Data{}"}${e.leaves.map((l) => `, ${expr(l, ctx)}`).join("")})`;
-      const arms = Object.entries(e.branches).map(([code, b]) => (b.reason !== undefined
-        ? `case '${code}': panic(abap.NotCompiled("arithmetic", ${JSON.stringify(b.reason)}))`
-        : `case '${code}': return ${expr(b, ctx)}`));
+      const arms = Object.entries(e.branches).map(([code, b]) => {
+        /** @type {import("./emit-go-types.ts").ArithmeticBranchProbe} */ const branch = b;
+        return branch.reason !== undefined
+          ? `case '${code}': panic(abap.NotCompiled("arithmetic", ${JSON.stringify(branch.reason)}))`
+          : `case '${code}': return ${expr(b, ctx)}`;
+      });
       return `func() ${goType(e.type)} { switch ${sel} { ${arms.join("; ")} }; panic(abap.NotCompiled("arithmetic", ${JSON.stringify(`calculation type of ${e.text} with these operands: not measured`)})) }()`;
     }
     case "wrap": return `abap.Data{P: ${addressable(e.x) ? `&${place(e.x, ctx)}` : `abap.Ptr(${expr(e.x, ctx)})`}, T: ${desc(e.x.type)}}`;

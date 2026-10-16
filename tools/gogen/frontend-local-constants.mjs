@@ -40,7 +40,7 @@ export function hoistLocalConstants(body, ctx, h) {
   ctx.localConstantNames = new Set();
   const owner = `${goName(ctx.className)}__LOCAL_CONSTANT__${segment(ctx.className)}_${segment(ctx.method)}`;
   ctx.localConstantFields = new Map();
-  const literalValue = (node) => {
+  /** @param {import("@abaplint/core").Nodes.StatementNode} node */ const literalValue = (node) => {
     const val = node.findFirstExpression(Expressions.Value);
     const src = val?.getChildren().find((c) => !isTok(c));
     return src && isExpr(src, Expressions.Constant);
@@ -53,7 +53,7 @@ export function hoistLocalConstants(body, ctx, h) {
     ctx.localConstants.set(name, {e: "const", go, type});
     ctx.locals.delete(name);
   };
-  const walk = (node) => {
+  /** @param {import("@abaplint/core").Nodes.StructureNode | import("@abaplint/core").Nodes.StatementNode | undefined} node */ const walk = (node) => {
     if (!node) return;
     if (isStruct(node, Structures.Constants)) {
       const name = upper(node.findFirstExpression(Expressions.DefinitionName).concatTokens());

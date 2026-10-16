@@ -1,15 +1,20 @@
+/** @param {(name: string) => string} goName */
 export const staticSlot = (owner, name, type, goName) => ({e: "static", owner, name, type, go: goName(`${owner}=>${name}`)});
 
 // Static attributes share storage in their declaring class, including inherited names.
+/** @param {import("./frontend.mjs").StaticHelpers} deps @param {import("./frontend.mjs").StaticContext} ctx */
 export function resolveStatic(owner, attr, ctx, deps, write = false) {
   const {CHAR_UTILITIES, C, upper, clasDef, registerConst, localInterfaceConstant, Unsupported, ancestors, goName, typeOf, abaplint, notInProgram} = deps;
   if (!write && owner === "CL_ABAP_CHAR_UTILITIES" && CHAR_UTILITIES[attr] !== undefined) return {e: "chars", value: CHAR_UTILITIES[attr], type: C(1)};
-  const intf = ctx.reg.getObject("INTF", owner)?.getDefinition();
+  /** @type {import("@abaplint/core").IRegistry} */ const reg = ctx.reg;
+  const intf = reg.getObject("INTF", owner)?.getDefinition();
   const clas = clasDef(ctx.reg, owner);
-  const local = ctx.program.localInterfaces.get(`${ctx.program.currentOwner}|${owner}`);
+  /** @type {Map<string, {def: import("@abaplint/core").IInterfaceDefinition; source: string}>} */ const localInterfaces = ctx.program.localInterfaces;
+  const local = localInterfaces.get(`${ctx.program.currentOwner}|${owner}`);
   const def = intf ?? clas ?? local?.def;
   if (def === undefined) throw new Unsupported(`${owner}=>${attr}: ${owner} is not in the program`);
-  const c = def.getAttributes().getConstants().find((x) => upper(x.getName()) === attr);
+  /** @type {readonly import("@abaplint/core").Types.ClassConstant[]} */ const constants = def.getAttributes().getConstants();
+  const c = constants.find((x) => upper(x.getName()) === attr);
   if (c !== undefined) {
     if (write) throw new Unsupported(`${owner}=>${attr}: a write to a constant`);
     const go = registerConst(ctx.program, `${ctx.program.currentOwner ?? owner}:${owner}~${attr}`,
@@ -34,15 +39,17 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
   // an alias of an interface for a constant of an interface it includes
   // (IF_APC_WSP_EXTENSION=>CO_CONNECT_MODE_REJECT for
   // IF_APC_WSP_EXTENSION_COMMON~CO_CONNECT_MODE_REJECT)
-  const alias = (def.getAliases?.() ?? []).find((x) => upper(x.getName()) === attr);
+  /** @type {ReturnType<import("@abaplint/core").IClassDefinition["getAliases"]>} */ const aliases = def.getAliases?.() ?? [];
+  const alias = aliases.find((x) => upper(x.getName()) === attr);
   const comp = alias === undefined ? [] : upper(alias.getComponent()).split("~");
   if (comp.length === 2 && comp[0] !== owner) return resolveStatic(comp[0], comp[1], ctx, deps, write);
   for (const at of [owner, ...(clas ? ancestors(ctx.reg, owner) : [])]) {
     const a = clasDef(ctx.reg, at)?.getAttributes().getStatic().find((x) => upper(x.getName()) === attr);
     if (!a) continue;
-    const pool = ctx.reg.getObject("CLAS", at.split(":")[0]);
+    /** @type {import("@abaplint/core").Objects.Class | undefined} */ const pool = ctx.reg.getObject("CLAS", at.split(":")[0]);
     const friendName = ctx.className.split(":").at(-1);
-    const globalFriend = (clasDef(ctx.reg, at)?.getFriends?.() ?? []).some((f) => upper(typeof f === "string" ? f : f.getName()) === ctx.className);
+    /** @type {readonly string[]} */ const friends = clasDef(ctx.reg, at)?.getFriends?.() ?? [];
+    const globalFriend = friends.some((f) => upper(f) === ctx.className);
     const localFriend = ctx.className.startsWith(`${at.split(":")[0]}:`) && (pool?.getABAPFiles() ?? []).some((f) => f.getStatements().some((st) => {
       const text = st.concatTokens().toUpperCase();
       return text.startsWith(`CLASS ${at.split(":").at(-1)} DEFINITION LOCAL FRIENDS `) && text.split(/\bLOCAL FRIENDS\b/)[1].match(/[A-Z_][A-Z0-9_]*/g)?.includes(friendName);
@@ -60,7 +67,7 @@ export function resolveStatic(owner, attr, ctx, deps, write = false) {
       [Statements.ClassData, Statements.ClassDataBegin, Statements.Data, Statements.DataBegin].some((kind) => st.get() instanceof kind)
       && st.getTokens().some((token) => token.getStart().equals(a.getToken().getStart())));
     const hasReadOnly = (node, trailing = false) => {
-      const children = node?.getChildren() ?? [];
+      /** @type {readonly import("@abaplint/core").INode[]} */ const children = node?.getChildren() ?? [];
       return children.some((c, i) => (!trailing || i === children.length - 3)
         && c instanceof Nodes.TokenNode && upper(c.getFirstToken().getStr()) === "READ"
         && children[i + 1] instanceof Nodes.TokenNode && children[i + 1].getFirstToken().getStr() === "-"
