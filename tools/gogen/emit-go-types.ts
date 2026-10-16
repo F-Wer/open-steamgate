@@ -9,7 +9,9 @@ export type {Type, Field, Param, ResolvedKey, SqlColumn, WriteType, TemplateOpti
 export type SymbolCollector = (cls: Class, method: Method, go: string, receiver: string | null) => void;
 // Reuse the IR tags while carrying the frontend's additional runtime shapes
 // through nested operands, arguments, conditions and statement bodies too.
-type RuntimeValue<T> = T extends IR.Expr ? Expr : T extends IR.Stmt ? Stmt
+// Types have no runtime expression/statement payloads to adapt. Preserve their
+// shared discriminated union instead of recursively rebuilding every type field.
+type RuntimeValue<T> = T extends IR.Type ? T : T extends IR.Expr ? Expr : T extends IR.Stmt ? Stmt
   : T extends IR.Condition ? Condition : T extends IR.Catch ? Catch
     : T extends IR.SqlPredicate ? SqlPredicate : T extends readonly (infer V)[] ? readonly RuntimeValue<V>[]
     : T extends object ? RuntimeFields<T> : T;
