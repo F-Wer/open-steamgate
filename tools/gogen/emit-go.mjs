@@ -1117,7 +1117,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
     }
     case "row_key": {
       const b = place(p.base, ctx);
-      const n = ctx.loop++;
+      const n = Number(ctx.loop); ctx.loop = n + 1;
       const keys = p.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
       return `(${stable(p.base.type) ? "**" : "*"}abap.RowByKey(&${b}, func(r${n} ${stable(p.base.type) ? "*" : ""}${goType(p.type)}) bool { return ${keys} }))`;
     }
@@ -1250,7 +1250,7 @@ const PLACES = new Set(["var", "attr", "static", "field", "fs", "row", "row_key"
   // read the appended value even when the handler does not.
   const names = ctx.tryBuilderBlocked ? [] : builders(body, ctx, outside);
   ctx.builders ??= new Map();
-  for (const n of names) ctx.builders.set(n, `sb_${ident(n)}_${ctx.loop++}`);
+  for (const n of names) { const loop = Number(ctx.loop); ctx.loop = loop + 1; ctx.builders.set(n, `sb_${ident(n)}_${loop}`); }
   const pre = names.flatMap((n) => {
     const b = ctx.builders.get(n);
     return [`${t}var ${b} strings.Builder`, `${t}${b}.WriteString(${ident(n)})`];
@@ -2231,7 +2231,7 @@ ${t}	}`));
     case "concat": return `abap.Concat(${e.l.e === "conv" && ["i2s", "i82s"].includes(e.l.kind) ? `strings.TrimRight(${expr(e.l, ctx)}, " ")` : expr(e.l, ctx)}, ${e.r.e === "conv" && ["i2s", "i82s"].includes(e.r.kind) ? `strings.TrimRight(${expr(e.r, ctx)}, " ")` : expr(e.r, ctx)})`;
     // CORRESPONDING type( itab ): a new table, one mapped row per source row
     case "table_map": {
-      const n = ctx.loop++;
+      const n = Number(ctx.loop); ctx.loop = n + 1;
       return `func() ${goType(e.type)} { out := ${goType(e.type)}{}; for _, MapRow${n} := range ${expr(e.from, ctx)} { ${place(e.row, ctx)} = ${rowValue(e.from.type, `MapRow${n}`)}; out = append(out, ${rowStored(e.type, expr(e.value, ctx))}) }; return out }()`;
     }
     case "struct": {
@@ -2445,7 +2445,7 @@ ${t}	}`));
   switch (c.c) {
     case "num_data_cmp": return `abap.CmpData(${expr(c.l, ctx)}, ${expr(c.r, ctx)}) ${c.op === "=" ? "==" : c.op === "<>" ? "!=" : c.op} 0`;
     case "in_range": {
-      const n = ctx.loop++;
+      const n = Number(ctx.loop); ctx.loop = n + 1;
       // field names through ident(): capitalised only in a layered build
       return `func() bool { rows${n} := ${expr(c.range, ctx)}; hasI${n}, hit${n} := false, false; for _, r${n} := range rows${n} { match${n} := false; switch r${n}.${ident("OPTION")} { case "EQ": match${n} = ${expr(c.value, ctx)} == r${n}.${ident("LOW")}; case "BT": match${n} = ${expr(c.value, ctx)} >= r${n}.${ident("LOW")} && ${expr(c.value, ctx)} <= r${n}.${ident("HIGH")}; default: panic(abap.NotCompiled("IN range", "selection option other than EQ or BT")) }; if r${n}.${ident("SIGN")} == "I" { hasI${n} = true; if match${n} { hit${n} = true } } else if r${n}.${ident("SIGN")} == "E" { if match${n} { return false } } else { panic(abap.NotCompiled("IN range", "selection sign other than I or E")) } }; return !hasI${n} || hit${n} }()`;
     }
@@ -2489,7 +2489,7 @@ ${t}	}`));
     }
     // ultra/events: line_exists( ) (frontend lineExists)
     case "line_exists": {
-      const n = ctx.loop++;
+      const n = Number(ctx.loop); ctx.loop = n + 1;
       const keys = c.keys.map((k) => (k.line ? `r${n} == ${expr(k.value, ctx)}` : `r${n}.${ident(k.name)} == ${expr(k.value, ctx)}`)).join(" && ");
       return `func() bool { for _, r${n} := range ${expr(c.table, ctx)} { if ${keys} { return true } }; return false }()`;
     }

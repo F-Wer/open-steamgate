@@ -1042,10 +1042,10 @@ function compiledFunctionCall(node, ctx, text, name) {
   // single inheritance: the superclass when it is compiled too (else the
   // class stands alone, as it did before inheritance was compiled)
   const sup = def.getSuperClass() ? upper(def.getSuperClass()) : null;
-  /** @type {Map<string, import("./frontend-types.ts").Signature>} */ const typed = new Map([...signatures].filter(([, v]) => !v.unsupported));
+  /** @type {Map<string, import("./frontend-types.ts").Signature>} */ const typed = new Map([...signatures].filter(([, v]) => "params" in v));
   if (HOST_REPLACED.has(className)) {
     // a method the frontend cannot type would be dropped, and its hook with it
-    for (const sig of signatures.values()) if (sig.unsupported) throw new Unsupported(`${className}=>${sig.name}: a host-replaced method must compile (${sig.unsupported})`);
+    for (const sig of signatures.values()) if (!("params" in sig)) throw new Unsupported(`${className}=>${sig.name}: a host-replaced method must compile (${sig.unsupported})`);
     for (const sig of typed.values()) {
       for (const p of [...sig.params, ...(sig.returning ? [sig.returning] : [])].filter(/** @param {import("./frontend-types.ts").FrontendParam} p */ (p) => !p.suppliedOf)) {
         const basic = p.type.k === "string" || p.type.k === "i" || p.type.k === "int8"
@@ -1056,7 +1056,7 @@ function compiledFunctionCall(node, ctx, text, name) {
   }
   /** @type {import("./frontend-types.ts").FrontendClass} */ const cls = {name: className, hostReplaced: HOST_REPLACED.has(className), attributes, methods: [], constructor: null, stubs: [],
     interfaces: def.getImplementing().map((i) => upper(i.name)), super: sup && program.wanted.has(sup) ? sup : null, abstract: def.isAbstract()};
-  cls.abstracts = [...signatures.values()].filter((x) => x.abstract && !x.unsupported && !x.name.includes("~"));
+  cls.abstracts = [...signatures.values()].filter((x) => "params" in x && x.abstract && !x.name.includes("~"));
   cls.signatures = signatures;
   // an object of this class can raise instance events (its own, a
   // superclass's, an interface's): the backends give it its registrations
@@ -1086,7 +1086,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       else signatures.set(name, {name, unsupported: why});
     };
     if (candidate === undefined) { skip("no signature"); continue; }
-    if (candidate.unsupported) { skip(candidate.unsupported); continue; } const sig = candidate;
+    if (!("params" in candidate)) { skip(candidate.unsupported); continue; } const sig = candidate;
     if (className === "CL_MESSAGE_HELPER" && ["GET_TEXT_PARAMS", "REPLACE_TEXT_PARAMS", "GET_OTR_TEXT_RAW"].includes(name)) {
       skip("message metadata lookup is not implemented"); continue;
     }
@@ -1170,14 +1170,14 @@ function compiledFunctionCall(node, ctx, text, name) {
   while (changed) {
     changed = false;
     if (cls.constructor && !cls.constructor.dropped) {
-      const bad = cls.constructor.calls?.find((c) => signatures.get(c)?.unsupported);
+      const bad = cls.constructor.calls?.find((c) => { const sig = signatures.get(c); return sig !== undefined && !("params" in sig) && !!sig.unsupported; });
       if (bad) {
         cls.constructor.dropped = true; changed = true;
         program.skipped.push(`${className}=>CONSTRUCTOR: calls ${bad}, which was skipped`);
       }
     }
     for (const m of cls.methods) {
-      const bad = m.calls?.find((c) => signatures.get(c)?.unsupported);
+      const bad = m.calls?.find((c) => { const sig = signatures.get(c); return sig !== undefined && !("params" in sig) && !!sig.unsupported; });
       if (bad && !m.dropped) {
         m.dropped = true; changed = true;
         program.skipped.push(`${className}=>${m.name}: calls ${bad}, which was skipped`);
@@ -5299,7 +5299,7 @@ const FUNCTIONS = {
     if (at === undefined || at === ctx.className) throw new Unsupported(`unknown method ${name}`);
     if (declaredMethod(ctx.reg, at, name)?.getVisibility?.() === 1) throw new Unsupported(`${name} is private in ${at}`);
     sig = methodSignature(ctx, at, name);
-    if (sig.static) owner = at;
+    if ("params" in sig && sig.static) owner = at;
   } else {
     // an alias the class inherits names an interface method its superclass
     // implements: the signature is the interface's
@@ -5307,8 +5307,8 @@ const FUNCTIONS = {
       : methodSignature(ctx, owner, qualified);
   }
   // a static method named through a subclass is the declaring class's function
-  if (owner !== null && receiver === null && sig?.static && !qualified.includes("~")) owner = declaringClass(ctx.reg, owner, name, "method") ?? owner;
-  if (sig === undefined) throw new Unsupported(`unknown method ${name}`); if (sig.unsupported) throw new Unsupported(`${owner ? owner + "=>" : ""}${name} was skipped: ${sig.unsupported}`);
+  if (owner !== null && receiver === null && sig !== undefined && "params" in sig && sig.static && !qualified.includes("~")) owner = declaringClass(ctx.reg, owner, name, "method") ?? owner;
+  if (sig === undefined) throw new Unsupported(`unknown method ${name}`); if (!("params" in sig)) throw new Unsupported(`${owner ? owner + "=>" : ""}${name} was skipped: ${sig.unsupported}`);
   const resolved = sig;
   if (!statement && resolved.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
   if (owner !== null && receiver === null && !resolved.static) throw new Unsupported(`${owner}=>${name}: an instance method called statically`);
