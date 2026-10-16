@@ -313,7 +313,7 @@ export interface ResolvedKey { readonly name: string; readonly unique: boolean; 
 export interface TemplateOptions { readonly decimals?: number; readonly raw?: boolean; readonly width?: number; readonly align?: string; readonly pad?: string;
     // two absence values today: null at frontend.mjs:5998, omitted at 5968; phase 2 normalises
     readonly pdec?: number | null }
-export type TemplatePart = {readonly text: string; readonly value?: undefined; readonly opts?: undefined} | {readonly text?: undefined; readonly value: Expr; readonly opts: TemplateOptions};
+export type TemplatePart = {readonly text: string} | {readonly value: Expr; readonly opts: TemplateOptions};
 export interface Catch { readonly classes: readonly string[]; readonly into: string | null; readonly intoPlace?: Expr; readonly intoKind: 'exc' | 'ref' | null; readonly intoType: Type | null; readonly covers: readonly string[]; readonly own: readonly string[]; readonly body: readonly Stmt[] }
 export interface SqlColumn { readonly name: string; readonly type: Type; readonly sql?: string; readonly named?: boolean; readonly agg?: {readonly star: true} | {readonly fn: string; readonly col: string} }
 export interface SqlAssignment { readonly line?: boolean; readonly field?: string; readonly type: Type }

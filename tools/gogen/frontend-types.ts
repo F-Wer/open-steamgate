@@ -33,9 +33,7 @@ export type MethodParameters = ReturnType<MethodDefinition["getParameters"]>;
 export interface FrontendParam extends Param { readonly defaultOwner?: string; readonly defOwner?: string }
 export type Signature = Omit<FrontendMethod, "params" | "unsupported"> & {readonly params: readonly FrontendParam[]; readonly static: boolean; readonly unsupported?: undefined; readonly none?: boolean};
 export type RefusedSignature = {readonly name: string; readonly unsupported: string};
-// Shared inspection shape: a refused signature has only name/unsupported;
-// successful signatures carry parameters and the optional method metadata.
-export interface MethodSignature extends Omit<Partial<Signature>, "unsupported"> { readonly name: string; readonly unsupported?: string }
+export type MethodSignature = Signature | RefusedSignature;
 export interface SuppliedMethod { name: string; found: string[] }
 export interface RttiTable { classSupers: Map<string, string | null>; structs: Map<string, {name: string; kind: string}[]>; known: Set<string> }
 export interface LockObject { name: string; table: string; key: string[]; fields: {name: string; kind: string; length: number}[] }

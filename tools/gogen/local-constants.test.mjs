@@ -6,6 +6,7 @@ import {tmpdir} from "node:os";
 import {compileProgram} from "./frontend.mjs";
 import {emitGo} from "./emit-go.mjs";
 import {emitJs} from "./emit-js.mjs";
+import {localConstant} from "./emit-local-constants.ts";
 
 test("only ASCII character literals fold, including structure fields", () => {
   const dir = mkdtempSync(join(tmpdir(), "constant-unicode-"));
@@ -28,4 +29,27 @@ ENDMETHOD. ENDCLASS.`);
       assert.match(emitted, /CFit\("😀z", 2\)/);
     }
   } finally { rmSync(dir, {recursive: true, force: true}); }
+});
+
+
+test("local constant callbacks retain the absent loop counter", () => {
+  const init = {e: "int", value: 1, type: {k: "i"}};
+  const contexts = [];
+  const helpers = {
+    fields: new Map([["Row", {fields: [{name: "a", type: init.type}, {name: "b", type: init.type}]}]]),
+    expr(value, ctx) {
+      if (contexts.length === 0) {
+        assert.equal(Object.hasOwn(ctx, "loop"), false);
+        assert.equal(ctx.loop, undefined);
+      } else {
+        assert.equal(ctx, contexts[0]);
+        assert.ok(Number.isNaN(ctx.loop));
+      }
+      contexts.push(ctx);
+      return `n${ctx.loop++}`;
+    },
+    zero: () => "0", ident: (name) => name, struct: (type, values) => `${type.go}{${values}}`,
+  };
+  assert.equal(localConstant({type: {k: "struct", go: "Row"}, fieldInits: {a: init, b: init}}, helpers),
+    "Row{a: nNaN, b: nNaN}");
 });

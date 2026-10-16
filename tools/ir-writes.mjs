@@ -1,4 +1,3 @@
-import {} from "./sqlscript-types.ts";
 // Writes as IR: INSERT, UPDATE, DELETE and MODIFY (an upsert by key), for a
 // host that turns ABAP Open SQL into this IR and lowers it -- the Go runtime
 // at build time, a JS host at run time. The statement is rendered by the

@@ -47,7 +47,7 @@ import {sqlIrType, writeIrType, irCheck, lowName, mandtPred, andIr, sqlHost, sql
 
 import {source, componentsOf, arith, sourceOperand, callMethodChain, excHolder,
   omittedArgument, omittedFactoryCall} from "./frontend-expressions-calls.mjs";
-/** @typedef {Omit<Partial<import("./frontend-types.ts").Signature>, "unsupported"> & {name: string, unsupported?: string}} ClassSignature */
+/** @typedef {import("./frontend-types.ts").MethodSignature} ClassSignature */
 /** @typedef {typeof byteStatementHelpers} ByteStatementHelpers */ const byteStatementHelpers = {source, lvalue, convert, findResults};
 /** @type {WeakMap<import("@abaplint/core").IRegistry, Record<string, string>>} */ const cdsViewsByRegistry = new WeakMap();
 const HOST_REPLACED = new Set(["ZCL_OSD_ENQ_KERNEL"]);
@@ -1086,7 +1086,7 @@ function compiledFunctionCall(node, ctx, text, name) {
       else signatures.set(name, {name, unsupported: why});
     };
     if (candidate === undefined) { skip("no signature"); continue; }
-    if (candidate.unsupported) { skip(candidate.unsupported); continue; } /** @type {import("./frontend-types.ts").Signature} */ const sig = candidate;
+    if (candidate.unsupported) { skip(candidate.unsupported); continue; } const sig = candidate;
     if (className === "CL_MESSAGE_HELPER" && ["GET_TEXT_PARAMS", "REPLACE_TEXT_PARAMS", "GET_OTR_TEXT_RAW"].includes(name)) {
       skip("message metadata lookup is not implemented"); continue;
     }
@@ -5309,7 +5309,7 @@ const FUNCTIONS = {
   // a static method named through a subclass is the declaring class's function
   if (owner !== null && receiver === null && sig?.static && !qualified.includes("~")) owner = declaringClass(ctx.reg, owner, name, "method") ?? owner;
   if (sig === undefined) throw new Unsupported(`unknown method ${name}`); if (sig.unsupported) throw new Unsupported(`${owner ? owner + "=>" : ""}${name} was skipped: ${sig.unsupported}`);
-  /** @type {import("./frontend-types.ts").Signature} */ const resolved = sig;
+  const resolved = sig;
   if (!statement && resolved.returning === null) throw new Unsupported(`${name} has no RETURNING, cannot be an operand`);
   if (owner !== null && receiver === null && !resolved.static) throw new Unsupported(`${owner}=>${name}: an instance method called statically`);
   if (owner !== null && receiver === null && !ctx.program.wanted.has(owner)) throw notInProgram(ctx, owner, `${owner}=>${name}: ${owner} is not compiled in this program`);

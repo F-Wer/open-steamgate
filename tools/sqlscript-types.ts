@@ -1,5 +1,8 @@
 // Construction shapes of the relational IR in sqlscript-ir.mjs.
-import type {WriteType} from "./gogen/ir.ts";
+type WriteType =
+  | {readonly abap: 'C' | 'X'; readonly len: number}
+  | {readonly abap: 'P'; readonly len: number; readonly dec: number}
+  | {readonly abap: 'I' | 'INT8' | 'STRING' | 'D' | 'XSTRING'};
 export type SqlType = WriteType | {readonly abap: "UNRESOLVED"; readonly reason: string} | {readonly abap: "BOOL"} | {readonly abap: "I"; readonly bits: 16};
 export type SqlValue = string | number | bigint | boolean | null;
 export type SqlExpr =

@@ -34,7 +34,7 @@ function fold(e) {
   return {e: e.type.k === "i" ? "int" : e.type.k === "f" ? "float" : "str", value, type: e.type};
 }
 const segment = (s) => `${s.length}_${Array.from(s, (c) => c.charCodeAt(0).toString(16).padStart(4, "0")).join("")}`;
-/** @param {import("@abaplint/core").Nodes.StructureNode | undefined} body @param {import("./frontend-types.ts").MethodContext} ctx @param {import("./frontend-types.ts").LocalConstantHelpers} h */ export function hoistLocalConstants(body, ctx, h) {
+export function hoistLocalConstants(body, ctx, h) {
   const {Nodes, Structures, Statements, Expressions, isTok, isExpr, isStruct, isStmt, upper, goName, initialValue, Unsupported} = h;
   ctx.localConstants = new Map();
   ctx.localConstantNames = new Set();
